@@ -1,34 +1,36 @@
 import '../domain/card_entity.dart';
-import '../domain/card_type.dart';
 
 abstract class CardsRepository {
   Future<List<CardEntity>> getAll();
+  Future<void> add(CardEntity card);
+  Future<void> update(CardEntity card);
+  Future<void> remove(String id);
 }
 
 class InMemoryCardsRepository implements CardsRepository {
   InMemoryCardsRepository();
 
-  final List<CardEntity> _cards = [
-    const CardEntity(
-      id: 'card_1',
-      name: 'Cartão Principal',
-      bankName: 'Banco A',
-      type: CardType.credit,
-      dueDay: 10,
-      limit: 10000,
-    ),
-    const CardEntity(
-      id: 'card_2',
-      name: 'Cartão Secundário',
-      bankName: 'Banco B',
-      type: CardType.credit,
-      dueDay: 20,
-      limit: 5000,
-    ),
-  ];
+  final List<CardEntity> _cards = [];
 
   @override
   Future<List<CardEntity>> getAll() async {
-    return _cards;
+    return List.unmodifiable(_cards);
+  }
+
+  @override
+  Future<void> add(CardEntity card) async {
+    _cards.add(card);
+  }
+
+  @override
+  Future<void> update(CardEntity card) async {
+    final index = _cards.indexWhere((c) => c.id == card.id);
+    if (index == -1) return;
+    _cards[index] = card;
+  }
+
+  @override
+  Future<void> remove(String id) async {
+    _cards.removeWhere((c) => c.id == id);
   }
 }

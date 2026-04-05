@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../../core/services/repository_locator.dart';
 import '../../../core/models/money.dart';
+import '../../../core/models/app_mode.dart';
+import '../../../core/services/app_mode_controller.dart';
+import '../../cards/domain/card_entity.dart';
 import '../domain/payment_method.dart';
 import '../domain/transaction_entity.dart';
 import '../domain/transaction_type.dart';
@@ -23,6 +26,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
   late TransactionType _selectedType;
   late PaymentMethod _selectedPaymentMethod;
   String? _selectedCategoryId;
+  String? _selectedCardId;
 
   bool _isSaving = false;
 
@@ -39,6 +43,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
       _selectedType = initial.type;
       _selectedPaymentMethod = initial.paymentMethod;
       _selectedCategoryId = initial.categoryId;
+      _selectedCardId = initial.cardId;
     } else {
       _selectedDate = DateTime.now();
       _selectedType = TransactionType.expense;
@@ -104,6 +109,10 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
     final baseId = widget.initialTransaction?.id ??
         DateTime.now().microsecondsSinceEpoch.toString();
 
+    final mode = AppModeController.instance.mode;
+    final isUltra = mode == AppMode.ultra;
+    final effectiveCardId = isUltra ? _selectedCardId : null;
+
     final tx = TransactionEntity(
       id: baseId,
       amount: Money(amount),
@@ -113,7 +122,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
       description:
           _descriptionController.text.isEmpty ? null : _descriptionController.text,
       categoryId: _selectedCategoryId!,
-      cardId: widget.initialTransaction?.cardId,
+      cardId: effectiveCardId,
     );
 
     if (_isEdit) {
@@ -132,16 +141,26 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
 
   @override
   Widget build(BuildContext context) {
+    final mode = AppModeController.instance.mode;
+    final isUltra = mode == AppMode.ultra;
     final title = _isEdit ? 'Editar transacao' : 'Nova transacao';
 
     return Scaffold(
       appBar: AppBar(
         title: Text(title),
       ),
-      body: FutureBuilder(
-        future: RepositoryLocator.instance.categories.getAll(),
+      body: FutureBuilder<List<dynamic>>(
+        future: Future.wait([
+          RepositoryLocator.instance.categories.getAll(),
+          RepositoryLocator.instance.cards.getAll(),
+        ]),
         builder: (context, snapshot) {
-          final categories = snapshot.data ?? [];
+          final categories = (snapshot.data != null && snapshot.data!.isNotEmpty)
+              ? List.from(snapshot.data![0])
+              : <dynamic>[];
+          final cards = (snapshot.data != null && snapshot.data!.length > 1)
+              ? List<CardEntity>.from(snapshot.data![1] as List)
+              : <CardEntity>[];
 
           return Padding(
             padding: const EdgeInsets.all(16),
@@ -255,9 +274,9 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                     ),
                     items: categories
                         .map(
-                          (c) => DropdownMenuItem(
-                            value: c.id,
-                            child: Text(c.name),
+                          (c) => DropdownMenuItem<String>(
+                            value: c.id as String,
+                            child: Text(c.name as String),
                           ),
                         )
                         .toList(),
@@ -267,6 +286,32 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                       });
                     },
                   ),
+                  if (isUltra) ...[
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      value: _selectedCardId,
+                      decoration: const InputDecoration(
+                        labelText: 'Cartao (opcional)',
+                      ),
+                      items: [
+                        const DropdownMenuItem<String>(
+                          value: null,
+                          child: Text('Sem cartao'),
+                        ),
+                        ...cards.map(
+                          (c) => DropdownMenuItem<String>(
+                            value: c.id,
+                            child: Text('${c.name} • ${c.bankName}'),
+                          ),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedCardId = value;
+                        });
+                      },
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   ListTile(
                     contentPadding: EdgeInsets.zero,

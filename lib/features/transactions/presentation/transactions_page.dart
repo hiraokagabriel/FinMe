@@ -4,6 +4,7 @@ import '../data/transactions_repository.dart';
 import '../domain/transaction_entity.dart';
 import '../domain/transaction_type.dart';
 import '../../categories/domain/category_entity.dart';
+import '../../cards/domain/card_entity.dart';
 import '../../../core/models/app_mode.dart';
 import '../../../core/services/app_mode_controller.dart';
 import '../../../core/services/repository_locator.dart';
@@ -20,6 +21,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
   late final TransactionsRepository _transactionsRepository;
   List<TransactionEntity> _transactions = const [];
   Map<String, CategoryEntity> _categoriesById = const {};
+  Map<String, CardEntity> _cardsById = const {};
   bool _isLoading = true;
   double _totalExpenses = 0;
   double _totalIncome = 0;
@@ -36,7 +38,10 @@ class _TransactionsPageState extends State<TransactionsPage> {
     final locator = RepositoryLocator.instance;
     final transactions = await _transactionsRepository.getAll();
     final categoriesList = await locator.categories.getAll();
+    final cardsList = await locator.cards.getAll();
+
     final categoriesById = {for (final c in categoriesList) c.id: c};
+    final cardsById = {for (final c in cardsList) c.id: c};
 
     double expenses = 0;
     double income = 0;
@@ -51,6 +56,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
     setState(() {
       _transactions = transactions;
       _categoriesById = categoriesById;
+      _cardsById = cardsById;
       _totalExpenses = expenses;
       _totalIncome = income;
       _isLoading = false;
@@ -172,6 +178,8 @@ class _TransactionsPageState extends State<TransactionsPage> {
                         itemBuilder: (context, index) {
                           final tx = _transactions[index];
                           final category = _categoriesById[tx.categoryId];
+                          final card =
+                              tx.cardId != null ? _cardsById[tx.cardId!] : null;
 
                           final isExpense = tx.type == TransactionType.expense;
                           final sign = isExpense ? '-' : '+';
@@ -181,12 +189,17 @@ class _TransactionsPageState extends State<TransactionsPage> {
                           final dateText =
                               '${tx.date.day.toString().padLeft(2, '0')}/${tx.date.month.toString().padLeft(2, '0')}/${tx.date.year}';
 
-                          final subtitleText = isSimple
-                              ? dateText
-                              : [
-                                  category?.name ?? 'Sem categoria',
-                                  dateText,
-                                ].join(' • ');
+                          String subtitleText;
+                          if (isSimple) {
+                            subtitleText = dateText;
+                          } else {
+                            final categoryPart =
+                                category?.name ?? 'Sem categoria';
+                            final cardPart =
+                                card != null ? card.name : 'Sem cartao';
+                            subtitleText =
+                                '$categoryPart • $cardPart • $dateText';
+                          }
 
                           return Dismissible(
                             key: ValueKey(tx.id),
@@ -214,7 +227,8 @@ class _TransactionsPageState extends State<TransactionsPage> {
                               ),
                             ),
                             child: ListTile(
-                              onTap: () => _openNewTransactionForm(initial: tx),
+                              onTap: () =>
+                                  _openNewTransactionForm(initial: tx),
                               title:
                                   Text(tx.description ?? 'Sem descricao'),
                               subtitle: Text(subtitleText),
