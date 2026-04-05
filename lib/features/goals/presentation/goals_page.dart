@@ -42,7 +42,6 @@ class _GoalsPageState extends State<GoalsPage> {
     });
   }
 
-  /// Gasto da categoria no mês atual.
   double _spentForCategory(String categoryId) {
     final now = DateTime.now();
     return _transactions
@@ -70,9 +69,8 @@ class _GoalsPageState extends State<GoalsPage> {
   }
 
   Future<void> _confirmDelete(GoalEntity goal) async {
-    final cat = _categories
-        .where((c) => c.id == goal.categoryId)
-        .firstOrNull;
+    final cat =
+        _categories.where((c) => c.id == goal.categoryId).firstOrNull;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -85,8 +83,8 @@ class _GoalsPageState extends State<GoalsPage> {
               child: const Text('Cancelar')),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child:
-                Text('Excluir', style: TextStyle(color: AppColors.danger)),
+            child: Text('Excluir',
+                style: TextStyle(color: AppColors.danger)),
           ),
         ],
       ),
@@ -102,8 +100,7 @@ class _GoalsPageState extends State<GoalsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final isUltra =
-        AppModeController.instance.mode == AppMode.ultra;
+    final isUltra = AppModeController.instance.mode == AppMode.ultra;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Metas')),
@@ -118,19 +115,18 @@ class _GoalsPageState extends State<GoalsPage> {
               ? _buildEmpty()
               : ListView(
                   padding: const EdgeInsets.only(
-                      bottom: 88,
-                      top: AppSpacing.md,
-                      left: AppSpacing.lg,
-                      right: AppSpacing.lg),
+                    bottom: 88,
+                    top: AppSpacing.md,
+                    left: AppSpacing.lg,
+                    right: AppSpacing.lg,
+                  ),
                   children: [
                     if (isUltra)
                       Padding(
-                        padding: const EdgeInsets.only(
-                            bottom: AppSpacing.md),
-                        child: Text(
-                          'Limite mensal por categoria',
-                          style: AppText.sectionLabel,
-                        ),
+                        padding:
+                            const EdgeInsets.only(bottom: AppSpacing.md),
+                        child: Text('Limite mensal por categoria',
+                            style: AppText.sectionLabel),
                       ),
                     ..._goals.map((goal) {
                       final cat = _categories
@@ -138,8 +134,8 @@ class _GoalsPageState extends State<GoalsPage> {
                           .firstOrNull;
                       final spent = _spentForCategory(goal.categoryId);
                       return Padding(
-                        padding: const EdgeInsets.only(
-                            bottom: AppSpacing.md),
+                        padding:
+                            const EdgeInsets.only(bottom: AppSpacing.md),
                         child: _GoalCard(
                           goal: goal,
                           category: cat,
@@ -218,7 +214,6 @@ class _GoalCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                // Ícone de categoria
                 CircleAvatar(
                   radius: 16,
                   backgroundColor: catColor.withOpacity(0.18),
@@ -237,10 +232,8 @@ class _GoalCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        category?.name ?? goal.categoryId,
-                        style: AppText.sectionLabel,
-                      ),
+                      Text(category?.name ?? goal.categoryId,
+                          style: AppText.sectionLabel),
                       Text(
                         goal.month == null
                             ? 'Recorrente (todos os meses)'
@@ -250,15 +243,13 @@ class _GoalCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                // Badge de alerta
                 if (isOver)
                   _AlertBadge(
-                    label: 'Estourada',
-                    color: AppColors.danger,
-                  )
+                      label: 'Estourada', color: AppColors.danger)
                 else if (isNear)
                   _AlertBadge(
-                    label: '${(ratio * 100).toStringAsFixed(0)}%',
+                    label:
+                        '${(ratio * 100).toStringAsFixed(0)}%',
                     color: AppColors.warning,
                   ),
                 const SizedBox(width: AppSpacing.xs),
@@ -277,8 +268,6 @@ class _GoalCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: AppSpacing.md),
-
-            // Barra de progresso
             ClipRRect(
               borderRadius: BorderRadius.circular(AppRadius.chip),
               child: LinearProgressIndicator(
@@ -289,8 +278,6 @@ class _GoalCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: AppSpacing.xs + 2),
-
-            // Valores
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -359,19 +346,37 @@ class _GoalFormDialogState extends State<_GoalFormDialog> {
   DateTime? _selectedMonth;
   bool _saving = false;
 
+  // Lista já filtrada por despesa — usada tanto no initState quanto no build
+  late final List<CategoryEntity> _expenseCategories;
+
   @override
   void initState() {
     super.initState();
+
+    // Filtra as categorias de despesa UMA vez e reutiliza
+    _expenseCategories = widget.categories
+        .where((c) => c.kind.index == 0) // CategoryKind.expense
+        .toList();
+
     if (widget.initial != null) {
       final g = widget.initial!;
       _limitController.text = g.limitAmount.toStringAsFixed(2);
-      _selectedCategoryId = g.categoryId;
       _isRecurrent = g.month == null;
       _selectedMonth = g.month;
+      // Garante que o ID editado exista na lista filtrada;
+      // se não existir (categoria foi deletada ou é receita), usa a primeira disponível
+      final existsInList =
+          _expenseCategories.any((c) => c.id == g.categoryId);
+      _selectedCategoryId = existsInList
+          ? g.categoryId
+          : (_expenseCategories.isNotEmpty
+              ? _expenseCategories.first.id
+              : null);
     } else {
-      if (widget.categories.isNotEmpty) {
-        _selectedCategoryId = widget.categories.first.id;
-      }
+      // Nova meta: seleciona a primeira categoria de despesa disponível
+      _selectedCategoryId = _expenseCategories.isNotEmpty
+          ? _expenseCategories.first.id
+          : null;
     }
   }
 
@@ -401,8 +406,8 @@ class _GoalFormDialogState extends State<_GoalFormDialog> {
 
   Future<void> _save() async {
     if (_selectedCategoryId == null) return;
-    final limit =
-        double.tryParse(_limitController.text.replaceAll(',', '.').trim());
+    final limit = double.tryParse(
+        _limitController.text.replaceAll(',', '.').trim());
     if (limit == null || limit <= 0) return;
 
     setState(() => _saving = true);
@@ -420,11 +425,24 @@ class _GoalFormDialogState extends State<_GoalFormDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final title = widget.initial == null ? 'Nova meta' : 'Editar meta';
-    final expenseCategories = widget.categories
-        .where((c) =>
-            c.kind.index == 0) // CategoryKind.expense
-        .toList();
+    final title =
+        widget.initial == null ? 'Nova meta' : 'Editar meta';
+
+    // Exibe aviso se não houver categorias de despesa cadastradas
+    if (_expenseCategories.isEmpty) {
+      return AlertDialog(
+        title: Text(title),
+        content: const Text(
+          'Nenhuma categoria de despesa encontrada.\nCadastre uma categoria de despesa antes de criar uma meta.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Fechar'),
+          ),
+        ],
+      );
+    }
 
     return AlertDialog(
       title: Text(title),
@@ -434,12 +452,12 @@ class _GoalFormDialogState extends State<_GoalFormDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Categoria
+            // Categoria — usa _expenseCategories (já filtrada e consistente com _selectedCategoryId)
             DropdownButtonFormField<String>(
               value: _selectedCategoryId,
               decoration:
                   const InputDecoration(labelText: 'Categoria'),
-              items: expenseCategories
+              items: _expenseCategories
                   .map((c) => DropdownMenuItem(
                         value: c.id,
                         child: Text(c.name),
@@ -450,7 +468,6 @@ class _GoalFormDialogState extends State<_GoalFormDialog> {
             ),
             const SizedBox(height: AppSpacing.md),
 
-            // Valor limite
             TextFormField(
               controller: _limitController,
               keyboardType: const TextInputType.numberWithOptions(
@@ -463,7 +480,6 @@ class _GoalFormDialogState extends State<_GoalFormDialog> {
             ),
             const SizedBox(height: AppSpacing.md),
 
-            // Recorrente ou mês específico
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               value: _isRecurrent,
