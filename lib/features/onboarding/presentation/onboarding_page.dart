@@ -17,6 +17,8 @@ class _OnboardingPageState extends State<OnboardingPage>
     with SingleTickerProviderStateMixin {
   int _step = 0; // 0 = splash, 1 = modo
   AppMode? _selectedMode;
+  bool _waitingForStep = false; // evita duplo disparo
+
   late final AnimationController _fadeCtrl;
   late final Animation<double> _fadeAnim;
 
@@ -25,25 +27,35 @@ class _OnboardingPageState extends State<OnboardingPage>
     super.initState();
     _fadeCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 600),
+      duration: const Duration(milliseconds: 500),
     );
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeInOut);
+
+    // Ouve o fim da animação de saída para trocar o step
+    _fadeCtrl.addStatusListener(_onAnimationStatus);
     _fadeCtrl.forward();
+  }
+
+  void _onAnimationStatus(AnimationStatus status) {
+    if (status == AnimationStatus.dismissed && _waitingForStep) {
+      _waitingForStep = false;
+      if (!mounted) return;
+      setState(() => _step = 1);
+      _fadeCtrl.forward();
+    }
   }
 
   @override
   void dispose() {
+    _fadeCtrl.removeStatusListener(_onAnimationStatus);
     _fadeCtrl.dispose();
     super.dispose();
   }
 
-  // AnimationController.reverse() retorna TickerFuture (não Future<void>),
-  // por isso usamos orCancel para obter um Future<void> real.
-  Future<void> _goToModeStep() async {
-    await _fadeCtrl.reverse().orCancel;
-    if (!mounted) return;
-    setState(() => _step = 1);
-    _fadeCtrl.forward();
+  void _goToModeStep() {
+    if (_waitingForStep) return;
+    _waitingForStep = true;
+    _fadeCtrl.reverse(); // quando chegar em dismissed, _onAnimationStatus troca o step
   }
 
   Future<void> _finish() async {
@@ -64,21 +76,20 @@ class _OnboardingPageState extends State<OnboardingPage>
       backgroundColor: cs.surface,
       body: FadeTransition(
         opacity: _fadeAnim,
-        child: _step == 0 ? _buildSplash(theme, cs) : _buildModeStep(theme, cs),
+        child: _step == 0 ? _buildSplash(cs) : _buildModeStep(cs),
       ),
     );
   }
 
   // ───────────────────────────── SPLASH ─────────────────────────────
 
-  Widget _buildSplash(ThemeData theme, ColorScheme cs) {
+  Widget _buildSplash(ColorScheme cs) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 48),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Logo
             Container(
               width: 72,
               height: 72,
@@ -98,7 +109,7 @@ class _OnboardingPageState extends State<OnboardingPage>
                 ),
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: AppSpacing.xxl),
             Text(
               'FinMe',
               style: AppText.screenTitle.copyWith(
@@ -107,7 +118,7 @@ class _OnboardingPageState extends State<OnboardingPage>
                 letterSpacing: -0.5,
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             Text(
               'Controle financeiro para quem lida\ncom muitos cartões e contas.',
               textAlign: TextAlign.center,
@@ -135,7 +146,7 @@ class _OnboardingPageState extends State<OnboardingPage>
 
   // ───────────────────────────── MODO ─────────────────────────────
 
-  Widget _buildModeStep(ThemeData theme, ColorScheme cs) {
+  Widget _buildModeStep(ColorScheme cs) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -150,12 +161,12 @@ class _OnboardingPageState extends State<OnboardingPage>
                 fontWeight: FontWeight.w600,
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             Text(
               'Você pode mudar isso depois nas configurações.',
               style: AppText.secondary,
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: AppSpacing.xxl),
             _ModeCard(
               title: 'Modo Simples',
               description:
@@ -164,7 +175,7 @@ class _OnboardingPageState extends State<OnboardingPage>
               selected: _selectedMode == AppMode.simple,
               onTap: () => setState(() => _selectedMode = AppMode.simple),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: AppSpacing.md),
             _ModeCard(
               title: 'Modo Ultra',
               description:
@@ -173,7 +184,7 @@ class _OnboardingPageState extends State<OnboardingPage>
               selected: _selectedMode == AppMode.ultra,
               onTap: () => setState(() => _selectedMode = AppMode.ultra),
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: AppSpacing.h),
             SizedBox(
               width: double.infinity,
               child: FilledButton(
@@ -227,9 +238,7 @@ class _ModeCard extends StatelessWidget {
               : cs.surfaceContainerHighest.withValues(alpha: 0.4),
           borderRadius: BorderRadius.circular(AppRadius.card),
           border: Border.all(
-            color: selected
-                ? cs.primary
-                : cs.outline.withValues(alpha: 0.3),
+            color: selected ? cs.primary : cs.outline.withValues(alpha: 0.3),
             width: selected ? 2 : 1,
           ),
         ),
