@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/models/app_mode.dart';
 import '../../../core/services/app_mode_controller.dart';
+import '../../../core/services/theme_controller.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../categories/presentation/categories_page.dart';
 
@@ -10,29 +11,56 @@ class SettingsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final controller = AppModeController.instance;
+    final modeController  = AppModeController.instance;
+    final themeController = ThemeController.instance;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Configurações')),
       body: AnimatedBuilder(
-        animation: controller,
+        animation: Listenable.merge([modeController, themeController]),
         builder: (context, _) {
-          final isUltra = controller.mode == AppMode.ultra;
+          final isUltra = modeController.mode == AppMode.ultra;
+          final isDark  = themeController.isDark;
+
           return ListView(
             children: [
-              // ── Modo de uso ─────────────────────────────────────────
+              // ── Aparência ───────────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(
                     AppSpacing.lg, AppSpacing.lg,
+                    AppSpacing.lg, AppSpacing.xs),
+                child: Text('Aparência', style: AppText.sectionLabel),
+              ),
+              SwitchListTile(
+                secondary: Icon(
+                  isDark
+                      ? Icons.dark_mode_outlined
+                      : Icons.light_mode_outlined,
+                ),
+                title: const Text('Tema escuro'),
+                subtitle: Text(
+                  isDark
+                      ? 'Interface escura ativa'
+                      : 'Interface clara ativa',
+                ),
+                value: isDark,
+                onChanged: themeController.setDark,
+              ),
+              const Divider(height: AppSpacing.h),
+
+              // ── Modo de uso ────────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg, 0,
                     AppSpacing.lg, AppSpacing.xs),
                 child: Text('Modo de uso', style: AppText.sectionLabel),
               ),
               RadioListTile<AppMode>(
                 value: AppMode.simple,
-                groupValue: controller.mode,
+                groupValue: modeController.mode,
                 activeColor: AppColors.primary,
                 onChanged: (v) {
-                  if (v != null) controller.setMode(v);
+                  if (v != null) modeController.setMode(v);
                 },
                 title: const Text('Modo Simples'),
                 subtitle: const Text(
@@ -41,10 +69,10 @@ class SettingsPage extends StatelessWidget {
               ),
               RadioListTile<AppMode>(
                 value: AppMode.ultra,
-                groupValue: controller.mode,
+                groupValue: modeController.mode,
                 activeColor: AppColors.primary,
                 onChanged: (v) {
-                  if (v != null) controller.setMode(v);
+                  if (v != null) modeController.setMode(v);
                 },
                 title: const Text('Modo Ultra'),
                 subtitle: const Text(
@@ -73,7 +101,7 @@ class SettingsPage extends StatelessWidget {
               ),
               const Divider(height: AppSpacing.h),
 
-              // ── Dados ────────────────────────────────────────────────
+              // ── Dados ──────────────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(
                     AppSpacing.lg, 0,
