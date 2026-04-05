@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/services/repository_locator.dart';
+import '../../../core/theme/app_theme.dart';
 import '../domain/card_entity.dart';
 import '../domain/card_type.dart';
 
@@ -49,14 +50,9 @@ class _NewCardPageState extends State<NewCardPage> {
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
+    setState(() => _isSaving = true);
 
-    setState(() {
-      _isSaving = true;
-    });
-
-    final locator = RepositoryLocator.instance;
-    final repo = locator.cards;
-
+    final repo = RepositoryLocator.instance.cards;
     final limitText = _limitController.text.trim();
     final limit = limitText.isEmpty
         ? null
@@ -81,23 +77,18 @@ class _NewCardPageState extends State<NewCardPage> {
     }
 
     if (!mounted) return;
-    setState(() {
-      _isSaving = false;
-    });
-
+    setState(() => _isSaving = false);
     Navigator.of(context).pop(true);
   }
 
   @override
   Widget build(BuildContext context) {
-    final title = _isEdit ? 'Editar cartao' : 'Novo cartao';
-
     return Scaffold(
       appBar: AppBar(
-        title: Text(title),
+        title: Text(_isEdit ? 'Editar cartão' : 'Novo cartão'),
       ),
       body: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppSpacing.lg),
         child: Form(
           key: _formKey,
           child: ListView(
@@ -105,62 +96,48 @@ class _NewCardPageState extends State<NewCardPage> {
               TextFormField(
                 controller: _nameController,
                 decoration: const InputDecoration(
-                  labelText: 'Nome do cartao',
+                  labelText: 'Nome do cartão',
                   hintText: 'Ex: Nubank Gold',
                 ),
-                validator: (value) {
-                  if ((value ?? '').trim().isEmpty) {
-                    return 'Informe o nome do cartao';
-                  }
-                  return null;
-                },
+                validator: (v) =>
+                    (v ?? '').trim().isEmpty ? 'Informe o nome' : null,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: AppSpacing.md),
               TextFormField(
                 controller: _bankController,
                 decoration: const InputDecoration(
                   labelText: 'Banco',
                   hintText: 'Ex: Nubank',
                 ),
-                validator: (value) {
-                  if ((value ?? '').trim().isEmpty) {
-                    return 'Informe o banco';
-                  }
-                  return null;
-                },
+                validator: (v) =>
+                    (v ?? '').trim().isEmpty ? 'Informe o banco' : null,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: AppSpacing.md),
               DropdownButtonFormField<CardType>(
                 value: _selectedType,
-                decoration: const InputDecoration(
-                  labelText: 'Tipo',
-                ),
+                decoration: const InputDecoration(labelText: 'Tipo'),
                 items: const [
                   DropdownMenuItem(
                     value: CardType.credit,
-                    child: Text('Credito'),
+                    child: Text('Crédito'),
                   ),
                   DropdownMenuItem(
                     value: CardType.debit,
-                    child: Text('Debito'),
+                    child: Text('Débito'),
                   ),
                 ],
-                onChanged: (value) {
-                  if (value != null) {
-                    setState(() {
-                      _selectedType = value;
-                    });
-                  }
+                onChanged: (v) {
+                  if (v != null) setState(() => _selectedType = v);
                 },
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: AppSpacing.md),
               Row(
                 children: [
                   Expanded(
                     child: TextFormField(
                       controller: _limitController,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
+                      keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true),
                       decoration: const InputDecoration(
                         labelText: 'Limite (opcional)',
                         prefixText: 'R\$ ',
@@ -168,32 +145,27 @@ class _NewCardPageState extends State<NewCardPage> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: AppSpacing.md),
                   Expanded(
                     child: DropdownButtonFormField<int>(
                       value: _dueDay,
-                      decoration: const InputDecoration(
-                        labelText: 'Vencimento',
-                      ),
+                      decoration:
+                          const InputDecoration(labelText: 'Vencimento'),
                       items: List.generate(
                         28,
-                        (index) => DropdownMenuItem(
-                          value: index + 1,
-                          child: Text('Dia ${index + 1}'),
+                        (i) => DropdownMenuItem(
+                          value: i + 1,
+                          child: Text('Dia ${i + 1}'),
                         ),
                       ),
-                      onChanged: (value) {
-                        if (value != null) {
-                          setState(() {
-                            _dueDay = value;
-                          });
-                        }
+                      onChanged: (v) {
+                        if (v != null) setState(() => _dueDay = v);
                       },
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: AppSpacing.xxl),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
@@ -202,11 +174,14 @@ class _NewCardPageState extends State<NewCardPage> {
                       ? const SizedBox(
                           height: 20,
                           width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
                         )
                       : Text(_isEdit
-                          ? 'Salvar alteracoes'
-                          : 'Salvar cartao'),
+                          ? 'Salvar alterações'
+                          : 'Salvar cartão'),
                 ),
               ),
             ],

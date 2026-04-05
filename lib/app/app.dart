@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../features/dashboard/presentation/dashboard_page.dart';
+import '../core/theme/app_theme.dart';
 import 'router.dart';
 
 class FinMeApp extends StatelessWidget {
@@ -10,10 +10,8 @@ class FinMeApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'FinMe',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
-      ),
+      debugShowCheckedModeBanner: false,
+      theme: finMeLightTheme(),
       initialRoute: AppRouter.dashboard,
       routes: AppRouter.routes,
     );

@@ -7,6 +7,7 @@ import '../domain/card_type.dart';
 import '../../../core/models/app_mode.dart';
 import '../../../core/services/app_mode_controller.dart';
 import '../../../core/services/repository_locator.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../features/transactions/domain/transaction_entity.dart';
 import '../../../features/transactions/domain/transaction_type.dart';
 import 'new_card_page.dart';
@@ -84,12 +85,21 @@ class _CardsPageState extends State<CardsPage> {
             ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Excluir'),
+              child: Text(
+                'Excluir',
+                style: TextStyle(color: AppColors.danger),
+              ),
             ),
           ],
         );
       },
     );
+  }
+
+  Color _limitColor(double ratio) {
+    if (ratio < 0.5) return AppColors.limitLow;
+    if (ratio < 0.8) return AppColors.limitMid;
+    return AppColors.limitHigh;
   }
 
   Widget _buildLimitBar(CardEntity card) {
@@ -99,48 +109,39 @@ class _CardsPageState extends State<CardsPage> {
     final used = _usedByCard[card.id] ?? 0;
     final ratio = (used / limit).clamp(0.0, 1.0);
     final percent = (ratio * 100).toStringAsFixed(1);
-
-    final Color barColor;
-    if (ratio < 0.5) {
-      barColor = Colors.green;
-    } else if (ratio < 0.8) {
-      barColor = Colors.orange;
-    } else {
-      barColor = Colors.red;
-    }
+    final color = _limitColor(ratio);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SizedBox(height: 8),
+        const SizedBox(height: AppSpacing.sm),
         Row(
           children: [
             Expanded(
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(4),
+                borderRadius: BorderRadius.circular(AppRadius.chip),
                 child: LinearProgressIndicator(
                   value: ratio,
                   minHeight: 8,
-                  backgroundColor: Colors.grey[200],
-                  color: barColor,
+                  backgroundColor: AppColors.limitTrack,
+                  color: color,
                 ),
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: AppSpacing.sm),
             Text(
               '$percent%',
-              style: TextStyle(
-                fontSize: 12,
+              style: AppText.badge.copyWith(
                 fontWeight: FontWeight.bold,
-                color: barColor,
+                color: color,
               ),
             ),
           ],
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: AppSpacing.xs),
         Text(
           'R\$ ${used.toStringAsFixed(2)} / R\$ ${limit.toStringAsFixed(2)}',
-          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+          style: AppText.secondary,
         ),
       ],
     );
@@ -153,17 +154,8 @@ class _CardsPageState extends State<CardsPage> {
     final used = _usedByCard[card.id] ?? 0;
     final free = (limit - used).clamp(0.0, limit);
     final ratio = (used / limit).clamp(0.0, 1.0);
+    final color = _limitColor(ratio);
 
-    final Color usedColor;
-    if (ratio < 0.5) {
-      usedColor = Colors.green;
-    } else if (ratio < 0.8) {
-      usedColor = Colors.orange;
-    } else {
-      usedColor = Colors.red;
-    }
-
-    // largura fixa para não espremer o texto ao lado
     return SizedBox(
       width: 100,
       height: 100,
@@ -174,13 +166,13 @@ class _CardsPageState extends State<CardsPage> {
           sections: [
             PieChartSectionData(
               value: used > 0 ? used : 0.001,
-              color: usedColor,
+              color: color,
               title: '',
               radius: 18,
             ),
             PieChartSectionData(
               value: free > 0 ? free : 0.001,
-              color: Colors.grey[200]!,
+              color: AppColors.limitTrack,
               title: '',
               radius: 18,
             ),
@@ -215,23 +207,48 @@ class _CardsPageState extends State<CardsPage> {
               : Column(
                   children: [
                     if (isSimple)
-                      Padding(
-                        padding: const EdgeInsets.all(16),
+                      Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.all(AppSpacing.lg),
+                        padding: const EdgeInsets.all(AppSpacing.md),
+                        decoration: BoxDecoration(
+                          color: AppColors.sidebar,
+                          borderRadius:
+                              BorderRadius.circular(AppRadius.card),
+                        ),
                         child: Text(
                           'Detalhes de cartões são mais úteis no Modo Ultra.',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(color: Colors.grey[600]),
+                          style: AppText.secondary,
                         ),
                       ),
                     Expanded(
                       child: _cards.isEmpty
-                          ? const Center(
-                              child: Text('Nenhum cartão cadastrado.'))
+                          ? Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.credit_card_off_outlined,
+                                    size: 48,
+                                    color: AppColors.textSecondary,
+                                  ),
+                                  const SizedBox(height: AppSpacing.md),
+                                  Text(
+                                    'Nenhum cartão cadastrado',
+                                    style: AppText.sectionLabel,
+                                  ),
+                                  const SizedBox(height: AppSpacing.sm),
+                                  Text(
+                                    'Toque em "Novo cartão" para começar.',
+                                    style: AppText.secondary,
+                                  ),
+                                ],
+                              ),
+                            )
                           : ListView.separated(
-                              padding:
-                                  const EdgeInsets.only(bottom: 80),
+                              padding: const EdgeInsets.only(
+                                  bottom: 80,
+                                  top: AppSpacing.sm),
                               itemCount: _cards.length,
                               separatorBuilder: (_, __) =>
                                   const Divider(height: 1),
@@ -257,15 +274,14 @@ class _CardsPageState extends State<CardsPage> {
                                       ),
                                     );
                                   },
-                                  // ✅ fundo direito (deslizar para esq → apagar)
                                   background: const SizedBox.shrink(),
                                   secondaryBackground: Container(
-                                    color: Colors.red,
+                                    color: AppColors.danger,
                                     alignment: Alignment.centerRight,
                                     padding: const EdgeInsets.symmetric(
-                                        horizontal: 16),
+                                        horizontal: AppSpacing.lg),
                                     child: const Icon(
-                                      Icons.delete,
+                                      Icons.delete_outline,
                                       color: Colors.white,
                                     ),
                                   ),
@@ -275,13 +291,12 @@ class _CardsPageState extends State<CardsPage> {
                                     child: Padding(
                                       padding:
                                           const EdgeInsets.symmetric(
-                                              horizontal: 16,
-                                              vertical: 12),
+                                              horizontal: AppSpacing.lg,
+                                              vertical: AppSpacing.md),
                                       child: Column(
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
-                                          // ── linha do nome + tipo ──
                                           Row(
                                             children: [
                                               Expanded(
@@ -292,37 +307,35 @@ class _CardsPageState extends State<CardsPage> {
                                                   children: [
                                                     Text(
                                                       card.name,
-                                                      style:
-                                                          const TextStyle(
+                                                      style: AppText.body
+                                                          .copyWith(
                                                         fontWeight:
                                                             FontWeight
-                                                                .bold,
+                                                                .w600,
                                                         fontSize: 15,
                                                       ),
                                                     ),
                                                     const SizedBox(
                                                         height: 2),
                                                     Text(
-                                                      '${card.bankName} • ${_cardTypeLabel(card.type)} • Vencimento dia ${card.dueDay}',
-                                                      style: TextStyle(
-                                                        fontSize: 12,
-                                                        color: Colors
-                                                            .grey[600],
-                                                      ),
+                                                      '${card.bankName} · ${_cardTypeLabel(card.type)} · Venc. dia ${card.dueDay}',
+                                                      style: AppText
+                                                          .secondary,
                                                     ),
                                                   ],
                                                 ),
                                               ),
                                             ],
                                           ),
-                                          // ── gráfico donuts (Ultra) ABAIXO do nome ──
                                           if (isUltra &&
                                               card.limit != null) ...[
-                                            const SizedBox(height: 8),
+                                            const SizedBox(
+                                                height: AppSpacing.sm),
                                             Row(
                                               children: [
                                                 _buildDonutChart(card),
-                                                const SizedBox(width: 12),
+                                                const SizedBox(
+                                                    width: AppSpacing.md),
                                                 Expanded(
                                                   child: _buildLimitBar(
                                                       card),
