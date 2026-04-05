@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/models/app_mode.dart';
 import '../../../core/services/app_mode_controller.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../categories/presentation/categories_page.dart';
 
 class SettingsPage extends StatelessWidget {
@@ -12,87 +13,86 @@ class SettingsPage extends StatelessWidget {
     final controller = AppModeController.instance;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Configuracoes'),
-      ),
+      appBar: AppBar(title: const Text('Configurações')),
       body: AnimatedBuilder(
         animation: controller,
         builder: (context, _) {
           final isUltra = controller.mode == AppMode.ultra;
           return ListView(
             children: [
-              // ---------- Modo de uso ----------
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
-                child: Text(
-                  'Modo de uso',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                ),
+              // ── Modo de uso ─────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg, AppSpacing.lg,
+                    AppSpacing.lg, AppSpacing.xs),
+                child: Text('Modo de uso', style: AppText.sectionLabel),
               ),
               RadioListTile<AppMode>(
                 value: AppMode.simple,
                 groupValue: controller.mode,
+                activeColor: AppColors.primary,
                 onChanged: (v) {
                   if (v != null) controller.setMode(v);
                 },
-                title: const Text('Modo simples'),
+                title: const Text('Modo Simples'),
                 subtitle: const Text(
-                  'Interface enxuta, foco em resumo rapido. Sem detalhes de cartao ou graficos avancados.',
+                  'Interface enxuta, foco em resumo rápido. Sem detalhes de cartão ou gráficos avançados.',
                 ),
               ),
               RadioListTile<AppMode>(
                 value: AppMode.ultra,
                 groupValue: controller.mode,
+                activeColor: AppColors.primary,
                 onChanged: (v) {
                   if (v != null) controller.setMode(v);
                 },
-                title: const Text('Modo ultra'),
+                title: const Text('Modo Ultra'),
                 subtitle: const Text(
-                  'Visao completa com graficos por categoria e cartao, limite de credito, campos avancados e provisionamento.',
+                  'Visão completa com gráficos por categoria e cartão, limite de crédito, campos avançados e provisionamento.',
                 ),
               ),
-              // Banner informativo do modo atual
               AnimatedSwitcher(
                 duration: const Duration(milliseconds: 250),
                 child: isUltra
                     ? _ModeBanner(
                         key: const ValueKey('ultra'),
                         icon: Icons.bolt,
-                        color: Colors.deepPurple,
-                        title: 'Modo ultra ativo',
+                        accentColor: AppColors.primary,
+                        title: 'Modo Ultra ativo',
                         message:
-                            'Voce esta vendo informacoes completas: graficos por categoria e cartao, limite de credito e campos avancados nas transacoes.',
+                            'Você está vendo informações completas: gráficos por categoria e cartão, limite de crédito e campos avançados nas transações.',
                       )
                     : _ModeBanner(
                         key: const ValueKey('simple'),
                         icon: Icons.spa_outlined,
-                        color: Colors.teal,
-                        title: 'Modo simples ativo',
+                        accentColor: AppColors.limitLow,
+                        title: 'Modo Simples ativo',
                         message:
-                            'Interface enxuta: apenas data na lista de transacoes. Campos de cartao e graficos ficam ocultos.',
+                            'Interface enxuta: apenas data na lista de transações. Campos de cartão e gráficos ficam ocultos.',
                       ),
               ),
-              const Divider(height: 32),
-              // ---------- Categorias ----------
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
-                child: Text(
-                  'Dados',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                ),
+              const Divider(height: AppSpacing.h),
+
+              // ── Dados ────────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg, 0,
+                    AppSpacing.lg, AppSpacing.xs),
+                child: Text('Dados', style: AppText.sectionLabel),
               ),
               ListTile(
                 leading: const Icon(Icons.label_outline),
                 title: const Text('Categorias'),
-                subtitle: const Text('Gerenciar categorias de despesa e receita'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (context) => const CategoriesPage(),
-                    ),
-                  );
-                },
+                subtitle: const Text(
+                    'Gerenciar categorias de despesa e receita'),
+                trailing: const Icon(
+                    Icons.chevron_right,
+                    color: AppColors.textSecondary),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => const CategoriesPage(),
+                  ),
+                ),
               ),
             ],
           );
@@ -106,48 +106,43 @@ class _ModeBanner extends StatelessWidget {
   const _ModeBanner({
     super.key,
     required this.icon,
-    required this.color,
+    required this.accentColor,
     required this.title,
     required this.message,
   });
 
   final IconData icon;
-  final Color color;
-  final String title;
-  final String message;
+  final Color    accentColor;
+  final String   title;
+  final String   message;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.fromLTRB(
+          AppSpacing.lg, AppSpacing.sm,
+          AppSpacing.lg, AppSpacing.xs),
+      padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withOpacity(0.25)),
+        color: accentColor.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        border: Border.all(color: accentColor.withOpacity(0.25)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: color, size: 20),
-          const SizedBox(width: 10),
+          Icon(icon, color: accentColor, size: 20),
+          const SizedBox(width: AppSpacing.sm + 2),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   title,
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                    color: color,
-                  ),
+                  style: AppText.sectionLabel.copyWith(color: accentColor),
                 ),
                 const SizedBox(height: 3),
-                Text(
-                  message,
-                  style: TextStyle(fontSize: 12, color: Colors.grey[700]),
-                ),
+                Text(message, style: AppText.secondary),
               ],
             ),
           ),

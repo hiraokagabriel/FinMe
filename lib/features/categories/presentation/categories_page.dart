@@ -4,6 +4,7 @@ import '../data/categories_repository.dart';
 import '../domain/category_entity.dart';
 import '../domain/category_kind.dart';
 import '../../../core/services/repository_locator.dart';
+import '../../../core/theme/app_theme.dart';
 
 class CategoriesPage extends StatefulWidget {
   const CategoriesPage({super.key});
@@ -17,21 +18,6 @@ class _CategoriesPageState extends State<CategoriesPage> {
   List<CategoryEntity> _categories = const [];
   bool _isLoading = true;
 
-  static const List<_CategoryPreset> _presets = [
-    _CategoryPreset('Alimentacao', 0xFFF44336),
-    _CategoryPreset('Transporte', 0xFF2196F3),
-    _CategoryPreset('Saude', 0xFF4CAF50),
-    _CategoryPreset('Lazer', 0xFFFF9800),
-    _CategoryPreset('Moradia', 0xFF9C27B0),
-    _CategoryPreset('Educacao', 0xFF00BCD4),
-    _CategoryPreset('Roupas', 0xFFE91E63),
-    _CategoryPreset('Assinaturas', 0xFF607D8B),
-    _CategoryPreset('Salario', 0xFF43A047),
-    _CategoryPreset('Freelance', 0xFF1E88E5),
-    _CategoryPreset('Investimentos', 0xFF8BC34A),
-    _CategoryPreset('Outros', 0xFF9E9E9E),
-  ];
-
   @override
   void initState() {
     super.initState();
@@ -43,14 +29,12 @@ class _CategoriesPageState extends State<CategoriesPage> {
     final list = await _repo.getAll();
     setState(() {
       _categories = list;
-      _isLoading = false;
+      _isLoading  = false;
     });
   }
 
-  Color _colorOf(CategoryEntity cat) {
-    if (cat.colorValue != null) return Color(cat.colorValue!);
-    return Colors.blueGrey;
-  }
+  Color _colorOf(CategoryEntity cat) =>
+      cat.colorValue != null ? Color(cat.colorValue!) : AppColors.textSecondary;
 
   Future<void> _openForm({CategoryEntity? initial}) async {
     await showDialog(
@@ -74,7 +58,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Excluir categoria'),
-        content: Text('Deseja excluir a categoria "${cat.name}"?'),
+        content: Text('Deseja excluir "${cat.name}"?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -82,7 +66,8 @@ class _CategoriesPageState extends State<CategoriesPage> {
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Excluir'),
+            child: Text('Excluir',
+                style: TextStyle(color: AppColors.danger)),
           ),
         ],
       ),
@@ -91,16 +76,17 @@ class _CategoriesPageState extends State<CategoriesPage> {
       await _repo.remove(cat.id);
       await _load();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Categoria excluida')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Categoria excluída')));
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final expenses = _categories.where((c) => c.kind == CategoryKind.expense).toList();
-    final incomes = _categories.where((c) => c.kind == CategoryKind.income).toList();
+    final expenses =
+        _categories.where((c) => c.kind == CategoryKind.expense).toList();
+    final incomes =
+        _categories.where((c) => c.kind == CategoryKind.income).toList();
 
     return Scaffold(
       appBar: AppBar(title: const Text('Categorias')),
@@ -112,12 +98,27 @@ class _CategoriesPageState extends State<CategoriesPage> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _categories.isEmpty
-              ? const Center(child: Text('Nenhuma categoria cadastrada.'))
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.label_off_outlined,
+                          size: 48, color: AppColors.textSecondary),
+                      const SizedBox(height: AppSpacing.md),
+                      Text('Nenhuma categoria cadastrada',
+                          style: AppText.sectionLabel),
+                      const SizedBox(height: AppSpacing.sm),
+                      Text('Toque em "Nova categoria" para começar.',
+                          style: AppText.secondary),
+                    ],
+                  ),
+                )
               : ListView(
                   padding: const EdgeInsets.only(bottom: 88),
                   children: [
                     if (expenses.isNotEmpty) ...[
-                      _SectionHeader(label: 'Despesas (${expenses.length})'),
+                      _SectionHeader(
+                          label: 'Despesas (${expenses.length})'),
                       ...expenses.map((cat) => _CategoryTile(
                             category: cat,
                             color: _colorOf(cat),
@@ -126,7 +127,8 @@ class _CategoriesPageState extends State<CategoriesPage> {
                           )),
                     ],
                     if (incomes.isNotEmpty) ...[
-                      _SectionHeader(label: 'Receitas (${incomes.length})'),
+                      _SectionHeader(
+                          label: 'Receitas (${incomes.length})'),
                       ...incomes.map((cat) => _CategoryTile(
                             category: cat,
                             color: _colorOf(cat),
@@ -147,11 +149,9 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-      child: Text(
-        label,
-        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-      ),
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.xs),
+      child: Text(label, style: AppText.sectionLabel),
     );
   }
 }
@@ -165,9 +165,9 @@ class _CategoryTile extends StatelessWidget {
   });
 
   final CategoryEntity category;
-  final Color color;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
+  final Color          color;
+  final VoidCallback   onEdit;
+  final VoidCallback   onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -176,13 +176,14 @@ class _CategoryTile extends StatelessWidget {
         backgroundColor: color.withOpacity(0.18),
         child: Text(
           category.name.isNotEmpty ? category.name[0].toUpperCase() : '?',
-          style: TextStyle(color: color, fontWeight: FontWeight.bold),
+          style: TextStyle(
+              color: color, fontWeight: FontWeight.bold),
         ),
       ),
       title: Text(category.name),
       subtitle: Text(
         category.kind == CategoryKind.expense ? 'Despesa' : 'Receita',
-        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+        style: AppText.secondary,
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
@@ -190,11 +191,13 @@ class _CategoryTile extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.edit_outlined, size: 20),
             tooltip: 'Editar',
+            color: AppColors.textSecondary,
             onPressed: onEdit,
           ),
           IconButton(
             icon: const Icon(Icons.delete_outline, size: 20),
             tooltip: 'Excluir',
+            color: AppColors.danger,
             onPressed: onDelete,
           ),
         ],
@@ -231,10 +234,10 @@ class _CategoryFormDialogState extends State<_CategoryFormDialog> {
     super.initState();
     if (widget.initial != null) {
       _nameController.text = widget.initial!.name;
-      _kind = widget.initial!.kind;
+      _kind       = widget.initial!.kind;
       _colorValue = widget.initial!.colorValue ?? _palette.first;
     } else {
-      _kind = CategoryKind.expense;
+      _kind       = CategoryKind.expense;
       _colorValue = _palette.first;
     }
   }
@@ -248,14 +251,13 @@ class _CategoryFormDialogState extends State<_CategoryFormDialog> {
   Future<void> _save() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) return;
-
     setState(() => _saving = true);
 
     final entity = CategoryEntity(
-      id: widget.initial?.id ??
+      id:         widget.initial?.id ??
           'cat_${DateTime.now().microsecondsSinceEpoch}',
-      name: name,
-      kind: _kind,
+      name:       name,
+      kind:       _kind,
       colorValue: _colorValue,
     );
 
@@ -266,9 +268,9 @@ class _CategoryFormDialogState extends State<_CategoryFormDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final title = widget.initial == null ? 'Nova categoria' : 'Editar categoria';
     return AlertDialog(
-      title: Text(title),
+      title: Text(
+          widget.initial == null ? 'Nova categoria' : 'Editar categoria'),
       content: SizedBox(
         width: 360,
         child: Column(
@@ -279,15 +281,21 @@ class _CategoryFormDialogState extends State<_CategoryFormDialog> {
               controller: _nameController,
               decoration: const InputDecoration(
                 labelText: 'Nome da categoria',
-                hintText: 'Ex: Alimentacao, Salario...',
+                hintText: 'Ex: Alimentação, Salário...',
               ),
               textCapitalization: TextCapitalization.sentences,
               autofocus: true,
             ),
-            const SizedBox(height: 16),
-            const Text('Tipo', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-            const SizedBox(height: 4),
+            const SizedBox(height: AppSpacing.lg),
+            Text('Tipo',
+                style: AppText.secondary
+                    .copyWith(fontWeight: FontWeight.w500)),
+            const SizedBox(height: AppSpacing.xs),
             SegmentedButton<CategoryKind>(
+              style: SegmentedButton.styleFrom(
+                selectedBackgroundColor: AppColors.primarySubtle,
+                selectedForegroundColor: AppColors.primary,
+              ),
               segments: const [
                 ButtonSegment(
                   value: CategoryKind.expense,
@@ -301,14 +309,17 @@ class _CategoryFormDialogState extends State<_CategoryFormDialog> {
                 ),
               ],
               selected: {_kind},
-              onSelectionChanged: (s) => setState(() => _kind = s.first),
+              onSelectionChanged: (s) =>
+                  setState(() => _kind = s.first),
             ),
-            const SizedBox(height: 16),
-            const Text('Cor', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.lg),
+            Text('Cor',
+                style: AppText.secondary
+                    .copyWith(fontWeight: FontWeight.w500)),
+            const SizedBox(height: AppSpacing.sm),
             Wrap(
-              spacing: 8,
-              runSpacing: 8,
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.sm,
               children: _palette.map((c) {
                 final selected = c == _colorValue;
                 return GestureDetector(
@@ -321,12 +332,15 @@ class _CategoryFormDialogState extends State<_CategoryFormDialog> {
                       color: Color(c),
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: selected ? Colors.black87 : Colors.transparent,
+                        color: selected
+                            ? AppColors.textPrimary
+                            : Colors.transparent,
                         width: 2.5,
                       ),
                     ),
                     child: selected
-                        ? const Icon(Icons.check, size: 14, color: Colors.white)
+                        ? const Icon(Icons.check,
+                            size: 14, color: Colors.white)
                         : null,
                   ),
                 );
@@ -341,18 +355,22 @@ class _CategoryFormDialogState extends State<_CategoryFormDialog> {
           child: const Text('Cancelar'),
         ),
         FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.primary,
+            foregroundColor: Colors.white,
+          ),
           onPressed: _saving ? null : _save,
           child: _saving
-              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ))
               : const Text('Salvar'),
         ),
       ],
     );
   }
-}
-
-class _CategoryPreset {
-  const _CategoryPreset(this.name, this.color);
-  final String name;
-  final int color;
 }

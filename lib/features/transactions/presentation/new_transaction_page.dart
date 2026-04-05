@@ -4,6 +4,7 @@ import '../../../core/services/repository_locator.dart';
 import '../../../core/models/money.dart';
 import '../../../core/models/app_mode.dart';
 import '../../../core/services/app_mode_controller.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../cards/domain/card_entity.dart';
 import '../../categories/domain/category_entity.dart';
 import '../domain/payment_method.dart';
@@ -20,18 +21,18 @@ class NewTransactionPage extends StatefulWidget {
 }
 
 class _NewTransactionPageState extends State<NewTransactionPage> {
-  final _formKey = GlobalKey<FormState>();
+  final _formKey               = GlobalKey<FormState>();
   final _descriptionController = TextEditingController();
-  final _amountController = TextEditingController();
+  final _amountController      = TextEditingController();
   final _installmentController = TextEditingController();
-  late DateTime _selectedDate;
-  late TransactionType _selectedType;
-  late PaymentMethod _selectedPaymentMethod;
+  late DateTime     _selectedDate;
+  late TransactionType    _selectedType;
+  late PaymentMethod      _selectedPaymentMethod;
   String? _selectedCategoryId;
   String? _selectedCardId;
-  bool _isProvisioned = false;
+  bool    _isProvisioned    = false;
   DateTime? _provisionedDueDate;
-  bool _isSaving = false;
+  bool    _isSaving         = false;
 
   late final Future<List<dynamic>> _loadFuture;
 
@@ -43,20 +44,20 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
     final initial = widget.initialTransaction;
     if (initial != null) {
       _descriptionController.text = initial.description ?? '';
-      _amountController.text = initial.amount.amount.toStringAsFixed(2);
-      _selectedDate = initial.date;
-      _selectedType = initial.type;
-      _selectedPaymentMethod = initial.paymentMethod;
-      _selectedCategoryId = initial.categoryId;
-      _selectedCardId = initial.cardId;
-      _isProvisioned = initial.isProvisioned;
-      _provisionedDueDate = initial.provisionedDueDate;
+      _amountController.text      = initial.amount.amount.toStringAsFixed(2);
+      _selectedDate               = initial.date;
+      _selectedType               = initial.type;
+      _selectedPaymentMethod      = initial.paymentMethod;
+      _selectedCategoryId         = initial.categoryId;
+      _selectedCardId             = initial.cardId;
+      _isProvisioned              = initial.isProvisioned;
+      _provisionedDueDate         = initial.provisionedDueDate;
       if (initial.installmentCount != null) {
         _installmentController.text = initial.installmentCount.toString();
       }
     } else {
-      _selectedDate = DateTime.now();
-      _selectedType = TransactionType.expense;
+      _selectedDate          = DateTime.now();
+      _selectedType          = TransactionType.expense;
       _selectedPaymentMethod = PaymentMethod.creditCard;
     }
 
@@ -65,7 +66,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
       RepositoryLocator.instance.cards.getAll(),
     ]).then((results) {
       final rawCategories = List<CategoryEntity>.from(results[0] as List);
-      final seen = <String>{};
+      final seen          = <String>{};
       final categories =
           rawCategories.where((c) => seen.add(c.id)).toList(growable: false);
       if (_selectedCategoryId == null && categories.isNotEmpty) {
@@ -89,12 +90,12 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
     DateTime? firstDate,
     DateTime? lastDate,
   }) async {
-    final now = DateTime.now();
+    final now    = DateTime.now();
     final result = await showDatePicker(
       context: context,
       initialDate: initial,
       firstDate: firstDate ?? DateTime(now.year - 1),
-      lastDate: lastDate ?? DateTime(now.year + 3),
+      lastDate:  lastDate  ?? DateTime(now.year + 3),
     );
     if (result != null) onPick(result);
   }
@@ -111,35 +112,34 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
     setState(() => _isSaving = true);
 
     final locator = RepositoryLocator.instance;
-    final amount = double.tryParse(
+    final amount  = double.tryParse(
           _amountController.text.replaceAll(',', '.').trim(),
-        ) ??
-        0;
-    final baseId = widget.initialTransaction?.id ??
+        ) ?? 0;
+    final baseId  = widget.initialTransaction?.id ??
         DateTime.now().microsecondsSinceEpoch.toString();
 
-    final mode = AppModeController.instance.mode;
-    final isUltra = mode == AppMode.ultra;
-    final effectiveCardId = isUltra ? _selectedCardId : null;
-
-    final installments = isUltra
+    final isUltra       = AppModeController.instance.mode == AppMode.ultra;
+    final effectiveCard = isUltra ? _selectedCardId : null;
+    final installments  = isUltra
         ? int.tryParse(_installmentController.text.trim())
         : null;
 
     final tx = TransactionEntity(
-      id: baseId,
-      amount: Money(amount),
-      date: _selectedDate,
-      type: _selectedType,
-      paymentMethod: _selectedPaymentMethod,
-      description: _descriptionController.text.isEmpty
+      id:                  baseId,
+      amount:              Money(amount),
+      date:                _selectedDate,
+      type:                _selectedType,
+      paymentMethod:       _selectedPaymentMethod,
+      description:         _descriptionController.text.isEmpty
           ? null
           : _descriptionController.text,
-      categoryId: _selectedCategoryId!,
-      cardId: effectiveCardId,
-      isProvisioned: isUltra ? _isProvisioned : false,
-      provisionedDueDate: (isUltra && _isProvisioned) ? _provisionedDueDate : null,
-      installmentCount: installments,
+      categoryId:          _selectedCategoryId!,
+      cardId:              effectiveCard,
+      isProvisioned:       isUltra ? _isProvisioned : false,
+      provisionedDueDate:  (isUltra && _isProvisioned)
+          ? _provisionedDueDate
+          : null,
+      installmentCount:    installments,
     );
 
     if (_isEdit) {
@@ -154,16 +154,18 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
   }
 
   String _formatDate(DateTime d) =>
-      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+      '${d.day.toString().padLeft(2, '0')}'
+      '/${d.month.toString().padLeft(2, '0')}'
+      '/${d.year}';
 
   @override
   Widget build(BuildContext context) {
-    final mode = AppModeController.instance.mode;
-    final isUltra = mode == AppMode.ultra;
-    final title = _isEdit ? 'Editar transacao' : 'Nova transacao';
+    final isUltra = AppModeController.instance.mode == AppMode.ultra;
 
     return Scaffold(
-      appBar: AppBar(title: Text(title)),
+      appBar: AppBar(
+        title: Text(_isEdit ? 'Editar transação' : 'Nova transação'),
+      ),
       body: FutureBuilder<List<dynamic>>(
         future: _loadFuture,
         builder: (context, snapshot) {
@@ -175,45 +177,45 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
               : <CardEntity>[];
 
           return Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(AppSpacing.lg),
             child: Form(
               key: _formKey,
               child: ListView(
                 children: [
-                  // ---------- Descricao ----------
+                  // ── Descrição ──────────────────────────────────────────
                   TextFormField(
                     controller: _descriptionController,
                     decoration: const InputDecoration(
-                      labelText: 'Descricao (opcional)',
+                      labelText: 'Descrição (opcional)',
                       hintText: 'Ex: Mercado, Cinema...',
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: AppSpacing.md),
 
-                  // ---------- Valor ----------
+                  // ── Valor ─────────────────────────────────────────────
                   TextFormField(
                     controller: _amountController,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true),
                     decoration: const InputDecoration(
                       labelText: 'Valor',
                       prefixText: 'R\$ ',
                       hintText: '0.00',
                     ),
-                    validator: (value) {
-                      final text = value?.trim() ?? '';
+                    validator: (v) {
+                      final text = v?.trim() ?? '';
                       if (text.isEmpty) return 'Informe um valor';
                       final parsed =
                           double.tryParse(text.replaceAll(',', '.'));
                       if (parsed == null || parsed <= 0) {
-                        return 'Informe um valor valido';
+                        return 'Informe um valor válido';
                       }
                       return null;
                     },
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: AppSpacing.md),
 
-                  // ---------- Tipo + Forma de pagamento ----------
+                  // ── Tipo + Pagamento ───────────────────────────────────
                   Row(
                     children: [
                       Expanded(
@@ -231,14 +233,12 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                               child: Text('Receita'),
                             ),
                           ],
-                          onChanged: (value) {
-                            if (value != null) {
-                              setState(() => _selectedType = value);
-                            }
+                          onChanged: (v) {
+                            if (v != null) setState(() => _selectedType = v);
                           },
                         ),
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: AppSpacing.md),
                       Expanded(
                         child: DropdownButtonFormField<PaymentMethod>(
                           value: _selectedPaymentMethod,
@@ -246,64 +246,54 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                               const InputDecoration(labelText: 'Pagamento'),
                           items: const [
                             DropdownMenuItem(
-                              value: PaymentMethod.creditCard,
-                              child: Text('Credito'),
-                            ),
+                                value: PaymentMethod.creditCard,
+                                child: Text('Crédito')),
                             DropdownMenuItem(
-                              value: PaymentMethod.debitCard,
-                              child: Text('Debito'),
-                            ),
+                                value: PaymentMethod.debitCard,
+                                child: Text('Débito')),
                             DropdownMenuItem(
-                              value: PaymentMethod.boleto,
-                              child: Text('Boleto'),
-                            ),
+                                value: PaymentMethod.boleto,
+                                child: Text('Boleto')),
                             DropdownMenuItem(
-                              value: PaymentMethod.pix,
-                              child: Text('Pix'),
-                            ),
+                                value: PaymentMethod.pix,
+                                child: Text('Pix')),
                             DropdownMenuItem(
-                              value: PaymentMethod.cash,
-                              child: Text('Dinheiro'),
-                            ),
+                                value: PaymentMethod.cash,
+                                child: Text('Dinheiro')),
                             DropdownMenuItem(
-                              value: PaymentMethod.other,
-                              child: Text('Outro'),
-                            ),
+                                value: PaymentMethod.other,
+                                child: Text('Outro')),
                           ],
-                          onChanged: (value) {
-                            if (value != null) {
-                              setState(() => _selectedPaymentMethod = value);
-                            }
+                          onChanged: (v) {
+                            if (v != null)
+                              setState(() => _selectedPaymentMethod = v);
                           },
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: AppSpacing.md),
 
-                  // ---------- Categoria ----------
+                  // ── Categoria ─────────────────────────────────────────
                   DropdownButtonFormField<String>(
                     value: _selectedCategoryId,
                     decoration:
                         const InputDecoration(labelText: 'Categoria'),
                     items: categories
-                        .map(
-                          (c) => DropdownMenuItem<String>(
-                            value: c.id,
-                            child: Text(c.name),
-                          ),
-                        )
+                        .map((c) => DropdownMenuItem<String>(
+                              value: c.id,
+                              child: Text(c.name),
+                            ))
                         .toList(),
-                    onChanged: (value) {
-                      setState(() => _selectedCategoryId = value);
-                    },
+                    onChanged: (v) =>
+                        setState(() => _selectedCategoryId = v),
                   ),
 
-                  // ---------- Data ----------
-                  const SizedBox(height: 4),
+                  // ── Data ──────────────────────────────────────────────
+                  const SizedBox(height: AppSpacing.xs),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('Data da transacao'),
+                    title: const Text('Data da transação'),
                     subtitle: Text(_formatDate(_selectedDate)),
                     trailing: TextButton(
                       onPressed: () => _pickDate(
@@ -314,31 +304,35 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                     ),
                   ),
 
-                  // ---------- Campos exclusivos do Modo Ultra ----------
+                  // ── Modo Ultra ────────────────────────────────────────
                   if (isUltra) ...[
-                    const Divider(height: 24),
-                    const Text(
-                      'Modo Ultra',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.deepPurple,
-                        letterSpacing: 0.5,
+                    const Divider(height: AppSpacing.xxl),
+                    // Badge "Modo Ultra"
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.md,
+                          vertical: AppSpacing.xs),
+                      decoration: BoxDecoration(
+                        color: AppColors.primarySubtle,
+                        borderRadius:
+                            BorderRadius.circular(AppRadius.full),
+                      ),
+                      child: Text(
+                        'Modo Ultra',
+                        style: AppText.badge
+                            .copyWith(color: AppColors.primary),
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: AppSpacing.md),
 
-                    // Cartao
+                    // Cartão
                     DropdownButtonFormField<String>(
                       value: _selectedCardId,
                       decoration: const InputDecoration(
-                        labelText: 'Cartao (opcional)',
-                      ),
+                          labelText: 'Cartão (opcional)'),
                       items: [
                         const DropdownMenuItem<String>(
-                          value: null,
-                          child: Text('Sem cartao'),
-                        ),
+                            value: null, child: Text('Sem cartão')),
                         ...cards.map(
                           (c) => DropdownMenuItem<String>(
                             value: c.id,
@@ -346,53 +340,54 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                           ),
                         ),
                       ],
-                      onChanged: (value) {
-                        setState(() => _selectedCardId = value);
-                      },
+                      onChanged: (v) =>
+                          setState(() => _selectedCardId = v),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: AppSpacing.md),
 
                     // Parcelas
                     TextFormField(
                       controller: _installmentController,
                       keyboardType: TextInputType.number,
                       decoration: const InputDecoration(
-                        labelText: 'Numero de parcelas (opcional)',
-                        hintText: 'Ex: 3 para 3x',
-                        prefixIcon: Icon(Icons.credit_card_outlined),
+                        labelText: 'Parcelas (opcional)',
+                        hintText: 'Ex: 3 para 3×',
+                        prefixIcon:
+                            Icon(Icons.credit_card_outlined),
                       ),
-                      validator: (value) {
-                        if (value == null || value.trim().isEmpty) return null;
-                        final parsed = int.tryParse(value.trim());
-                        if (parsed == null || parsed <= 0) {
-                          return 'Numero de parcelas invalido';
+                      validator: (v) {
+                        if (v == null || v.trim().isEmpty) return null;
+                        final p = int.tryParse(v.trim());
+                        if (p == null || p <= 0) {
+                          return 'Número de parcelas inválido';
                         }
                         return null;
                       },
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: AppSpacing.xs),
 
-                    // Provisionamento
+                    // Toggle provisionado
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       value: _isProvisioned,
-                      onChanged: (v) {
-                        setState(() {
-                          _isProvisioned = v;
-                          if (!v) _provisionedDueDate = null;
-                        });
-                      },
-                      title: const Text('Provisionar (ainda nao pago)'),
+                      onChanged: (v) => setState(() {
+                        _isProvisioned = v;
+                        if (!v) _provisionedDueDate = null;
+                      }),
+                      title: const Text('Provisionar (ainda não pago)'),
                       subtitle: const Text(
-                        'Contabiliza o gasto mas indica que ainda nao saiu da conta.',
+                        'Contabiliza o gasto mas indica que ainda não saiu da conta.',
                       ),
                     ),
 
-                    // Data de vencimento do provisionado
+                    // Data de vencimento
                     if (_isProvisioned)
                       ListTile(
                         contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.event_outlined),
+                        leading: Icon(Icons.event_outlined,
+                            color: _provisionedDueDate == null
+                                ? AppColors.warning
+                                : AppColors.textSecondary),
                         title: const Text('Vencimento'),
                         subtitle: Text(
                           _provisionedDueDate != null
@@ -400,26 +395,27 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                               : 'Toque para definir',
                           style: TextStyle(
                             color: _provisionedDueDate == null
-                                ? Colors.orange[700]
-                                : null,
+                                ? AppColors.warning
+                                : AppColors.textPrimary,
                           ),
                         ),
                         trailing: TextButton(
                           onPressed: () => _pickDate(
                             initial: _provisionedDueDate ??
-                                DateTime.now().add(const Duration(days: 7)),
+                                DateTime.now()
+                                    .add(const Duration(days: 7)),
                             firstDate: DateTime.now(),
                             lastDate: DateTime.now()
                                 .add(const Duration(days: 365 * 2)),
-                            onPick: (d) =>
-                                setState(() => _provisionedDueDate = d),
+                            onPick: (d) => setState(
+                                () => _provisionedDueDate = d),
                           ),
                           child: const Text('Definir'),
                         ),
                       ),
                   ],
 
-                  const SizedBox(height: 24),
+                  const SizedBox(height: AppSpacing.xxl),
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
@@ -429,11 +425,13 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                               height: 20,
                               width: 20,
                               child: CircularProgressIndicator(
-                                  strokeWidth: 2),
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
                             )
                           : Text(_isEdit
-                              ? 'Salvar alteracoes'
-                              : 'Salvar transacao'),
+                              ? 'Salvar alterações'
+                              : 'Salvar transação'),
                     ),
                   ),
                 ],
