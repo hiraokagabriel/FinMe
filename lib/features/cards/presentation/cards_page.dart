@@ -53,9 +53,9 @@ class _CardsPageState extends State<CardsPage> {
   String _cardTypeLabel(CardType type) {
     switch (type) {
       case CardType.credit:
-        return 'Credito';
+        return 'Crédito';
       case CardType.debit:
-        return 'Debito';
+        return 'Débito';
     }
   }
 
@@ -75,8 +75,8 @@ class _CardsPageState extends State<CardsPage> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Excluir cartao'),
-          content: Text('Deseja excluir o cartao "${card.name}"?'),
+          title: const Text('Excluir cartão'),
+          content: Text('Deseja excluir o cartão "${card.name}"?'),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
@@ -100,7 +100,7 @@ class _CardsPageState extends State<CardsPage> {
     final ratio = (used / limit).clamp(0.0, 1.0);
     final percent = (ratio * 100).toStringAsFixed(1);
 
-    Color barColor;
+    final Color barColor;
     if (ratio < 0.5) {
       barColor = Colors.green;
     } else if (ratio < 0.8) {
@@ -154,7 +154,7 @@ class _CardsPageState extends State<CardsPage> {
     final free = (limit - used).clamp(0.0, limit);
     final ratio = (used / limit).clamp(0.0, 1.0);
 
-    Color usedColor;
+    final Color usedColor;
     if (ratio < 0.5) {
       usedColor = Colors.green;
     } else if (ratio < 0.8) {
@@ -163,26 +163,26 @@ class _CardsPageState extends State<CardsPage> {
       usedColor = Colors.red;
     }
 
+    // largura fixa para não espremer o texto ao lado
     return SizedBox(
-      height: 120,
+      width: 100,
+      height: 100,
       child: PieChart(
         PieChartData(
           sectionsSpace: 2,
-          centerSpaceRadius: 36,
+          centerSpaceRadius: 30,
           sections: [
             PieChartSectionData(
               value: used > 0 ? used : 0.001,
               color: usedColor,
-              title: used > 0 ? 'Usado' : '',
-              radius: 20,
-              titleStyle: const TextStyle(fontSize: 9, color: Colors.white),
+              title: '',
+              radius: 18,
             ),
             PieChartSectionData(
               value: free > 0 ? free : 0.001,
               color: Colors.grey[200]!,
-              title: free > 0 ? 'Livre' : '',
-              radius: 20,
-              titleStyle: TextStyle(fontSize: 9, color: Colors.grey[600]),
+              title: '',
+              radius: 18,
             ),
           ],
         ),
@@ -203,12 +203,12 @@ class _CardsPageState extends State<CardsPage> {
 
         return Scaffold(
           appBar: AppBar(
-            title: const Text('Cartoes'),
+            title: const Text('Cartões'),
           ),
           floatingActionButton: FloatingActionButton.extended(
             onPressed: () => _openCardForm(),
             icon: const Icon(Icons.add),
-            label: const Text('Novo cartao'),
+            label: const Text('Novo cartão'),
           ),
           body: _isLoading
               ? const Center(child: CircularProgressIndicator())
@@ -218,7 +218,7 @@ class _CardsPageState extends State<CardsPage> {
                       Padding(
                         padding: const EdgeInsets.all(16),
                         child: Text(
-                          'Detalhes de cartoes sao mais uteis no modo ultra.',
+                          'Detalhes de cartões são mais úteis no Modo Ultra.',
                           style: Theme.of(context)
                               .textTheme
                               .bodySmall
@@ -226,88 +226,117 @@ class _CardsPageState extends State<CardsPage> {
                         ),
                       ),
                     Expanded(
-                      child: ListView.separated(
-                        padding: const EdgeInsets.only(bottom: 80),
-                        itemCount: _cards.length,
-                        separatorBuilder: (_, __) =>
-                            const Divider(height: 1),
-                        itemBuilder: (context, index) {
-                          final card = _cards[index];
+                      child: _cards.isEmpty
+                          ? const Center(
+                              child: Text('Nenhum cartão cadastrado.'))
+                          : ListView.separated(
+                              padding:
+                                  const EdgeInsets.only(bottom: 80),
+                              itemCount: _cards.length,
+                              separatorBuilder: (_, __) =>
+                                  const Divider(height: 1),
+                              itemBuilder: (context, index) {
+                                final card = _cards[index];
 
-                          return Dismissible(
-                            key: ValueKey(card.id),
-                            direction: DismissDirection.endToStart,
-                            confirmDismiss: (_) => _confirmDelete(card),
-                            onDismissed: (_) async {
-                              await _cardsRepository.remove(card.id);
-                              await _loadData();
-                              if (!mounted) return;
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content:
-                                      Text('Cartao excluido com sucesso'),
-                                ),
-                              );
-                            },
-                            background: Container(
-                              color: Colors.red,
-                              alignment: Alignment.centerRight,
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 16),
-                              child: const Icon(
-                                Icons.delete,
-                                color: Colors.white,
-                              ),
-                            ),
-                            child: InkWell(
-                              onTap: () => _openCardForm(initial: card),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 16, vertical: 12),
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
+                                return Dismissible(
+                                  key: ValueKey(card.id),
+                                  direction:
+                                      DismissDirection.endToStart,
+                                  confirmDismiss: (_) =>
+                                      _confirmDelete(card),
+                                  onDismissed: (_) async {
+                                    await _cardsRepository
+                                        .remove(card.id);
+                                    await _loadData();
+                                    if (!mounted) return;
+                                    ScaffoldMessenger.of(context)
+                                        .showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                            'Cartão excluído com sucesso'),
+                                      ),
+                                    );
+                                  },
+                                  // ✅ fundo direito (deslizar para esq → apagar)
+                                  background: const SizedBox.shrink(),
+                                  secondaryBackground: Container(
+                                    color: Colors.red,
+                                    alignment: Alignment.centerRight,
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 16),
+                                    child: const Icon(
+                                      Icons.delete,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  child: InkWell(
+                                    onTap: () =>
+                                        _openCardForm(initial: card),
+                                    child: Padding(
+                                      padding:
+                                          const EdgeInsets.symmetric(
+                                              horizontal: 16,
+                                              vertical: 12),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          // ── linha do nome + tipo ──
+                                          Row(
                                             children: [
-                                              Text(
-                                                card.name,
-                                                style: const TextStyle(
-                                                  fontWeight:
-                                                      FontWeight.bold,
-                                                  fontSize: 15,
-                                                ),
-                                              ),
-                                              const SizedBox(height: 2),
-                                              Text(
-                                                '${card.bankName} • ${_cardTypeLabel(card.type)} • Vencimento dia ${card.dueDay}',
-                                                style: TextStyle(
-                                                  fontSize: 12,
-                                                  color: Colors.grey[600],
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment
+                                                          .start,
+                                                  children: [
+                                                    Text(
+                                                      card.name,
+                                                      style:
+                                                          const TextStyle(
+                                                        fontWeight:
+                                                            FontWeight
+                                                                .bold,
+                                                        fontSize: 15,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(
+                                                        height: 2),
+                                                    Text(
+                                                      '${card.bankName} • ${_cardTypeLabel(card.type)} • Vencimento dia ${card.dueDay}',
+                                                      style: TextStyle(
+                                                        fontSize: 12,
+                                                        color: Colors
+                                                            .grey[600],
+                                                      ),
+                                                    ),
+                                                  ],
                                                 ),
                                               ),
                                             ],
                                           ),
-                                        ),
-                                        if (isUltra &&
-                                            card.limit != null)
-                                          _buildDonutChart(card),
-                                      ],
+                                          // ── gráfico donuts (Ultra) ABAIXO do nome ──
+                                          if (isUltra &&
+                                              card.limit != null) ...[
+                                            const SizedBox(height: 8),
+                                            Row(
+                                              children: [
+                                                _buildDonutChart(card),
+                                                const SizedBox(width: 12),
+                                                Expanded(
+                                                  child: _buildLimitBar(
+                                                      card),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ],
+                                      ),
                                     ),
-                                    if (isUltra && card.limit != null)
-                                      _buildLimitBar(card),
-                                  ],
-                                ),
-                              ),
+                                  ),
+                                );
+                              },
                             ),
-                          );
-                        },
-                      ),
                     ),
                   ],
                 ),
