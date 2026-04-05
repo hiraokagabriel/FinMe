@@ -10,17 +10,26 @@ class OnboardingPage extends StatefulWidget {
   const OnboardingPage({super.key});
 
   @override
-  State<OnboardingPage> createState() => _OnboardingPageState();
+  State<OnboardingPage> createState() {
+    return _OnboardingPageState();
+  }
 }
 
 class _OnboardingPageState extends State<OnboardingPage> {
-  int _step = 0;
+  final PageController _pageCtrl = PageController();
   AppMode? _selectedMode;
 
+  @override
+  void dispose() {
+    _pageCtrl.dispose();
+    super.dispose();
+  }
+
   void _goToModeStep() {
-    setState(() {
-      _step = 1;
-    });
+    _pageCtrl.nextPage(
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeInOut,
+    );
   }
 
   void _selectMode(AppMode mode) {
@@ -34,7 +43,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
     await AppModeController.instance.setMode(_selectedMode!);
     await HiveInit.markOnboardingDone();
     if (mounted) {
-      Navigator.pushReplacementNamed(context, AppRouter.dashboard);
+      await Navigator.pushReplacementNamed(context, AppRouter.dashboard);
     }
   }
 
@@ -44,41 +53,39 @@ class _OnboardingPageState extends State<OnboardingPage> {
 
     return Scaffold(
       backgroundColor: cs.surface,
-      body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 400),
-        switchInCurve: Curves.easeIn,
-        switchOutCurve: Curves.easeOut,
-        transitionBuilder: (child, animation) {
-          return FadeTransition(opacity: animation, child: child);
-        },
-        child: _step == 0
-            ? _SplashStep(key: const ValueKey(0), onNext: _goToModeStep)
-            : _ModeStep(
-                key: const ValueKey(1),
-                selectedMode: _selectedMode,
-                onSelect: _selectMode,
-                onFinish: _finish,
-              ),
+      body: PageView(
+        controller: _pageCtrl,
+        physics: const NeverScrollableScrollPhysics(),
+        children: <Widget>[
+          _SplashStep(onNext: _goToModeStep),
+          _ModeStep(
+            selectedMode: _selectedMode,
+            onSelect: _selectMode,
+            onFinish: _finish,
+          ),
+        ],
       ),
     );
   }
 }
 
-// ───────────────────────────── SPLASH ─────────────────────────────
+// ──────────────────────── SPLASH ────────────────────────
 
 class _SplashStep extends StatelessWidget {
   final VoidCallback onNext;
+
   const _SplashStep({super.key, required this.onNext});
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 48),
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          children: [
+          children: <Widget>[
             Container(
               width: 72,
               height: 72,
@@ -134,7 +141,7 @@ class _SplashStep extends StatelessWidget {
   }
 }
 
-// ───────────────────────────── SELEÇÃO DE MODO ────────────────────────
+// ──────────────────────── SELEÇÃO DE MODO ────────────────────────
 
 class _ModeStep extends StatelessWidget {
   final AppMode? selectedMode;
@@ -156,7 +163,7 @@ class _ModeStep extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+          children: <Widget>[
             Text(
               'Como você quer usar o FinMe?',
               style: AppText.screenTitle.copyWith(
@@ -172,24 +179,20 @@ class _ModeStep extends StatelessWidget {
             const SizedBox(height: AppSpacing.xxl),
             _ModeCard(
               title: 'Modo Simples',
-              description:
-                  'Visão enxuta. Ideal para quem quer controlar gastos do dia a dia sem complicação.',
+              description: 'Visão enxuta. Ideal para quem quer controlar gastos do dia a dia sem complicação.',
               icon: Icons.wb_sunny_outlined,
               selected: selectedMode == AppMode.simple,
-              onTap: () {
-                onSelect(AppMode.simple);
-              },
+              onTap: onSelect,
+              mode: AppMode.simple,
             ),
             const SizedBox(height: AppSpacing.md),
             _ModeCard(
               title: 'Modo Ultra',
-              description:
-                  'Visão completa com gráficos, múltiplos cartões, provisionamentos e análises detalhadas.',
+              description: 'Visão completa com gráficos, múltiplos cartões, provisionamentos e análises detalhadas.',
               icon: Icons.bolt_outlined,
               selected: selectedMode == AppMode.ultra,
-              onTap: () {
-                onSelect(AppMode.ultra);
-              },
+              onTap: onSelect,
+              mode: AppMode.ultra,
             ),
             const SizedBox(height: AppSpacing.h),
             SizedBox(
@@ -212,21 +215,24 @@ class _ModeStep extends StatelessWidget {
   }
 }
 
-// ─────────────────────────── CARD DE MODO ────────────────────────────
+// ──────────────────────── CARD DE MODO ────────────────────────
 
 class _ModeCard extends StatelessWidget {
   final String title;
   final String description;
   final IconData icon;
   final bool selected;
-  final VoidCallback onTap;
+  final ValueChanged<AppMode> onTap;
+  final AppMode mode;
 
   const _ModeCard({
+    super.key,
     required this.title,
     required this.description,
     required this.icon,
     required this.selected,
     required this.onTap,
+    required this.mode,
   });
 
   @override
@@ -234,7 +240,9 @@ class _ModeCard extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
 
     return GestureDetector(
-      onTap: onTap,
+      onTap: () {
+        onTap(mode);
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         curve: Curves.easeInOut,
@@ -245,15 +253,13 @@ class _ModeCard extends StatelessWidget {
               : cs.surfaceContainerHighest.withValues(alpha: 0.4),
           borderRadius: BorderRadius.circular(AppRadius.card),
           border: Border.all(
-            color: selected
-                ? cs.primary
-                : cs.outline.withValues(alpha: 0.3),
+            color: selected ? cs.primary : cs.outline.withValues(alpha: 0.3),
             width: selected ? 2 : 1,
           ),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+          children: <Widget>[
             Icon(
               icon,
               size: 22,
@@ -263,7 +269,7 @@ class _ModeCard extends StatelessWidget {
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+                children: <Widget>[
                   Text(
                     title,
                     style: TextStyle(
