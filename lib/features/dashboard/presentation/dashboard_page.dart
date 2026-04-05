@@ -23,6 +23,13 @@ class DashboardPage extends StatelessWidget {
               },
               child: const Text('Ver transações de exemplo'),
             ),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pushNamed(AppRouter.cards);
+              },
+              child: const Text('Ver cartões de exemplo'),
+            ),
           ],
         ),
       ),
