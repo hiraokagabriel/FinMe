@@ -22,11 +22,9 @@ abstract final class AppColors {
   static const Color primaryDark        = Color(0xFF81D4FA);
   static const Color primarySubtleDark  = Color(0xFF1A2D40);
 
-  // ── Conteúdo ─────────────────────────────────────────────────
-  static const Color textPrimary     = Color(0xFF202124);
-  static const Color textSecondary   = Color(0xFF5F6368);
-
-  // ── Conteúdo — Modo Escuro ───────────────────────────────────
+  // ── Conteúdo (referência; widgets devem herdar cor do tema) ─────────
+  static const Color textPrimary        = Color(0xFF202124);
+  static const Color textSecondary      = Color(0xFF5F6368);
   static const Color textPrimaryDark    = Color(0xFFE8EAED);
   static const Color textSecondaryDark  = Color(0xFF9AA0A6);
 
@@ -37,15 +35,13 @@ abstract final class AppColors {
   // ── Status ───────────────────────────────────────────────────
   static const Color warning         = Color(0xFFFF9800);
   static const Color danger          = Color(0xFFE53935);
-
-  // ── Status — Modo Escuro ─────────────────────────────────────
   static const Color warningDark     = Color(0xFFFFB74D);
   static const Color dangerDark      = Color(0xFFEF5350);
 
   // ── Utilitários internos ─────────────────────────────────────
   static const Color _divider        = Color(0x1F5F6368);
   static const Color _dividerDark    = Color(0x289AA0A6);
-  static Color get divider => _divider;
+  static Color get divider     => _divider;
   static Color get dividerDark => _dividerDark;
 
   // Barra de limite
@@ -74,42 +70,39 @@ abstract final class AppSpacing {
   static const double h   = 32;
 }
 
-/// Estilos de texto reutilizáveis
+/// Estilos de texto reutilizáveis.
+/// SEM `color` fixo — herdam a cor do DefaultTextStyle/ThemeData,
+/// garantindo contraste correto em tema claro E escuro.
 abstract final class AppText {
   static const TextStyle screenTitle = TextStyle(
     fontSize: 18,
     fontWeight: FontWeight.w600,
-    color: AppColors.textPrimary,
   );
 
   static const TextStyle sectionLabel = TextStyle(
     fontSize: 14,
     fontWeight: FontWeight.w600,
-    color: AppColors.textPrimary,
   );
 
   static const TextStyle body = TextStyle(
     fontSize: 14,
     fontWeight: FontWeight.w400,
-    color: AppColors.textPrimary,
   );
 
   static const TextStyle secondary = TextStyle(
     fontSize: 12,
     fontWeight: FontWeight.w400,
-    color: AppColors.textSecondary,
+    // Cor herdada do tema (onSurfaceVariant via bodySmall do textTheme)
   );
 
   static const TextStyle badge = TextStyle(
     fontSize: 11,
     fontWeight: FontWeight.w500,
-    color: AppColors.textPrimary,
   );
 
   static const TextStyle amount = TextStyle(
     fontSize: 15,
     fontWeight: FontWeight.w600,
-    color: AppColors.textPrimary,
   );
 }
 
@@ -120,38 +113,39 @@ ThemeData finMeLightTheme() => _buildTheme(dark: false);
 ThemeData finMeDarkTheme() => _buildTheme(dark: true);
 
 ThemeData _buildTheme({required bool dark}) {
-  final bg        = dark ? AppColors.backgroundDark  : AppColors.background;
-  final surface   = dark ? AppColors.surfaceDark     : AppColors.surface;
-  final sidebar   = dark ? AppColors.sidebarDark     : AppColors.sidebar;
-  final primary   = dark ? AppColors.primaryDark     : AppColors.primary;
-  final subtle    = dark ? AppColors.primarySubtleDark : AppColors.primarySubtle;
-  final txtPri    = dark ? AppColors.textPrimaryDark : AppColors.textPrimary;
-  final txtSec    = dark ? AppColors.textSecondaryDark : AppColors.textSecondary;
-  final divider   = dark ? AppColors.dividerDark     : AppColors.divider;
-  final danger    = dark ? AppColors.dangerDark      : AppColors.danger;
-  final warning   = dark ? AppColors.warningDark     : AppColors.warning;
-  final limitTrack= dark ? AppColors.limitTrackDark  : AppColors.limitTrack;
+  final bg         = dark ? AppColors.backgroundDark  : AppColors.background;
+  final surface    = dark ? AppColors.surfaceDark     : AppColors.surface;
+  final sidebar    = dark ? AppColors.sidebarDark     : AppColors.sidebar;
+  final primary    = dark ? AppColors.primaryDark     : AppColors.primary;
+  final subtle     = dark ? AppColors.primarySubtleDark : AppColors.primarySubtle;
+  final txtPri     = dark ? AppColors.textPrimaryDark   : AppColors.textPrimary;
+  final txtSec     = dark ? AppColors.textSecondaryDark : AppColors.textSecondary;
+  final divider    = dark ? AppColors.dividerDark     : AppColors.divider;
+  final danger     = dark ? AppColors.dangerDark      : AppColors.danger;
+  final limitTrack = dark ? AppColors.limitTrackDark  : AppColors.limitTrack;
 
   final scheme = dark
       ? ColorScheme.dark(
-          primary:    primary,
-          onPrimary:  AppColors.backgroundDark,
-          secondary:  subtle,
-          onSecondary: txtPri,
-          surface:    surface,
-          onSurface:  txtPri,
-          error:      danger,
-          onError:    AppColors.backgroundDark,
+          primary:          primary,
+          onPrimary:        AppColors.backgroundDark,
+          secondary:        subtle,
+          onSecondary:      txtPri,
+          surface:          surface,
+          onSurface:        txtPri,         // texto principal
+          onSurfaceVariant: txtSec,         // texto secundário
+          error:            danger,
+          onError:          AppColors.backgroundDark,
         )
       : ColorScheme.light(
-          primary:    primary,
-          onPrimary:  Colors.white,
-          secondary:  subtle,
-          onSecondary: txtPri,
-          surface:    surface,
-          onSurface:  txtPri,
-          error:      danger,
-          onError:    Colors.white,
+          primary:          primary,
+          onPrimary:        Colors.white,
+          secondary:        subtle,
+          onSecondary:      txtPri,
+          surface:          surface,
+          onSurface:        txtPri,
+          onSurfaceVariant: txtSec,
+          error:            danger,
+          onError:          Colors.white,
         );
 
   return ThemeData(
@@ -165,7 +159,8 @@ ThemeData _buildTheme({required bool dark}) {
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       shadowColor: Colors.transparent,
-      titleTextStyle: AppText.screenTitle.copyWith(color: txtPri),
+      titleTextStyle: TextStyle(
+          fontSize: 18, fontWeight: FontWeight.w600, color: txtPri),
       iconTheme: IconThemeData(color: txtPri),
     ),
 
@@ -270,17 +265,19 @@ ThemeData _buildTheme({required bool dark}) {
           horizontal: AppSpacing.lg, vertical: AppSpacing.md),
     ),
 
+    // Todas as cores de texto passam pelos tokens dinâmicos por tema
     textTheme: TextTheme(
-      titleLarge:  AppText.screenTitle.copyWith(color: txtPri),
-      titleMedium: AppText.sectionLabel.copyWith(color: txtPri),
-      bodyLarge:   AppText.body.copyWith(color: txtPri),
-      bodyMedium:  AppText.body.copyWith(color: txtPri),
-      bodySmall:   AppText.secondary.copyWith(color: txtSec),
-      labelSmall:  AppText.badge.copyWith(color: txtPri),
+      titleLarge:  TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: txtPri),
+      titleMedium: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: txtPri),
+      bodyLarge:   TextStyle(fontSize: 14, fontWeight: FontWeight.w400, color: txtPri),
+      bodyMedium:  TextStyle(fontSize: 14, fontWeight: FontWeight.w400, color: txtPri),
+      bodySmall:   TextStyle(fontSize: 12, fontWeight: FontWeight.w400, color: txtSec),
+      labelSmall:  TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: txtPri),
     ),
 
     snackBarTheme: SnackBarThemeData(
-      backgroundColor: dark ? AppColors.surfaceDark : AppColors.textPrimary,
+      backgroundColor:
+          dark ? AppColors.surfaceDark : AppColors.textPrimary,
       contentTextStyle: TextStyle(
           color: dark ? txtPri : Colors.white, fontSize: 14),
       shape: RoundedRectangleBorder(
@@ -293,8 +290,10 @@ ThemeData _buildTheme({required bool dark}) {
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadius.card)),
-      titleTextStyle: AppText.screenTitle.copyWith(color: txtPri),
-      contentTextStyle: AppText.body.copyWith(color: txtPri),
+      titleTextStyle: TextStyle(
+          fontSize: 18, fontWeight: FontWeight.w600, color: txtPri),
+      contentTextStyle: TextStyle(
+          fontSize: 14, fontWeight: FontWeight.w400, color: txtPri),
     ),
 
     switchTheme: SwitchThemeData(
@@ -321,8 +320,10 @@ ThemeData _buildTheme({required bool dark}) {
     listTileTheme: ListTileThemeData(
       tileColor: surface,
       iconColor: txtSec,
-      titleTextStyle: AppText.body.copyWith(color: txtPri),
-      subtitleTextStyle: AppText.secondary.copyWith(color: txtSec),
+      titleTextStyle: TextStyle(
+          fontSize: 14, fontWeight: FontWeight.w400, color: txtPri),
+      subtitleTextStyle: TextStyle(
+          fontSize: 12, fontWeight: FontWeight.w400, color: txtSec),
       contentPadding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.lg, vertical: AppSpacing.xs),
     ),
@@ -340,7 +341,8 @@ ThemeData _buildTheme({required bool dark}) {
         borderRadius: BorderRadius.circular(AppRadius.card),
         side: BorderSide(color: divider),
       ),
-      textStyle: AppText.body.copyWith(color: txtPri),
+      textStyle: TextStyle(
+          fontSize: 14, fontWeight: FontWeight.w400, color: txtPri),
     ),
   );
 }
