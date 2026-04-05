@@ -7,6 +7,7 @@ import '../../categories/domain/category_entity.dart';
 import '../../../core/models/app_mode.dart';
 import '../../../core/services/app_mode_controller.dart';
 import '../../../core/services/repository_locator.dart';
+import 'new_transaction_page.dart';
 
 class TransactionsPage extends StatefulWidget {
   const TransactionsPage({super.key});
@@ -56,6 +57,15 @@ class _TransactionsPageState extends State<TransactionsPage> {
     });
   }
 
+  Future<void> _openNewTransactionForm() async {
+    final created = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (context) => const NewTransactionPage()),
+    );
+    if (created == true) {
+      await _loadData();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final modeController = AppModeController.instance;
@@ -68,6 +78,11 @@ class _TransactionsPageState extends State<TransactionsPage> {
         return Scaffold(
           appBar: AppBar(
             title: const Text('Transacoes'),
+          ),
+          floatingActionButton: FloatingActionButton.extended(
+            onPressed: _openNewTransactionForm,
+            icon: const Icon(Icons.add),
+            label: const Text('Nova transacao'),
           ),
           body: _isLoading
               ? const Center(child: CircularProgressIndicator())
