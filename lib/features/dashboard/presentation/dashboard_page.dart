@@ -416,7 +416,7 @@ class _RecentTransactionRow extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: amountColor.withOpacity(0.12),
                   borderRadius:
-                      BorderRadius.circular(AppRadius.sm),
+                      BorderRadius.circular(AppRadius.chip),
                 ),
                 child: Icon(
                   isIncome
