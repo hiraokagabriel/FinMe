@@ -37,6 +37,8 @@ lib/
 │   ├── theme/
 │   │   └── app_theme.dart
 │   └── utils/
+docs/
+│   └── M3_REPORT.md                   # ✅ #50 — Relatório de progresso do M3
 └── features/
     ├── transactions/
     │   ├── domain/
@@ -167,8 +169,10 @@ lib/
 | # | Feature | Arquivo(s) alvo | Status |
 |---|---------|-----------------|--------|
 | M3-C | **Splash Screen / Onboarding** | `lib/features/onboarding/` + ajuste `main.dart` | 🔲 Pendente |
-| M3-D | **Persistência definitiva de preferências avançadas** | `lib/core/services/` + Hive box `preferences` | 🔲 Pendente |
+| M3-D | **Persistência definitiva de preferências avançadas** | `lib/core/services/preferences_service.dart` + Hive box `preferences` | 🔲 Pendente |
 | M3-E | **Orçamento Mensal por Categoria** | `lib/features/budget/` | 🔲 Pendente |
+
+> Ver detalhes completos em `docs/M3_REPORT.md`
 
 ---
 
@@ -209,7 +213,7 @@ lib/
 | 1 | CategoryModel |
 | 2 | CardModel |
 | 3 | AccountModel ✅ |
-| 4 | *(reservado para BudgetModel)* |
+| 4 | *(reservado para BudgetModel — M3-E)* |
 | 5 | GoalModel ✅ |
 
 ### Rotas
@@ -441,15 +445,11 @@ M3-A completo — AccountEntity, AccountModel, HiveAccountsRepository, AccountsP
 
 ### #49 — feat(transfer): transferência entre contas ✅ (M3-B)
 **SHA:** `c871a23a` | **Tipo:** feat (M3)  
-**M3-B — Transferência entre Contas.** Feature completa implementada:
-- `TransactionType.transfer` adicionado ao enum
-- `TransactionEntity.toAccountId` + `notes` adicionados
-- `TransactionModel` atualizado: índices 15 (`toAccountId`) e 16 (`notes`) retrocompatíveis
-- `TransferPage`: seleção de conta origem/destino, valor, data, descrição opcional
-- Lança débito na origem e crédito no destino como par de transações
-- Empty state se < 2 contas cadastradas
-- Rota `/transfer` registrada no router
-- CONTEXT.md atualizado
+M3-B completo — TransactionType.transfer, TransactionEntity.toAccountId + notes, TransactionModel índices 15/16, TransferPage, rota /transfer.
+
+### #50 — docs(m3): adiciona M3_REPORT.md e atualiza CONTEXT.md
+**SHA:** *(este commit)* | **Tipo:** docs  
+Criado `docs/M3_REPORT.md` com rastreamento detalhado dos itens M3-C, M3-D e M3-E pendentes (critérios, arquivos alvo, ordem de execução sugerida). CONTEXT.md atualizado com referência ao relatório e seção 4 ajustada.
 
 ---
 
