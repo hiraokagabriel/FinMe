@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../domain/account_entity.dart';
 import '../data/accounts_repository.dart';
 import '../../../core/services/repository_locator.dart';
+import '../../transactions/domain/transaction_entity.dart';
 
 class AccountsPage extends StatefulWidget {
   const AccountsPage({super.key});
@@ -62,7 +63,8 @@ class _AccountsPageState extends State<AccountsPage> {
   }
 
   Future<double> _computeBalance(AccountEntity account) async {
-    final txs = await RepositoryLocator.instance.transactions.getAll();
+    final List<TransactionEntity> txs =
+        await RepositoryLocator.instance.transactions.getAll();
     double balance = account.initialBalance;
     for (final tx in txs) {
       if (tx.accountId != account.id) continue;

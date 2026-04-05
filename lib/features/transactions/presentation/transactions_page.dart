@@ -421,8 +421,8 @@ class _TransactionsPageState extends State<TransactionsPage> {
     final Map<String, double> byCategory = {};
     for (final tx in _filtered) {
       if (tx.type == TransactionType.expense) {
-        byCategory[tx.categoryId] =
-            (byCategory[tx.categoryId] ?? 0) + tx.amount.amount;
+        final catId = tx.categoryId ?? '';
+        byCategory[catId] = (byCategory[catId] ?? 0) + tx.amount.amount;
       }
     }
     final entries = byCategory.entries.toList()
