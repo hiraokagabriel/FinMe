@@ -85,6 +85,13 @@ class _DashboardPageState extends State<DashboardPage> {
     return total;
   }
 
+  /// Retorna as últimas [limit] transações não-provisionadas, mais recentes primeiro.
+  List<TransactionEntity> _recentTransactions({int limit = 5}) {
+    final filtered = _transactions.where((t) => !t.isProvisioned).toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
+    return filtered.take(limit).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -117,6 +124,8 @@ class _DashboardPageState extends State<DashboardPage> {
                       _buildSummaryCards(isUltra),
                       const SizedBox(height: AppSpacing.lg),
                       _buildLineChartCard(),
+                      const SizedBox(height: AppSpacing.lg),
+                      _buildRecentTransactions(context),
                       const SizedBox(height: AppSpacing.lg),
                       _buildQuickActions(context, isUltra),
                       const SizedBox(height: AppSpacing.lg),
@@ -155,7 +164,10 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget _buildSummaryCards(bool isUltra) {
     final (income, expense) = _currentMonthTotals;
     final balance = income - expense;
+    final provisioned = _totalProvisioned;
 
+    // "A vencer" aparece em ambos os modos — no Ultra fica após o Saldo,
+    // no Simples fica no fim da linha para não sobrecarregar visualmente.
     final cards = [
       _SummaryCardData(
         label: 'Receitas',
@@ -178,29 +190,23 @@ class _DashboardPageState extends State<DashboardPage> {
         color: balance >= 0 ? AppColors.primary : AppColors.danger,
         prefix: 'R\$',
       ),
+      _SummaryCardData(
+        label: 'A vencer',
+        value: provisioned,
+        icon: Icons.schedule_outlined,
+        color: AppColors.warning,
+        prefix: 'R\$',
+      ),
     ];
 
-    final all = isUltra
-        ? [
-            ...cards,
-            _SummaryCardData(
-              label: 'A vencer',
-              value: _totalProvisioned,
-              icon: Icons.schedule_outlined,
-              color: AppColors.warning,
-              prefix: 'R\$',
-            ),
-          ]
-        : cards;
-
     return Row(
-      children: all
+      children: cards
           .asMap()
           .entries
           .map((e) => Expanded(
                 child: Padding(
                   padding: EdgeInsets.only(
-                      right: e.key < all.length - 1
+                      right: e.key < cards.length - 1
                           ? AppSpacing.sm
                           : 0),
                   child: _SummaryCard(data: e.value),
@@ -260,6 +266,71 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  /// Seção de últimas transações — 5 mais recentes com link para ver todas.
+  Widget _buildRecentTransactions(BuildContext context) {
+    final recent = _recentTransactions(limit: 5);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text('Últimas transações', style: AppText.sectionLabel),
+                const Spacer(),
+                TextButton(
+                  onPressed: () => Navigator.of(context)
+                      .pushNamed(AppRouter.transactions),
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(
+                    'Ver todas',
+                    style: AppText.secondary.copyWith(
+                      color: AppColors.primary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.md),
+            if (recent.isEmpty)
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(vertical: AppSpacing.lg),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.receipt_long_outlined,
+                          size: 32, color: AppColors.textSecondary),
+                      const SizedBox(height: AppSpacing.sm),
+                      Text('Nenhuma transação registrada',
+                          style: AppText.secondary),
+                    ],
+                  ),
+                ),
+              )
+            else
+              ...recent.asMap().entries.map((e) {
+                final tx = e.value;
+                final isLast = e.key == recent.length - 1;
+                return _RecentTransactionRow(
+                  transaction: tx,
+                  showDivider: !isLast,
+                );
+              }),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildQuickActions(BuildContext context, bool isUltra) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -297,6 +368,112 @@ class _DashboardPageState extends State<DashboardPage> {
               ),
           ],
         ),
+      ],
+    );
+  }
+}
+
+// ── Linha de transação recente ─────────────────────────────────────────────
+
+class _RecentTransactionRow extends StatelessWidget {
+  const _RecentTransactionRow({
+    required this.transaction,
+    required this.showDivider,
+  });
+
+  final TransactionEntity transaction;
+  final bool showDivider;
+
+  static const _monthAbbr = [
+    '', 'jan', 'fev', 'mar', 'abr', 'mai', 'jun',
+    'jul', 'ago', 'set', 'out', 'nov', 'dez',
+  ];
+
+  String get _formattedDate {
+    final d = transaction.date;
+    return '${d.day.toString().padLeft(2, '0')} ${_monthAbbr[d.month]}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isIncome = transaction.type == TransactionType.income;
+    final amountColor =
+        isIncome ? AppColors.limitLow : AppColors.danger;
+    final amountPrefix = isIncome ? '+ R\$' : '- R\$';
+
+    return Column(
+      children: [
+        Padding(
+          padding:
+              const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+          child: Row(
+            children: [
+              // Ícone de tipo
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: amountColor.withOpacity(0.12),
+                  borderRadius:
+                      BorderRadius.circular(AppRadius.sm),
+                ),
+                child: Icon(
+                  isIncome
+                      ? Icons.arrow_upward_rounded
+                      : Icons.arrow_downward_rounded,
+                  size: 14,
+                  color: amountColor,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              // Descrição + categoria
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      transaction.description,
+                      style: AppText.body,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (transaction.category != null)
+                      Text(
+                        transaction.category!.name,
+                        style: AppText.secondary,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              // Data + valor
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '$amountPrefix ${transaction.amount.amount.toStringAsFixed(2)}',
+                    style: AppText.amount.copyWith(
+                      color: amountColor,
+                      fontSize: 13,
+                    ),
+                  ),
+                  Text(
+                    _formattedDate,
+                    style: AppText.secondary,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        if (showDivider)
+          Divider(
+            height: 1,
+            thickness: 1,
+            color: AppColors.divider,
+          ),
       ],
     );
   }
