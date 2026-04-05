@@ -20,9 +20,11 @@ class TransactionModel {
   final bool isProvisioned;
   final int? installmentCount;
   final DateTime? provisionedDueDate;
-  // índices 13 e 14: recorrência — retrocompatíveis com registros antigos
   final int recurrenceRuleIndex;
   final String? recurrenceSourceId;
+  // índices 15 e 16: adicionados em M3-B — retrocompatíveis
+  final String? toAccountId;
+  final String? notes;
 
   TransactionModel({
     required this.id,
@@ -40,6 +42,8 @@ class TransactionModel {
     this.provisionedDueDate,
     this.recurrenceRuleIndex = 0,
     this.recurrenceSourceId,
+    this.toAccountId,
+    this.notes,
   });
 
   TransactionEntity toEntity() {
@@ -47,8 +51,12 @@ class TransactionModel {
       id: id,
       amount: Money(amount, currency: currency),
       date: date,
-      type: TransactionType.values[typeIndex],
-      paymentMethod: PaymentMethod.values[paymentMethodIndex],
+      type: typeIndex < TransactionType.values.length
+          ? TransactionType.values[typeIndex]
+          : TransactionType.expense,
+      paymentMethod: paymentMethodIndex < PaymentMethod.values.length
+          ? PaymentMethod.values[paymentMethodIndex]
+          : PaymentMethod.other,
       description: description,
       categoryId: categoryId,
       cardId: cardId,
@@ -60,6 +68,8 @@ class TransactionModel {
           ? RecurrenceRule.values[recurrenceRuleIndex]
           : RecurrenceRule.none,
       recurrenceSourceId: recurrenceSourceId,
+      toAccountId: toAccountId,
+      notes: notes,
     );
   }
 
@@ -72,7 +82,7 @@ class TransactionModel {
       typeIndex: entity.type.index,
       paymentMethodIndex: entity.paymentMethod.index,
       description: entity.description,
-      categoryId: entity.categoryId,
+      categoryId: entity.categoryId ?? '',
       cardId: entity.cardId,
       isBoleto: entity.isBoleto,
       isProvisioned: entity.isProvisioned,
@@ -80,6 +90,8 @@ class TransactionModel {
       provisionedDueDate: entity.provisionedDueDate,
       recurrenceRuleIndex: entity.recurrenceRule.index,
       recurrenceSourceId: entity.recurrenceSourceId,
+      toAccountId: entity.toAccountId,
+      notes: entity.notes,
     );
   }
 }
@@ -102,22 +114,23 @@ class TransactionModelAdapter extends TypeAdapter<TransactionModel> {
       typeIndex: fields[4] as int,
       paymentMethodIndex: fields[5] as int,
       description: fields[6] as String?,
-      categoryId: fields[7] as String,
+      categoryId: (fields[7] as String?) ?? '',
       cardId: fields[8] as String?,
       isBoleto: fields[9] as bool,
       isProvisioned: fields[10] as bool,
       installmentCount: fields[11] as int?,
       provisionedDueDate: fields[12] as DateTime?,
-      // índices 13 e 14: opcionais — registros antigos não terão esses campos
       recurrenceRuleIndex: (fields[13] as int?) ?? 0,
       recurrenceSourceId: fields[14] as String?,
+      toAccountId: fields[15] as String?,
+      notes: fields[16] as String?,
     );
   }
 
   @override
   void write(BinaryWriter writer, TransactionModel obj) {
     writer
-      ..writeByte(15)
+      ..writeByte(17)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -147,6 +160,10 @@ class TransactionModelAdapter extends TypeAdapter<TransactionModel> {
       ..writeByte(13)
       ..write(obj.recurrenceRuleIndex)
       ..writeByte(14)
-      ..write(obj.recurrenceSourceId);
+      ..write(obj.recurrenceSourceId)
+      ..writeByte(15)
+      ..write(obj.toAccountId)
+      ..writeByte(16)
+      ..write(obj.notes);
   }
 }
