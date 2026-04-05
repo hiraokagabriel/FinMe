@@ -451,6 +451,9 @@ M3-B completo — TransactionType.transfer, TransactionEntity.toAccountId + note
 **SHA:** *(este commit)* | **Tipo:** docs  
 Criado `docs/M3_REPORT.md` com rastreamento detalhado dos itens M3-C, M3-D e M3-E pendentes (critérios, arquivos alvo, ordem de execução sugerida). CONTEXT.md atualizado com referência ao relatório e seção 4 ajustada.
 
+### #51 — fix(dashboard): null-safety em categoryId no RecentTransactionRow
+**SHA:** `9353359b` | **Tipo:** fix  
+Corrigido erro de compilação no Windows em `dashboard_page.dart`: `categoryId` é `String?` e estava sendo usado sem checagem de nulidade. Aplicado fallback `?? ''` e renderização condicional do texto.
 ---
 
 *Este arquivo deve ser atualizado a cada commit. Marque os itens da seção 4 como ✅ conforme forem entregues.*
