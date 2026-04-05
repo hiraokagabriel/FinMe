@@ -17,6 +17,9 @@ class TransactionModel {
   final String? cardId;
   final bool isBoleto;
   final bool isProvisioned;
+  // M3 - provisionamento avancado (indices 11 e 12 - retrocompativeis)
+  final int? installmentCount;
+  final DateTime? provisionedDueDate;
 
   TransactionModel({
     required this.id,
@@ -30,6 +33,8 @@ class TransactionModel {
     required this.cardId,
     required this.isBoleto,
     required this.isProvisioned,
+    this.installmentCount,
+    this.provisionedDueDate,
   });
 
   TransactionEntity toEntity() {
@@ -44,6 +49,8 @@ class TransactionModel {
       cardId: cardId,
       isBoleto: isBoleto,
       isProvisioned: isProvisioned,
+      installmentCount: installmentCount,
+      provisionedDueDate: provisionedDueDate,
     );
   }
 
@@ -60,6 +67,8 @@ class TransactionModel {
       cardId: entity.cardId,
       isBoleto: entity.isBoleto,
       isProvisioned: entity.isProvisioned,
+      installmentCount: entity.installmentCount,
+      provisionedDueDate: entity.provisionedDueDate,
     );
   }
 }
@@ -86,13 +95,16 @@ class TransactionModelAdapter extends TypeAdapter<TransactionModel> {
       cardId: fields[8] as String?,
       isBoleto: fields[9] as bool,
       isProvisioned: fields[10] as bool,
+      // indices 11 e 12: opcionais - registros antigos nao terao esses campos
+      installmentCount: fields[11] as int?,
+      provisionedDueDate: fields[12] as DateTime?,
     );
   }
 
   @override
   void write(BinaryWriter writer, TransactionModel obj) {
     writer
-      ..writeByte(11)
+      ..writeByte(13)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -114,6 +126,10 @@ class TransactionModelAdapter extends TypeAdapter<TransactionModel> {
       ..writeByte(9)
       ..write(obj.isBoleto)
       ..writeByte(10)
-      ..write(obj.isProvisioned);
+      ..write(obj.isProvisioned)
+      ..writeByte(11)
+      ..write(obj.installmentCount)
+      ..writeByte(12)
+      ..write(obj.provisionedDueDate);
   }
 }

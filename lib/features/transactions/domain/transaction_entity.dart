@@ -1,9 +1,6 @@
 import '../../../core/models/money.dart';
-import '../../../core/models/date_range.dart';
-import '../../cards/domain/card_entity.dart';
-import '../../categories/domain/category_entity.dart';
-import 'payment_method.dart';
-import 'transaction_type.dart';
+import '../domain/payment_method.dart';
+import '../domain/transaction_type.dart';
 
 class TransactionEntity {
   final String id;
@@ -17,6 +14,12 @@ class TransactionEntity {
   final bool isBoleto;
   final bool isProvisioned;
 
+  // Provisionamento avancado (M3)
+  // installmentCount: numero de parcelas (null = nao parcelado)
+  // provisionedDueDate: data de vencimento do boleto/parcela provisionada
+  final int? installmentCount;
+  final DateTime? provisionedDueDate;
+
   const TransactionEntity({
     required this.id,
     required this.amount,
@@ -28,5 +31,7 @@ class TransactionEntity {
     this.cardId,
     this.isBoleto = false,
     this.isProvisioned = false,
+    this.installmentCount,
+    this.provisionedDueDate,
   });
 }
