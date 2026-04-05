@@ -6,8 +6,9 @@ import '../../features/cards/data/card_model.dart';
 
 class HiveInit {
   static const String transactionsBoxName = 'transactions';
-  static const String categoriesBoxName = 'categories';
-  static const String cardsBoxName = 'cards';
+  static const String categoriesBoxName   = 'categories';
+  static const String cardsBoxName        = 'cards';
+  static const String goalsBoxName        = 'goals';
 
   static Future<void> init() async {
     await Hive.initFlutter();
@@ -20,36 +21,35 @@ class HiveInit {
         await Hive.openBox<TransactionModel>(transactionsBoxName);
     final categoriesBox =
         await Hive.openBox<CategoryModel>(categoriesBoxName);
-    final cardsBox = await Hive.openBox<CardModel>(cardsBoxName);
+    final cardsBox   = await Hive.openBox<CardModel>(cardsBoxName);
+    // goals usa Box dinâmica (Map) – sem adapter gerado
+    await Hive.openBox(goalsBoxName);
 
-    // Use put() with the entity id as key so that update() (which also uses
-    // put(entity.id, ...)) overwrites the same record instead of creating a
-    // second one with a different auto-numeric key.
     if (categoriesBox.isEmpty) {
       final seedCategories = [
         CategoryModel(
           id: 'cat_food',
-          name: 'Alimentacao',
+          name: 'Alimentação',
           kindIndex: 0,
-          colorValue: null,
+          colorValue: 0xFFF44336,
         ),
         CategoryModel(
           id: 'cat_transport',
           name: 'Transporte',
           kindIndex: 0,
-          colorValue: null,
+          colorValue: 0xFF2196F3,
         ),
         CategoryModel(
           id: 'cat_subscriptions',
           name: 'Assinaturas',
           kindIndex: 0,
-          colorValue: null,
+          colorValue: 0xFF607D8B,
         ),
         CategoryModel(
           id: 'cat_salary',
-          name: 'Salario',
+          name: 'Salário',
           kindIndex: 1,
-          colorValue: null,
+          colorValue: 0xFF43A047,
         ),
       ];
       await categoriesBox.putAll({
@@ -61,7 +61,7 @@ class HiveInit {
       final seedCards = [
         CardModel(
           id: 'card_1',
-          name: 'Cartao Principal',
+          name: 'Cartão Principal',
           bankName: 'Banco A',
           typeIndex: 0,
           dueDay: 10,
@@ -69,7 +69,7 @@ class HiveInit {
         ),
         CardModel(
           id: 'card_2',
-          name: 'Cartao Secundario',
+          name: 'Cartão Secundário',
           bankName: 'Banco B',
           typeIndex: 0,
           dueDay: 20,
@@ -130,7 +130,7 @@ class HiveInit {
           date: now.subtract(const Duration(days: 10)),
           typeIndex: 0,
           paymentMethodIndex: 5,
-          description: 'Salario',
+          description: 'Salário',
           categoryId: 'cat_salary',
           cardId: null,
           isBoleto: false,

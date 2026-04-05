@@ -35,7 +35,6 @@ class _DashboardPageState extends State<DashboardPage> {
     });
   }
 
-  // Agrega receitas e despesas por mês nos últimos N meses
   List<_MonthSummary> _buildMonthlySummary({int months = 6}) {
     final now = DateTime.now();
     return List.generate(months, (i) {
@@ -56,7 +55,6 @@ class _DashboardPageState extends State<DashboardPage> {
     });
   }
 
-  // Totais do mês atual
   (double, double) get _currentMonthTotals {
     final now = DateTime.now();
     double income = 0;
@@ -74,7 +72,6 @@ class _DashboardPageState extends State<DashboardPage> {
     return (income, expense);
   }
 
-  // Total de provisionados futuros
   double get _totalProvisioned {
     final now = DateTime.now();
     double total = 0;
@@ -93,8 +90,8 @@ class _DashboardPageState extends State<DashboardPage> {
     return AnimatedBuilder(
       animation: AppModeController.instance,
       builder: (context, _) {
-        final mode = AppModeController.instance.mode;
-        final isUltra = mode == AppMode.ultra;
+        final isUltra =
+            AppModeController.instance.mode == AppMode.ultra;
 
         return Scaffold(
           appBar: AppBar(
@@ -115,43 +112,12 @@ class _DashboardPageState extends State<DashboardPage> {
                   child: ListView(
                     padding: const EdgeInsets.all(AppSpacing.lg),
                     children: [
-                      // ── Badge de modo ─────────────────────────────
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: AppSpacing.md,
-                              vertical: AppSpacing.xs,
-                            ),
-                            decoration: BoxDecoration(
-                              color: isUltra
-                                  ? AppColors.primarySubtle
-                                  : AppColors.sidebar,
-                              borderRadius:
-                                  BorderRadius.circular(AppRadius.full),
-                            ),
-                            child: Text(
-                              isUltra ? 'Modo Ultra' : 'Modo Simples',
-                              style: AppText.badge.copyWith(
-                                color: isUltra
-                                    ? AppColors.primary
-                                    : AppColors.textSecondary,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                      _buildModeBadge(isUltra),
                       const SizedBox(height: AppSpacing.lg),
-
-                      // ── Cards de resumo do mês atual ───────────────
                       _buildSummaryCards(isUltra),
                       const SizedBox(height: AppSpacing.lg),
-
-                      // ── Gráfico de linha mensal ────────────────────
                       _buildLineChartCard(),
                       const SizedBox(height: AppSpacing.lg),
-
-                      // ── Ações rápidas ──────────────────────────────
                       _buildQuickActions(context, isUltra),
                       const SizedBox(height: AppSpacing.lg),
                     ],
@@ -162,7 +128,29 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  // ── Resumo do mês ──────────────────────────────────────────────────────────
+  Widget _buildModeBadge(bool isUltra) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md, vertical: AppSpacing.xs),
+          decoration: BoxDecoration(
+            color:
+                isUltra ? AppColors.primarySubtle : AppColors.sidebar,
+            borderRadius: BorderRadius.circular(AppRadius.full),
+          ),
+          child: Text(
+            isUltra ? 'Modo Ultra' : 'Modo Simples',
+            style: AppText.badge.copyWith(
+              color: isUltra
+                  ? AppColors.primary
+                  : AppColors.textSecondary,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 
   Widget _buildSummaryCards(bool isUltra) {
     final (income, expense) = _currentMonthTotals;
@@ -192,7 +180,7 @@ class _DashboardPageState extends State<DashboardPage> {
       ),
     ];
 
-    final items = isUltra
+    final all = isUltra
         ? [
             ...cards,
             _SummaryCardData(
@@ -206,20 +194,21 @@ class _DashboardPageState extends State<DashboardPage> {
         : cards;
 
     return Row(
-      children: items
-          .map((d) => Expanded(
+      children: all
+          .asMap()
+          .entries
+          .map((e) => Expanded(
                 child: Padding(
                   padding: EdgeInsets.only(
-                      right:
-                          items.last == d ? 0 : AppSpacing.sm),
-                  child: _SummaryCard(data: d),
+                      right: e.key < all.length - 1
+                          ? AppSpacing.sm
+                          : 0),
+                  child: _SummaryCard(data: e.value),
                 ),
               ))
           .toList(),
     );
   }
-
-  // ── Gráfico de linha mensal ────────────────────────────────────────────────
 
   Widget _buildLineChartCard() {
     final summary = _buildMonthlySummary(months: 6);
@@ -235,7 +224,6 @@ class _DashboardPageState extends State<DashboardPage> {
               children: [
                 Text('Evolução mensal', style: AppText.sectionLabel),
                 const Spacer(),
-                // Legenda
                 _LegendDot(
                     color: AppColors.limitLow, label: 'Receitas'),
                 const SizedBox(width: AppSpacing.md),
@@ -252,7 +240,8 @@ class _DashboardPageState extends State<DashboardPage> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(Icons.show_chart_outlined,
-                          size: 36, color: AppColors.textSecondary),
+                          size: 36,
+                          color: AppColors.textSecondary),
                       const SizedBox(height: AppSpacing.sm),
                       Text('Sem dados nos últimos 6 meses',
                           style: AppText.secondary),
@@ -271,35 +260,35 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  // ── Ações rápidas ──────────────────────────────────────────────────────────
-
   Widget _buildQuickActions(BuildContext context, bool isUltra) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Acesso rápido', style: AppText.sectionLabel),
         const SizedBox(height: AppSpacing.md),
-        Row(
+        Wrap(
+          spacing: AppSpacing.md,
+          runSpacing: AppSpacing.md,
           children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: () =>
-                    Navigator.of(context).pushNamed(AppRouter.transactions),
-                icon: const Icon(Icons.receipt_long_outlined),
-                label: const Text('Transações'),
-              ),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.of(context)
+                  .pushNamed(AppRouter.transactions),
+              icon: const Icon(Icons.receipt_long_outlined),
+              label: const Text('Transações'),
             ),
-            if (isUltra) ...[
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () =>
-                      Navigator.of(context).pushNamed(AppRouter.cards),
-                  icon: const Icon(Icons.credit_card_outlined),
-                  label: const Text('Cartões'),
-                ),
+            OutlinedButton.icon(
+              onPressed: () =>
+                  Navigator.of(context).pushNamed(AppRouter.goals),
+              icon: const Icon(Icons.flag_outlined),
+              label: const Text('Metas'),
+            ),
+            if (isUltra)
+              OutlinedButton.icon(
+                onPressed: () =>
+                    Navigator.of(context).pushNamed(AppRouter.cards),
+                icon: const Icon(Icons.credit_card_outlined),
+                label: const Text('Cartões'),
               ),
-            ],
           ],
         ),
       ],
@@ -307,7 +296,7 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 }
 
-// ── Gráfico ────────────────────────────────────────────────────────────────
+// ── Gráfico ───────────────────────────────────────────────────────────────
 
 class _MonthlyLineChart extends StatelessWidget {
   const _MonthlyLineChart({required this.summary});
@@ -343,10 +332,8 @@ class _MonthlyLineChart extends StatelessWidget {
         gridData: FlGridData(
           show: true,
           drawVerticalLine: false,
-          getDrawingHorizontalLine: (_) => FlLine(
-            color: AppColors.divider,
-            strokeWidth: 1,
-          ),
+          getDrawingHorizontalLine: (_) =>
+              FlLine(color: AppColors.divider, strokeWidth: 1),
         ),
         borderData: FlBorderData(show: false),
         titlesData: FlTitlesData(
@@ -376,7 +363,8 @@ class _MonthlyLineChart extends StatelessWidget {
                 }
                 return Text(
                   _monthAbbr[summary[i].month.month],
-                  style: AppText.secondary.copyWith(fontSize: 10),
+                  style:
+                      AppText.secondary.copyWith(fontSize: 10),
                 );
               },
             ),
@@ -494,16 +482,18 @@ class _SummaryCard extends StatelessWidget {
               children: [
                 Icon(data.icon, size: 14, color: data.color),
                 const SizedBox(width: AppSpacing.xs),
-                Text(data.label, style: AppText.secondary),
+                Flexible(
+                  child: Text(data.label,
+                      style: AppText.secondary,
+                      overflow: TextOverflow.ellipsis),
+                ),
               ],
             ),
             const SizedBox(height: AppSpacing.xs),
             Text(
               '${data.prefix} ${data.value.toStringAsFixed(2)}',
-              style: AppText.amount.copyWith(
-                color: data.color,
-                fontSize: 13,
-              ),
+              style: AppText.amount
+                  .copyWith(color: data.color, fontSize: 13),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -527,8 +517,8 @@ class _LegendDot extends StatelessWidget {
         Container(
           width: 8,
           height: 8,
-          decoration: BoxDecoration(
-              color: color, shape: BoxShape.circle),
+          decoration:
+              BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: AppSpacing.xs),
         Text(label, style: AppText.secondary),
