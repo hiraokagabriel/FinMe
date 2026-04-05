@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../domain/app_mode.dart';
-import '../services/app_mode_controller.dart';
+import '../../../core/models/app_mode.dart';
+import '../../../core/services/app_mode_controller.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
