@@ -37,11 +37,13 @@ class _OnboardingPageState extends State<OnboardingPage>
     super.dispose();
   }
 
-  void _goToModeStep() {
-    _fadeCtrl.reverse().then((_) {
-      setState(() => _step = 1);
-      _fadeCtrl.forward();
-    });
+  // AnimationController.reverse() retorna TickerFuture (não Future<void>),
+  // por isso usamos orCancel para obter um Future<void> real.
+  Future<void> _goToModeStep() async {
+    await _fadeCtrl.reverse().orCancel;
+    if (!mounted) return;
+    setState(() => _step = 1);
+    _fadeCtrl.forward();
   }
 
   Future<void> _finish() async {
@@ -99,7 +101,7 @@ class _OnboardingPageState extends State<OnboardingPage>
             const SizedBox(height: 24),
             Text(
               'FinMe',
-              style: AppText.title.copyWith(
+              style: AppText.screenTitle.copyWith(
                 fontSize: 32,
                 fontWeight: FontWeight.w700,
                 letterSpacing: -0.5,
@@ -119,7 +121,7 @@ class _OnboardingPageState extends State<OnboardingPage>
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(AppRadius.card),
                   ),
                 ),
                 child: const Text('Começar'),
@@ -143,7 +145,7 @@ class _OnboardingPageState extends State<OnboardingPage>
           children: [
             Text(
               'Como você quer usar o FinMe?',
-              style: AppText.title.copyWith(
+              style: AppText.screenTitle.copyWith(
                 fontSize: 20,
                 fontWeight: FontWeight.w600,
               ),
@@ -179,7 +181,7 @@ class _OnboardingPageState extends State<OnboardingPage>
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(AppRadius.card),
                   ),
                 ),
                 child: const Text('Entrar no FinMe'),
@@ -218,12 +220,12 @@ class _ModeCard extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         curve: Curves.easeInOut,
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppSpacing.lg),
         decoration: BoxDecoration(
           color: selected
               ? cs.primary.withValues(alpha: 0.08)
               : cs.surfaceContainerHighest.withValues(alpha: 0.4),
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(AppRadius.card),
           border: Border.all(
             color: selected
                 ? cs.primary
@@ -239,7 +241,7 @@ class _ModeCard extends StatelessWidget {
               size: 22,
               color: selected ? cs.primary : cs.onSurfaceVariant,
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: AppSpacing.md),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -252,7 +254,7 @@ class _ModeCard extends StatelessWidget {
                       color: selected ? cs.primary : cs.onSurface,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: AppSpacing.xs),
                   Text(
                     description,
                     style: TextStyle(
@@ -266,7 +268,7 @@ class _ModeCard extends StatelessWidget {
             ),
             if (selected)
               Padding(
-                padding: const EdgeInsets.only(left: 8),
+                padding: const EdgeInsets.only(left: AppSpacing.sm),
                 child: Icon(Icons.check_circle, size: 18, color: cs.primary),
               ),
           ],
