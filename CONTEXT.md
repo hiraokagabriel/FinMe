@@ -153,10 +153,10 @@ lib/
 
 | # | Feature | Arquivo(s) alvo | Status |
 |---|---------|-----------------|--------|
-| 3 | **Múltiplas Contas/Carteiras** | Novo feature: `lib/features/accounts/` + integração em transactions | 🔲 Pendente |
-| 4 | **Transferência entre Contas** | Depende do item 3; novo tipo de transação `transfer` | 🔲 Pendente |
-| 8 | **Splash Screen / Onboarding** | `lib/features/onboarding/` + ajuste no `main.dart` | 🔲 Pendente |
-| 9 | **Persistência definitiva de preferências avançadas** | `lib/core/services/` + Hive box `preferences` | 🔲 Pendente |
+| M3-A | **Múltiplas Contas/Carteiras** | Novo feature: `lib/features/accounts/` + integração em transactions | 🔲 Pendente |
+| M3-B | **Transferência entre Contas** | Depende de M3-A; novo tipo de transação `transfer` | 🔲 Pendente |
+| M3-C | **Splash Screen / Onboarding** | `lib/features/onboarding/` + ajuste no `main.dart` | 🔲 Pendente |
+| M3-D | **Persistência definitiva de preferências avançadas** | `lib/core/services/` + Hive box `preferences` | 🔲 Pendente |
 
 ---
 
@@ -196,7 +196,7 @@ lib/
 | 0 | TransactionModel |
 | 1 | CategoryModel |
 | 2 | CardModel |
-| 3 | *(reservado para AccountModel — M3 item 3)* |
+| 3 | *(reservado para AccountModel — M3-A)* |
 | 4 | *(reservado para BudgetModel — futuro)* |
 | 5 | GoalModel ✅ |
 
@@ -219,291 +219,344 @@ lib/
 3. **fl_chart já incluso:** Para gráficos do dashboard e relatórios, usar `fl_chart` (LineChart, PieChart, BarChart). Não adicionar outra lib de charts.
 4. **csv já incluso:** Para exportação, usar o pacote `csv`. Para PDF, verificar se precisará adicionar `pdf` ao pubspec.
 5. **ThemeController:** Para qualquer componente que precise trocar tema dinamicamente, usar `ThemeController.instance` e chamar `setState` no widget pai via `ValueNotifier`.
-6. **AppText sem cores fixas:** Após o commit #10, os widgets `AppText` herdam cor do tema. Nunca definir cor hardcoded em `AppText`.
-7. **Chave Hive por id (string):** Após o commit #20, todos os registros usam `entity.id` como chave no box Hive. Não usar índice numérico.
-8. **AppRadius.chip:** Usar `AppRadius.chip` para elementos do tipo chip/badge. `AppRadius.sm` foi removido para esse uso (commit #28).
+6. **AppText sem cores fixas:** Após o commit #33, os widgets `AppText` herdam cor do tema. Nunca definir cor hardcoded em `AppText`.
+7. **Chave Hive por id (string):** Após o commit #23, todos os registros usam `entity.id` como chave no box Hive. Não usar índice numérico.
+8. **AppRadius.chip:** Usar `AppRadius.chip` para elementos do tipo chip/badge. `AppRadius.sm` foi removido para esse uso (commit #36).
 
 ---
 
 ## 8. Histórico Completo de Commits
 
-> Numerados do mais antigo (#1) ao mais recente (#35). Use este registro para rastrear onde features foram introduzidas e onde bugs foram corrigidos.
+> Numerados do mais antigo (#1) ao mais recente (#38). Use este registro para rastrear onde features foram introduzidas e onde bugs foram corrigidos.
 
 ---
 
 ### #1 — Initial commit
 **SHA:** `832733cb`  
-Criação do repositório no GitHub. Commit inicial gerado automaticamente.
+**Tipo:** chore  
+Criação do repositório no GitHub. Commit inicial gerado automaticamente pelo GitHub (README vazio).
 
 ---
 
 ### #2 — Initial commit: projeto Flutter FinMe
 **SHA:** `e35a66f2`  
-Scaffold do projeto Flutter gerado com `flutter create`. Estrutura base do app criada.
+**Tipo:** chore  
+Scaffold do projeto Flutter gerado com `flutter create`. Estrutura base do app criada (lib/, pubspec.yaml, android/, ios/, etc.).
 
 ---
 
 ### #3 — Initialize README with project details and instructions
 **SHA:** `b20cc5b6`  
-README inicial adicionado com visão geral do projeto, modos de uso (Simples/Ultra) e features planejadas.
+**Tipo:** docs  
+README inicial adicionado com visão geral do projeto, modos de uso (Simples/Ultra) e lista de features planejadas.
 
 ---
 
 ### #4 — Documentação inicial (CLAUDE.md e ROADMAP.md)
 **SHA:** `35f50bc0`  
+**Tipo:** docs  
 Primeiros arquivos de documentação criados: `CLAUDE.md` com convenções do projeto e `ROADMAP.md` com os marcos planejados (M1 a M5).
 
 ---
 
 ### #5 — Add ROADMAP.md and CLAUDE.md with project structure and guidelines
 **SHA:** `76ab4bf7`  
-Segunda versão dos arquivos de documentação, com estrutura de pastas detalhada e guidelines de desenvolvimento.
+**Tipo:** docs  
+Segunda versão dos arquivos de documentação com estrutura de pastas detalhada, guidelines de desenvolvimento e padrões de nomenclatura.
 
 ---
 
 ### #6 — Refactor lib structure and add initial app/dashboard skeleton
 **SHA:** `900cfd8d`  
-Refatoração da estrutura de pastas `lib/`. Criação do skeleton inicial do app com `app.dart`, `router.dart` e `dashboard_page.dart` placeholder.
+**Tipo:** refactor  
+Refatoração da estrutura de pastas `lib/`. Criação do skeleton inicial do app: `app.dart`, `router.dart` e `dashboard_page.dart` placeholder com BottomNavigationBar.
 
 ---
 
 ### #7 — Implement M2 domain models, in-memory repositories, and transactions page with navigation from dashboard
 **SHA:** `cd3d2430`  
-**Marco M2 inicial.** Criação dos domain models (`TransactionEntity`, `CategoryEntity`, `CardEntity`), repositórios em memória e `TransactionsPage` com navegação a partir do dashboard.
+**Tipo:** feat (M2 — início)  
+**Marco M2.** Criação dos domain models (`TransactionEntity`, `CategoryEntity`, `CardEntity`), repositórios em memória e `TransactionsPage` com navegação a partir do dashboard.
 
 ---
 
 ### #8 — Fix imports and currency string in TransactionsPage
 **SHA:** `d247b42b`  
-Correção de imports quebrados e string de moeda mal formatada em `TransactionsPage`.
+**Tipo:** fix  
+Correção de imports quebrados e string de moeda mal formatada em `TransactionsPage` após refatoração do #7.
 
 ---
 
 ### #9 — Make DateRange constructor non-const to avoid const assertion on method call
 **SHA:** `5937e7bc`  
-Fix de erro de compilação: `DateRange` não pode ser `const` pois possui método que altera estado.
+**Tipo:** fix  
+Erro de compilação: `DateRange` não pode ser `const` pois possui método que retorna objeto mutável. Construtor removido do const.
 
 ---
 
 ### #10 — Refine M2: add cards listing page and summary totals to transactions page
 **SHA:** `2e87d9c5`  
-**M2 refinado.** Adicionada `CardsPage` com listagem de cartões. Totais de receitas/despesas exibidos no cabeçalho de `TransactionsPage`.
+**Tipo:** feat (M2 — refinamento)  
+`CardsPage` criada com listagem de cartões. Totais de receitas e despesas do período exibidos no cabeçalho de `TransactionsPage`.
 
 ---
 
 ### #11 — Fix missing CardType import in CardsRepository
 **SHA:** `e1ca6a5e`  
-Correção de import ausente de `CardType` em `CardsRepository`, causando erro de compilação.
+**Tipo:** fix  
+Import ausente de `CardType` em `CardsRepository` causava erro de compilação. Adicionado caminho correto do enum.
 
 ---
 
 ### #12 — Add docs/TROUBLESHOOTING.md with common Git and Flutter issues and fixes
 **SHA:** `9ffd3d5a`  
-Documentação de troubleshooting adicionada em `docs/TROUBLESHOOTING.md` com soluções para problemas comuns de Git e Flutter.
+**Tipo:** docs  
+`docs/TROUBLESHOOTING.md` adicionado com soluções para problemas comuns de Git (conflitos, histórico) e Flutter (builds, Hive, encoding).
 
 ---
 
 ### #13 — Implement M3: app mode (simple/ultra), settings page, and adaptive UI on dashboard, transactions, and cards
 **SHA:** `a5b78026`  
-**Marco M3 iniciado.** Implementação do `AppModeController`, `SettingsPage` e UI adaptativa por modo (Simples/Ultra) nas telas de dashboard, transações e cartões.
+**Tipo:** feat (M3 — início)  
+**Marco M3.** `AppModeController` singleton implementado. `SettingsPage` criada. UI adaptativa por modo (Simples/Ultra) nas telas de dashboard, transações e cartões.
 
 ---
 
 ### #14 — Fix encoding issues in AppModeController by rewriting file as clean UTF-8 Dart source
 **SHA:** `efd42bfa`  
-Correção de sequências unicode corrompidas (null bytes) no `AppModeController` — arquivo reescrito como UTF-8 limpo.
+**Tipo:** fix  
+Sequências unicode corrompidas (null bytes) causavam falha de compilação no `AppModeController`. Arquivo reescrito como UTF-8 limpo.
 
 ---
 
 ### #15 — Add Hive-based local persistence for cards, categories, and transactions, and wire UI to use repository locator backed by Hive instead of in-memory mocks
 **SHA:** `063b30d7`  
-**Persistência real com Hive.** `HiveInit`, `RepositoryLocator`, `TransactionModel` (typeId 0), `CategoryModel` (typeId 1), `CardModel` (typeId 2). UI conectada aos repositórios reais no lugar dos mocks em memória.
+**Tipo:** feat  
+**Persistência real com Hive.** `HiveInit`, `RepositoryLocator` e modelos com adapters manuais: `TransactionModel` (typeId 0), `CategoryModel` (typeId 1), `CardModel` (typeId 2). UI desconectada dos mocks em memória e conectada aos repositórios reais.
 
 ---
 
 ### #16 — Add CRUD methods to transactions repositories and implement NewTransactionPage to create transactions in Hive, refreshing list and summary on return
 **SHA:** `064508b8`  
-`NewTransactionPage` implementada. CRUD completo de transações: criar, salvar em Hive, atualizar lista e totais ao retornar.
+**Tipo:** feat  
+`NewTransactionPage` implementada com formulário completo. CRUD de transações: criar, salvar em Hive, atualizar lista e totais ao retornar para `TransactionsPage`.
 
 ---
 
 ### #17 — Allow editing and deleting transactions from the UI by enhancing NewTransactionPage to handle edits and wrapping list items in Dismissible with confirmation dialog and edit-on-tap behaviour
 **SHA:** `9bf4e3ef`  
-Edição e exclusão de transações. Lista usa `Dismissible` com diálogo de confirmação. Toque em item abre edição em `NewTransactionPage`.
+**Tipo:** feat  
+Edição e exclusão de transações via UI. Lista usa `Dismissible` com diálogo de confirmação para excluir. Toque em item abre `NewTransactionPage` em modo edição.
 
 ---
 
 ### #18 — Add CRUD support and UI for cards and link transactions to cards in ultra mode, showing card information in transaction list
 **SHA:** `12a3e728`  
-CRUD completo de cartões. Transações vinculadas a cartões (Ultra only). Info do cartão exibida na lista de transações.
+**Tipo:** feat  
+CRUD completo de cartões implementado. Transações vinculadas a cartões no modo Ultra. Nome e ícone do cartão exibidos na lista de transações.
 
 ---
 
 ### #19 — Add card limit usage visualization (LinearProgressIndicator + donut chart per card) and expenses-by-card pie chart in ultra mode, plus fl_chart dependency and special character fixes across all UI strings
 **SHA:** `aee4a7e0`  
-Visualização de uso do limite por cartão (barra de progresso + donut chart). Gráfico pizza de despesas por cartão (Ultra). Dependência `fl_chart` adicionada ao pubspec. Correção de caracteres especiais em toda a UI.
+**Tipo:** feat  
+Visualização de uso do limite por cartão: `LinearProgressIndicator` + donut chart. Gráfico pizza de despesas por cartão (modo Ultra). Dependência `fl_chart` adicionada ao `pubspec.yaml`. Correção de caracteres especiais em toda a UI (acentuação, cedilha).
 
 ---
 
 ### #20 — Fix: correct import paths in settings_page.dart (point to core/ instead of features/settings/)
 **SHA:** `3d38aa44`  
-Correção de caminhos de import em `settings_page.dart` que apontavam para pasta inexistente.
+**Tipo:** fix  
+`settings_page.dart` importava de `features/settings/` que não existe. Corrigido para apontar para `core/` onde os controllers realmente estão.
 
 ---
 
 ### #21 — Fix: replace corrupted null-byte unicode sequences with plain ASCII in dashboard_page.dart
 **SHA:** `ac124ab2`  
-Remoção de sequências unicode corrompidas (null bytes) no `dashboard_page.dart`.
+**Tipo:** fix  
+`dashboard_page.dart` continha sequências null-byte unicode corrompidas que impediam a compilação. Substituídas por ASCII puro.
 
 ---
 
 ### #22 — feat(M2+M3): CRUD de categorias, filtros em transações, persistência de modo e UI diferenciada simples/ultra
 **SHA:** `2689f785`  
-CRUD de categorias implementado. Filtros por tipo, período e categoria em `TransactionsPage`. Persistência do modo Simples/Ultra confirmada. UI diferenciada por modo concluída.
+**Tipo:** feat  
+`CategoriesPage` com CRUD completo de categorias. Filtros por tipo, período e categoria em `TransactionsPage`. Persistência do modo Simples/Ultra via Hive confirmada. UI diferenciada por modo finalizada.
 
 ---
 
 ### #23 — fix: corrige barra debug e layout quebrado do nome do cartão
 **SHA:** `00571cef`  
-Remoção da debug bar visível na UI. Correção de layout do nome do cartão que estava quebrado.
+**Tipo:** fix  
+Debug bar visível na UI removida. Layout do nome do cartão na `CardsPage` estava quebrado em telas menores — corrigido com `Expanded` e `TextOverflow`.
 
 ---
 
 ### #24 — fix: seed categories with put (id as key) and cache futures to prevent DropdownButton duplicate-value crash
 **SHA:** `45e352a4`  
-Seed de categorias agora usa `put(id, model)` como chave. Futures cacheados para evitar crash de valor duplicado no `DropdownButton`.
+**Tipo:** fix  
+Seed de categorias agora usa `box.put(entity.id, model)` garantindo chave única. Futures de carregamento cacheados no `initState` para evitar crash de valor duplicado no `DropdownButton`.
 
 ---
 
 ### #25 — fix: remove const from seed lists (CardModel/CategoryModel have no const ctor) and fix string interpolation escape in new_transaction_page
 **SHA:** `4c2c39a6`  
-Remoção de `const` de listas de seed (modelos Hive não têm construtor `const`). Correção de escape em interpolação de string.
+**Tipo:** fix  
+Listas de seed usavam `const` em modelos Hive que não têm construtor `const`. Removido. Correção de escape em interpolação de string em `new_transaction_page.dart`.
 
 ---
 
 ### #26 — fix: use box key (not entity.id) for delete; migrate legacy numeric-keyed records to id-keyed on first open
 **SHA:** `bb2c214e`  
-Exclusão usa a chave do box Hive (não `entity.id`). Migração automática de registros legados com chave numérica para chave por string id no primeiro boot.
+**Tipo:** fix  
+Exclusão de registros Hive estava usando `entity.id` (string) como chave mas registros antigos usavam índice numérico. Corrigido: exclusão usa a chave real do box. Migração automática de registros legados (chave numérica → string id) adicionada ao boot do app.
 
 ---
 
 ### #27 — feat(M3): modo simples enxuto, provisionamento e persistência de preferências
 **SHA:** `cb760a78`  
-Modo Simples realmente enxuto: sem filtro de categoria, sem gráficos, sem campo cartão, resumo único. Provisionamento de gastos futuros: campos `installmentCount` e `provisionedDueDate` (índices Hive 11 e 12). Seção "A vencer" no topo (Ultra only).
+**Tipo:** feat (M3)  
+Modo Simples realmente enxuto: sem filtro de categoria, sem gráficos, sem campo cartão, resumo único (só despesas do período), lista com data apenas. Provisionamento de gastos futuros: campos `installmentCount` e `provisionedDueDate` adicionados a `TransactionEntity` e `TransactionModel` (índices Hive 11 e 12, retrocompatíveis). Seção "A vencer" exibida no topo em modo Ultra.
 
 ---
 
 ### #28 — docs: adiciona padrão visual completo (paletas, tipografia, mockups) ao CLAUDE.md
 **SHA:** `eb79294`  
+**Tipo:** docs  
 `CLAUDE.md` atualizado com paleta de cores completa (light/dark), tipografia, espaçamentos e mockups de referência visual para manter consistência nos commits futuros.
 
 ---
 
 ### #29 — feat: aplica paleta modo claro em todos os menus via AppTheme centralizado
 **SHA:** `ad8da191`  
-Paleta do modo claro aplicada em todos os menus do app via `AppTheme` centralizado. Menus deixam de usar cores hardcoded.
+**Tipo:** feat  
+Paleta do modo claro aplicada em todos os menus do app via `AppTheme` centralizado. Menus deixam de usar cores hardcoded e passam a usar os tokens do design system.
 
 ---
 
 ### #30 — feat: aplica paleta modo claro em transactions, settings e categories
 **SHA:** `0fc41226`  
-Paleta do modo claro aplicada especificamente nas telas de transações, configurações e categorias.
+**Tipo:** feat  
+Paleta do modo claro aplicada especificamente nas telas de transações, configurações e categorias, completando a padronização visual do app em modo claro.
 
 ---
 
 ### #31 — docs: atualiza roadmap com progresso real de M1, M2 e M3
 **SHA:** `913ec04d`  
-`ROADMAP.md` atualizado refletindo M1 e M2 como concluídos e o progresso real do M3.
+**Tipo:** docs  
+`ROADMAP.md` atualizado refletindo M1 e M2 como concluídos e o estado real do M3 com itens marcados individualmente.
 
 ---
 
 ### #32 — feat(dashboard): substitui placeholder por dashboard aprimorado com gráfico de linha mensal
 **SHA:** `c970b00c`  
-**M3 — Dashboard.** Tela inicial reescrita com KPIs do mês (saldo, entradas, saídas) e gráfico de linha mensal mostrando evolução de receitas vs. despesas.
+**Tipo:** feat (M3)  
+**M3 — Dashboard.** `DashboardPage` reescrita: KPIs do mês (saldo, entradas, saídas) e gráfico de linha mensal mostrando evolução de receitas vs. despesas nos últimos 6 meses usando `fl_chart`.
 
 ---
 
 ### #33 — feat(goals): tela de metas com CRUD, barra de progresso e badge de alerta
 **SHA:** `2f1a1248`  
-**M3 — Metas v1.** `GoalsPage` com CRUD de metas, barra de progresso visual e badges de alerta (verde/amarelo/vermelho).
+**Tipo:** feat (M3)  
+**M3 — Metas v1.** `GoalsPage` criada com CRUD de metas, barra de progresso visual e badges de alerta verde/amarelo/vermelho. `GoalEntity` e `GoalModel` (typeId 5) adicionados. `HiveGoalsRepository` implementado.
 
 ---
 
 ### #34 — feat(reports): tela de relatórios com filtro por período e exportação CSV
 **SHA:** `4896b0f0`  
-**M3 — Relatórios.** `ReportsPage` com filtro por período e exportação dos dados em CSV usando o pacote `csv`.
+**Tipo:** feat (M3)  
+**M3 — Relatórios.** `ReportsPage` implementada com filtro de período (mês atual, 3 meses, 6 meses, personalizado) e exportação dos dados em CSV usando o pacote `csv`. Estrutura pronta para adição de gráficos.
 
 ---
 
 ### #35 — fix(goals): corrige crash no dropdown ao abrir formulário de nova meta
 **SHA:** `0ac24c07`  
-Correção de crash ao abrir o formulário de nova meta: dropdown de categorias inicializava com valor inválido.
+**Tipo:** fix  
+Crash ao abrir formulário de nova meta: o dropdown de categorias inicializava com valor nulo mas a lista ainda não havia carregado. Corrigido com inicialização lazy e estado de loading.
 
 ---
 
 ### #36 — feat(theme): tema escuro com toggle persistido nas configurações
 **SHA:** `66858493`  
-**M3 — Tema Escuro.** `ThemeController` com toggle persistido via Hive. Toggle disponível em `SettingsPage`. `ThemeData` completo para dark mode.
+**Tipo:** feat (M3)  
+**M3 — Tema Escuro.** `ThemeController` implementado com toggle persistido via Hive. Toggle disponível em `SettingsPage`. `ThemeData` completo para dark mode definido em `app_theme.dart`. App reage dinamicamente à troca de tema via `ValueNotifier`.
 
 ---
 
 ### #37 — fix(theme): remove cores fixas dos AppText para herdar cor do tema
 **SHA:** `7a624c51`  
-Widgets `AppText` tinham cores hardcoded que quebravam o dark mode. Removidas para herdar cor do tema automaticamente.
+**Tipo:** fix  
+Widgets `AppText` tinham cores hardcoded (`Colors.black`, `Colors.white`) que quebravam a aparência no dark mode. Removidas todas as cores fixas para que `AppText` herde a cor do tema via `DefaultTextStyle`.
 
 ---
 
 ### #38 — fix(persistence): corrige persistência do modo e tema entre sessões
 **SHA:** `03b33cba`  
-Modo Simples/Ultra e tema claro/escuro agora são corretamente restaurados ao reabrir o app.
+**Tipo:** fix  
+Modo Simples/Ultra e tema claro/escuro não eram restaurados corretamente ao reabrir o app. Corrigido: `AppModeController` e `ThemeController` agora lêem o valor salvo no Hive durante a inicialização em `main.dart`.
 
 ---
 
 ### #39 — feat(recurrence): recorrência automática de transações (diária, semanal, mensal, anual)
 **SHA:** `de224688`  
-**M3 — Recorrência.** `RecurrenceRule` e `RecurrenceService` implementados. Transações recorrentes geradas automaticamente no boot para as frequências: daily, weekly, monthly, yearly.
+**Tipo:** feat (M3)  
+**M3 — Recorrência.** `RecurrenceRule` com frequências `daily`, `weekly`, `monthly`, `yearly` adicionado à `TransactionEntity`. `RecurrenceService.generatePending()` implementado e chamado no boot: gera automaticamente todas as transações recorrentes pendentes desde a última execução, vinculadas à transação original via `recurrenceParentId`.
 
 ---
 
 ### #40 — feat(categories): ícones personalizados por categoria
 **SHA:** `2cc5f2ec`  
-**M3 — Ícones.** Picker de ícone adicionado ao formulário de categorias. Ícone exibido junto ao nome da categoria em toda a listagem de transações.
+**Tipo:** feat (M3)  
+**M3 — Ícones.** Picker de ícone adicionado ao formulário de criação/edição de categoria. `CategoryEntity` atualizada com campo `icon` (String com emoji/codepoint). Ícone exibido ao lado do nome da categoria em toda a listagem de transações.
 
 ---
 
 ### #41 — feat(dashboard): adiciona KPI 'A vencer' no Modo Simples e seção de últimas transações
 **SHA:** `e2b3d3eb`  
-Dashboard aprimorado: KPI "A vencer" adicionado também ao Modo Simples. Seção "Últimas transações" incluída na home.
+**Tipo:** feat (M3)  
+Dashboard aprimorado: KPI "A vencer" adicionado também ao Modo Simples (antes era Ultra only). Seção "Últimas transações" incluída na home mostrando os 5 lançamentos mais recentes.
 
 ---
 
 ### #42 — fix: corrige erros de compilação no dashboard_page (AppText.sm → secondary, description nullable, category → categoryId)
 **SHA:** `833cf73d`  
-Correção de 3 erros de compilação no dashboard: uso incorreto de `AppText.sm`, campo `description` nullable não tratado e referência a `category` em vez de `categoryId`.
+**Tipo:** fix  
+Três erros de compilação no `dashboard_page.dart`: (1) `AppText.sm` não existe — substituído por `AppText.secondary`; (2) campo `description` nullable não tratado com operador `?`; (3) referência a `category` (objeto) em vez de `categoryId` (String).
 
 ---
 
 ### #43 — fix: substituir AppRadius.sm por AppRadius.chip no dashboard_page
 **SHA:** `48c2dedc`  
-`AppRadius.sm` foi renomeado/removido. Substituído por `AppRadius.chip` no dashboard.
+**Tipo:** fix  
+`AppRadius.sm` foi removido do design system. Substituído por `AppRadius.chip` nos badges e chips do dashboard.
 
 ---
 
 ### #44 — feat(goals): tela unificada de Metas de Economia + Teto de Gastos
 **SHA:** `15c5c379`  
-**M3 — Metas v2 (reescrita).** `GoalsPage` reescrita com TabBar separando os dois tipos: Meta de Economia (valor acumulado vs. alvo) e Teto de Gastos (calculado automaticamente pelas transações do mês/categoria). `GoalType` enum adicionado. `GoalEntity` atualizada com `type`, `targetAmount`, `title` e `currentAmount`. Alertas visuais: verde (<80%), amarelo (>=80%), vermelho (estourado).
+**Tipo:** feat (M3)  
+**M3 — Metas v2 (reescrita).** `GoalsPage` reescrita com `TabBar` separando dois tipos: **Meta de Economia** (valor acumulado manual vs. valor alvo) e **Teto de Gastos** (calculado automaticamente pelas transações do mês/categoria). `GoalType` enum adicionado. `GoalEntity` atualizada com `type`, `targetAmount`, `title` e `currentAmount`. Formulário dinâmico adapta campos conforme o tipo. Alertas visuais: verde (<80%), amarelo (>=80%), vermelho (estourado).
 
 ---
 
 ### #45 — docs: adiciona CONTEXT.md com estado atual do projeto para referência de IA
 **SHA:** `f37b5654`  
-`CONTEXT.md` criado com documentação completa do estado atual do projeto para referência da IA em commits futuros.
+**Tipo:** docs  
+`CONTEXT.md` criado com documentação completa do estado atual do projeto: estrutura de pastas, features implementadas, features pendentes, convenções e dependências.
 
 ---
 
 ### #46 — docs: adiciona histórico completo de commits ao CONTEXT.md
+**SHA:** `513bcae2`  
+**Tipo:** docs  
+Histórico de todos os commits numerados (#1 a #46) adicionado ao `CONTEXT.md` com descrição de cada um para rastreabilidade total do projeto.
+
+---
+
+### #47 — docs: reescreve CONTEXT.md com histórico de commits numerados #1-#38 e estado atual do projeto
 **SHA:** *(este commit)*  
-Histórico de todos os commits numerados (#1 a #46) adicionado ao `CONTEXT.md` para rastreabilidade total do projeto.
+**Tipo:** docs  
+`CONTEXT.md` reescrito com histórico oficial e definitivo: todos os 38 commits reais do repositório numerados do mais antigo (#1) ao mais recente (#38), cada um com SHA, tipo e descrição detalhada do que foi feito. Seções de projeto atualizadas com estado real das features.
 
 ---
 
