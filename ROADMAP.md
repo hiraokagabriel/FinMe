@@ -122,7 +122,7 @@ FinMe é um app de finanças para pessoas que lidam com **alto volume de cartõe
 - **Modo Ultra**
   - Interface com maior densidade de informações.
   - Visão de gastos por cartão e por categoria.
-  - Seção de provisionados / “A vencer”.
+  - Seção de provisionados / "A vencer".
   - Campos avançados no cadastro de transações, como cartão, parcelas e vencimento provisionado.
 
 - **Persistência das preferências**
@@ -138,18 +138,19 @@ FinMe é um app de finanças para pessoas que lidam com **alto volume de cartõe
     - categorias
     - configurações
 
+- **Recorrência automática de transações** ✅
+- **Ícones personalizados por categoria** ✅
+
 **Itens ainda pendentes dentro de M3:**
 
 - Dashboard/Home aprimorado com gráfico de linha mensal.
 - Tela de metas.
 - Tela de relatórios exportáveis.
-- Recorrência automática de transações.
 - Múltiplas contas/carteiras além de cartões.
 - Transferência entre contas.
 - Orçamento mensal por categoria.
 - Tema escuro.
 - Splash / onboarding.
-- Ícones personalizados por categoria.
 - Persistência explícita e definitiva de preferências de visualização avançadas.
 
 **Observação:**
@@ -170,8 +171,8 @@ FinMe é um app de finanças para pessoas que lidam com **alto volume de cartõe
   - Assinaturas recorrentes (streamings, serviços, etc.).
   - Anuidades e tarifas de cartões.
 - Relatórios como:
-  - “Gastos recorrentes deste mês” vs meses anteriores.
-  - “Top categorias onde você mais gastou neste período”.
+  - "Gastos recorrentes deste mês" vs meses anteriores.
+  - "Top categorias onde você mais gastou neste período".
 - Visão de volume de gastos no **débito**:
   - Para onde está indo o dinheiro do dia a dia.
   - Sumarização por categoria e por estabelecimento (quando houver).
@@ -215,6 +216,6 @@ FinMe é um app de finanças para pessoas que lidam com **alto volume de cartõe
 - Suporte completo a:
   - iOS / iPadOS.
   - macOS.
-- Painel “Saúde financeira” com indicadores e dicas.
+- Painel "Saúde financeira" com indicadores e dicas.
 - Possíveis integrações com bancos, APIs de extrato ou agregadores financeiros.
-- Modo “auditoria rápida” para revisar um período (ex.: últimos 15 dias) e marcar gastos como essenciais/supérfluos.
+- Modo "auditoria rápida" para revisar um período (ex.: últimos 15 dias) e marcar gastos como essenciais/supérfluos.
