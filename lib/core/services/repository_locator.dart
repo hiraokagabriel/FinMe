@@ -10,6 +10,9 @@ import '../../features/cards/data/card_model.dart';
 import '../../features/cards/data/hive_cards_repository.dart';
 import '../../features/cards/data/cards_repository.dart';
 import '../../features/goals/data/goals_repository.dart';
+import '../../features/accounts/data/account_model.dart';
+import '../../features/accounts/data/hive_accounts_repository.dart';
+import '../../features/accounts/data/accounts_repository.dart';
 import 'hive_init.dart';
 
 class RepositoryLocator {
@@ -32,5 +35,9 @@ class RepositoryLocator {
 
   late final GoalsRepository goals = GoalsRepository(
     Hive.box(HiveInit.goalsBoxName),
+  );
+
+  late final AccountsRepository accounts = HiveAccountsRepository(
+    Hive.box<AccountModel>(HiveInit.accountsBoxName),
   );
 }

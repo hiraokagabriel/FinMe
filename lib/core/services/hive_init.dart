@@ -4,6 +4,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../../features/transactions/data/transaction_model.dart';
 import '../../features/categories/data/category_model.dart';
 import '../../features/cards/data/card_model.dart';
+import '../../features/accounts/data/account_model.dart';
 
 class HiveInit {
   static const String transactionsBoxName = 'transactions';
@@ -11,6 +12,7 @@ class HiveInit {
   static const String cardsBoxName        = 'cards';
   static const String goalsBoxName        = 'goals';
   static const String settingsBoxName     = 'settings';
+  static const String accountsBoxName     = 'accounts';
 
   static Future<void> init() async {
     await Hive.initFlutter();
@@ -18,6 +20,7 @@ class HiveInit {
     Hive.registerAdapter(TransactionModelAdapter());
     Hive.registerAdapter(CategoryModelAdapter());
     Hive.registerAdapter(CardModelAdapter());
+    Hive.registerAdapter(AccountModelAdapter());
 
     await Hive.openBox<String>(settingsBoxName);
 
@@ -27,6 +30,8 @@ class HiveInit {
         await Hive.openBox<CategoryModel>(categoriesBoxName);
     final cardsBox = await Hive.openBox<CardModel>(cardsBoxName);
     await Hive.openBox(goalsBoxName);
+    final accountsBox =
+        await Hive.openBox<AccountModel>(accountsBoxName);
 
     if (categoriesBox.isEmpty) {
       final seedCategories = [
@@ -85,6 +90,38 @@ class HiveInit {
       ];
       await cardsBox.putAll({
         for (final c in seedCards) c.id: c,
+      });
+    }
+
+    if (accountsBox.isEmpty) {
+      final seedAccounts = [
+        AccountModel(
+          id: 'acc_checking',
+          name: 'Conta Corrente',
+          typeIndex: AccountType.checking.index,
+          initialBalance: 0.0,
+          colorValue: 0xFF01696F,
+          isDefault: true,
+        ),
+        AccountModel(
+          id: 'acc_savings',
+          name: 'Poupança',
+          typeIndex: AccountType.savings.index,
+          initialBalance: 0.0,
+          colorValue: 0xFF43A047,
+          isDefault: false,
+        ),
+        AccountModel(
+          id: 'acc_cash',
+          name: 'Dinheiro',
+          typeIndex: AccountType.cash.index,
+          initialBalance: 0.0,
+          colorValue: 0xFFD19900,
+          isDefault: false,
+        ),
+      ];
+      await accountsBox.putAll({
+        for (final a in seedAccounts) a.id: a,
       });
     }
 

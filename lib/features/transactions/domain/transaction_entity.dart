@@ -1,42 +1,41 @@
-import '../../../core/models/money.dart';
-import '../domain/payment_method.dart';
-import '../domain/transaction_type.dart';
-import '../domain/recurrence_rule.dart';
+import 'recurrence_rule.dart';
 
 class TransactionEntity {
   final String id;
-  final Money amount;
+  final double amount;
+  final String currency;
   final DateTime date;
-  final TransactionType type;
-  final PaymentMethod paymentMethod;
-  final String? description;
-  final String categoryId;
+  final int typeIndex;
+  final int paymentMethodIndex;
+  final String description;
+  final String? categoryId;
   final String? cardId;
+  final String? accountId; // M3-A: conta vinculada
   final bool isBoleto;
   final bool isProvisioned;
   final int? installmentCount;
   final DateTime? provisionedDueDate;
-
-  /// Regra de recorrência. `none` = sem repetição.
-  final RecurrenceRule recurrenceRule;
-
-  /// ID da transação-origem de onde esta foi gerada (null = é a origem).
-  final String? recurrenceSourceId;
+  final RecurrenceRule? recurrenceRule;
+  final String? recurrenceParentId;
+  final String? notes;
 
   const TransactionEntity({
     required this.id,
     required this.amount,
+    required this.currency,
     required this.date,
-    required this.type,
-    required this.paymentMethod,
-    this.description,
-    required this.categoryId,
+    required this.typeIndex,
+    required this.paymentMethodIndex,
+    required this.description,
+    this.categoryId,
     this.cardId,
-    this.isBoleto = false,
-    this.isProvisioned = false,
+    this.accountId,
+    required this.isBoleto,
+    required this.isProvisioned,
     this.installmentCount,
     this.provisionedDueDate,
-    this.recurrenceRule = RecurrenceRule.none,
-    this.recurrenceSourceId,
+    this.recurrenceRule,
+    this.recurrenceParentId,
+    this.notes,
   });
 }
