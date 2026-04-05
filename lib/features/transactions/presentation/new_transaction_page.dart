@@ -85,9 +85,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
   }
 
   Future<void> _save() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
+    if (!_formKey.currentState!.validate()) return;
     if (_selectedCategoryId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Selecione uma categoria')),
@@ -100,12 +98,10 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
     });
 
     final locator = RepositoryLocator.instance;
-
     final amount = double.tryParse(
           _amountController.text.replaceAll(',', '.').trim(),
         ) ??
         0;
-
     final baseId = widget.initialTransaction?.id ??
         DateTime.now().microsecondsSinceEpoch.toString();
 
@@ -119,8 +115,9 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
       date: _selectedDate,
       type: _selectedType,
       paymentMethod: _selectedPaymentMethod,
-      description:
-          _descriptionController.text.isEmpty ? null : _descriptionController.text,
+      description: _descriptionController.text.isEmpty
+          ? null
+          : _descriptionController.text,
       categoryId: _selectedCategoryId!,
       cardId: effectiveCardId,
     );
@@ -155,10 +152,10 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
           RepositoryLocator.instance.cards.getAll(),
         ]),
         builder: (context, snapshot) {
-          final categories = (snapshot.data != null && snapshot.data!.isNotEmpty)
+          final categories = snapshot.data != null
               ? List.from(snapshot.data![0])
               : <dynamic>[];
-          final cards = (snapshot.data != null && snapshot.data!.length > 1)
+          final cards = snapshot.data != null
               ? List<CardEntity>.from(snapshot.data![1] as List)
               : <CardEntity>[];
 
@@ -172,6 +169,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                     controller: _descriptionController,
                     decoration: const InputDecoration(
                       labelText: 'Descricao (opcional)',
+                      hintText: 'Ex: Mercado, Cinema...',
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -182,6 +180,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                     decoration: const InputDecoration(
                       labelText: 'Valor',
                       prefixText: 'R\$ ',
+                      hintText: '0.00',
                     ),
                     validator: (value) {
                       final text = value?.trim() ?? '';
@@ -227,7 +226,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                         child: DropdownButtonFormField<PaymentMethod>(
                           value: _selectedPaymentMethod,
                           decoration: const InputDecoration(
-                            labelText: 'Forma de pagamento',
+                            labelText: 'Pagamento',
                           ),
                           items: const [
                             DropdownMenuItem(
@@ -301,7 +300,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                         ...cards.map(
                           (c) => DropdownMenuItem<String>(
                             value: c.id,
-                            child: Text('${c.name} • ${c.bankName}'),
+                            child: Text('${c.name} - ${c.bankName}'),
                           ),
                         ),
                       ],

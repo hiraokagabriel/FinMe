@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:fl_chart/fl_chart.dart';
 
 import '../data/transactions_repository.dart';
 import '../domain/transaction_entity.dart';
@@ -29,8 +30,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
   @override
   void initState() {
     super.initState();
-    final locator = RepositoryLocator.instance;
-    _transactionsRepository = locator.transactions;
+    _transactionsRepository = RepositoryLocator.instance.transactions;
     _loadData();
   }
 
@@ -63,17 +63,14 @@ class _TransactionsPageState extends State<TransactionsPage> {
     });
   }
 
-  Future<void> _openNewTransactionForm({TransactionEntity? initial}) async {
-    final createdOrUpdated = await Navigator.of(context).push<bool>(
+  Future<void> _openForm({TransactionEntity? initial}) async {
+    final ok = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
-        builder: (context) => NewTransactionPage(
-          initialTransaction: initial,
-        ),
+        builder: (context) =>
+            NewTransactionPage(initialTransaction: initial),
       ),
     );
-    if (createdOrUpdated == true) {
-      await _loadData();
-    }
+    if (ok == true) await _loadData();
   }
 
   Future<bool?> _confirmDelete(TransactionEntity tx) async {
@@ -83,7 +80,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
         return AlertDialog(
           title: const Text('Excluir transacao'),
           content: Text(
-            'Tem certeza que deseja excluir esta transacao?\n\n${tx.description ?? 'Sem descricao'}',
+            'Deseja excluir a transacao "${tx.description ?? 'Sem descricao'}"?',
           ),
           actions: [
             TextButton(
@@ -100,6 +97,112 @@ class _TransactionsPageState extends State<TransactionsPage> {
     );
   }
 
+  Widget _buildExpensesByCardChart() {
+    final cardsWithExpenses = _cardsById.values
+        .map((c) {
+          double total = 0;
+          for (final tx in _transactions) {
+            if (tx.type == TransactionType.expense && tx.cardId == c.id) {
+              total += tx.amount.amount;
+            }
+          }
+          return (card: c, total: total);
+        })
+        .where((e) => e.total > 0)
+        .toList();
+
+    if (cardsWithExpenses.isEmpty) return const SizedBox.shrink();
+
+    final colors = [
+      Colors.blue,
+      Colors.deepPurple,
+      Colors.teal,
+      Colors.orange,
+      Colors.pink,
+    ];
+
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Gastos por cartao',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 160,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: PieChart(
+                      PieChartData(
+                        sectionsSpace: 2,
+                        centerSpaceRadius: 38,
+                        sections: [
+                          for (int i = 0;
+                              i < cardsWithExpenses.length;
+                              i++)
+                            PieChartSectionData(
+                              value: cardsWithExpenses[i].total,
+                              color: colors[i % colors.length],
+                              title: '',
+                              radius: 24,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (int i = 0;
+                          i < cardsWithExpenses.length;
+                          i++) ...[
+                        Row(
+                          children: [
+                            Container(
+                              width: 10,
+                              height: 10,
+                              decoration: BoxDecoration(
+                                color: colors[i % colors.length],
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              cardsWithExpenses[i].card.name,
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ],
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.only(left: 16, bottom: 4),
+                          child: Text(
+                            'R\$ ${cardsWithExpenses[i].total.toStringAsFixed(2)}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final modeController = AppModeController.instance;
@@ -108,13 +211,14 @@ class _TransactionsPageState extends State<TransactionsPage> {
       builder: (context, _) {
         final mode = modeController.mode;
         final isSimple = mode == AppMode.simple;
+        final isUltra = mode == AppMode.ultra;
 
         return Scaffold(
           appBar: AppBar(
             title: const Text('Transacoes'),
           ),
           floatingActionButton: FloatingActionButton.extended(
-            onPressed: () => _openNewTransactionForm(),
+            onPressed: () => _openForm(),
             icon: const Icon(Icons.add),
             label: const Text('Nova transacao'),
           ),
@@ -123,65 +227,51 @@ class _TransactionsPageState extends State<TransactionsPage> {
               : Column(
                   children: [
                     Padding(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 12),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Despesas',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.red,
-                                ),
-                              ),
-                              Text(
+                          _SummaryChip(
+                            label: 'Despesas',
+                            value:
                                 '- R\$ ${_totalExpenses.toStringAsFixed(2)}',
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.red,
-                                ),
-                              ),
-                            ],
+                            color: Colors.red,
                           ),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              const Text(
-                                'Receitas',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.green,
-                                ),
-                              ),
-                              Text(
+                          _SummaryChip(
+                            label: 'Receitas',
+                            value:
                                 '+ R\$ ${_totalIncome.toStringAsFixed(2)}',
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.green,
-                                ),
-                              ),
-                            ],
+                            color: Colors.green,
+                          ),
+                          _SummaryChip(
+                            label: 'Saldo',
+                            value:
+                                'R\$ ${(_totalIncome - _totalExpenses).toStringAsFixed(2)}',
+                            color: (_totalIncome - _totalExpenses) >= 0
+                                ? Colors.blue
+                                : Colors.red,
                           ),
                         ],
                       ),
                     ),
+                    if (isUltra) _buildExpensesByCardChart(),
                     const Divider(height: 1),
                     Expanded(
                       child: ListView.separated(
+                        padding: const EdgeInsets.only(bottom: 80),
                         itemCount: _transactions.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        separatorBuilder: (_, __) =>
+                            const Divider(height: 1),
                         itemBuilder: (context, index) {
                           final tx = _transactions[index];
                           final category = _categoriesById[tx.categoryId];
-                          final card =
-                              tx.cardId != null ? _cardsById[tx.cardId!] : null;
+                          final card = tx.cardId != null
+                              ? _cardsById[tx.cardId!]
+                              : null;
 
-                          final isExpense = tx.type == TransactionType.expense;
+                          final isExpense =
+                              tx.type == TransactionType.expense;
                           final sign = isExpense ? '-' : '+';
                           final amountText =
                               '$sign R\$ ${tx.amount.amount.toStringAsFixed(2)}';
@@ -193,12 +283,12 @@ class _TransactionsPageState extends State<TransactionsPage> {
                           if (isSimple) {
                             subtitleText = dateText;
                           } else {
-                            final categoryPart =
+                            final catPart =
                                 category?.name ?? 'Sem categoria';
                             final cardPart =
                                 card != null ? card.name : 'Sem cartao';
                             subtitleText =
-                                '$categoryPart • $cardPart • $dateText';
+                                '$catPart \u2022 $cardPart \u2022 $dateText';
                           }
 
                           return Dismissible(
@@ -211,32 +301,32 @@ class _TransactionsPageState extends State<TransactionsPage> {
                               if (!mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
-                                  content:
-                                      Text('Transacao excluida com sucesso'),
+                                  content: Text(
+                                      'Transacao excluida com sucesso'),
                                 ),
                               );
                             },
                             background: Container(
                               color: Colors.red,
                               alignment: Alignment.centerRight,
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 16),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16),
                               child: const Icon(
                                 Icons.delete,
                                 color: Colors.white,
                               ),
                             ),
                             child: ListTile(
-                              onTap: () =>
-                                  _openNewTransactionForm(initial: tx),
-                              title:
-                                  Text(tx.description ?? 'Sem descricao'),
+                              onTap: () => _openForm(initial: tx),
+                              title: Text(
+                                  tx.description ?? 'Sem descricao'),
                               subtitle: Text(subtitleText),
                               trailing: Text(
                                 amountText,
                                 style: TextStyle(
-                                  color:
-                                      isExpense ? Colors.red : Colors.green,
+                                  color: isExpense
+                                      ? Colors.red
+                                      : Colors.green,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
@@ -249,6 +339,43 @@ class _TransactionsPageState extends State<TransactionsPage> {
                 ),
         );
       },
+    );
+  }
+}
+
+class _SummaryChip extends StatelessWidget {
+  const _SummaryChip({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            color: Colors.grey[600],
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
+        ),
+      ],
     );
   }
 }

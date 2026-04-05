@@ -106,6 +106,7 @@ class _NewCardPageState extends State<NewCardPage> {
                 controller: _nameController,
                 decoration: const InputDecoration(
                   labelText: 'Nome do cartao',
+                  hintText: 'Ex: Nubank Gold',
                 ),
                 validator: (value) {
                   if ((value ?? '').trim().isEmpty) {
@@ -119,6 +120,7 @@ class _NewCardPageState extends State<NewCardPage> {
                 controller: _bankController,
                 decoration: const InputDecoration(
                   labelText: 'Banco',
+                  hintText: 'Ex: Nubank',
                 ),
                 validator: (value) {
                   if ((value ?? '').trim().isEmpty) {
@@ -162,6 +164,7 @@ class _NewCardPageState extends State<NewCardPage> {
                       decoration: const InputDecoration(
                         labelText: 'Limite (opcional)',
                         prefixText: 'R\$ ',
+                        hintText: '5000.00',
                       ),
                     ),
                   ),
@@ -170,7 +173,7 @@ class _NewCardPageState extends State<NewCardPage> {
                     child: DropdownButtonFormField<int>(
                       value: _dueDay,
                       decoration: const InputDecoration(
-                        labelText: 'Dia de vencimento',
+                        labelText: 'Vencimento',
                       ),
                       items: List.generate(
                         28,

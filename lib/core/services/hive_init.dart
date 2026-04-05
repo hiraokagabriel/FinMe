@@ -18,7 +18,8 @@ class HiveInit {
 
     final transactionsBox =
         await Hive.openBox<TransactionModel>(transactionsBoxName);
-    final categoriesBox = await Hive.openBox<CategoryModel>(categoriesBoxName);
+    final categoriesBox =
+        await Hive.openBox<CategoryModel>(categoriesBoxName);
     final cardsBox = await Hive.openBox<CardModel>(cardsBoxName);
 
     if (categoriesBox.isEmpty) {
