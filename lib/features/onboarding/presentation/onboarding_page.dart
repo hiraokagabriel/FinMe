@@ -14,10 +14,20 @@ class OnboardingPage extends StatefulWidget {
 }
 
 class _OnboardingPageState extends State<OnboardingPage> {
-  int _step = 0; // 0 = splash, 1 = modo
+  int _step = 0;
   AppMode? _selectedMode;
 
-  void _goToModeStep() => setState(() => _step = 1);
+  void _goToModeStep() {
+    setState(() {
+      _step = 1;
+    });
+  }
+
+  void _selectMode(AppMode mode) {
+    setState(() {
+      _selectedMode = mode;
+    });
+  }
 
   Future<void> _finish() async {
     if (_selectedMode == null) return;
@@ -38,14 +48,15 @@ class _OnboardingPageState extends State<OnboardingPage> {
         duration: const Duration(milliseconds: 400),
         switchInCurve: Curves.easeIn,
         switchOutCurve: Curves.easeOut,
-        transitionBuilder: (child, animation) =>
-            FadeTransition(opacity: animation, child: child),
+        transitionBuilder: (child, animation) {
+          return FadeTransition(opacity: animation, child: child);
+        },
         child: _step == 0
             ? _SplashStep(key: const ValueKey(0), onNext: _goToModeStep)
             : _ModeStep(
                 key: const ValueKey(1),
                 selectedMode: _selectedMode,
-                onSelect: (mode) => setState(() => _selectedMode = mode),
+                onSelect: _selectMode,
                 onFinish: _finish,
               ),
       ),
@@ -123,7 +134,7 @@ class _SplashStep extends StatelessWidget {
   }
 }
 
-// ───────────────────────────── SELEÇÃO DE MODO ─────────────────────────────
+// ───────────────────────────── SELEÇÃO DE MODO ────────────────────────
 
 class _ModeStep extends StatelessWidget {
   final AppMode? selectedMode;
@@ -165,7 +176,9 @@ class _ModeStep extends StatelessWidget {
                   'Visão enxuta. Ideal para quem quer controlar gastos do dia a dia sem complicação.',
               icon: Icons.wb_sunny_outlined,
               selected: selectedMode == AppMode.simple,
-              onTap: () => onSelect(AppMode.simple),
+              onTap: () {
+                onSelect(AppMode.simple);
+              },
             ),
             const SizedBox(height: AppSpacing.md),
             _ModeCard(
@@ -174,7 +187,9 @@ class _ModeStep extends StatelessWidget {
                   'Visão completa com gráficos, múltiplos cartões, provisionamentos e análises detalhadas.',
               icon: Icons.bolt_outlined,
               selected: selectedMode == AppMode.ultra,
-              onTap: () => onSelect(AppMode.ultra),
+              onTap: () {
+                onSelect(AppMode.ultra);
+              },
             ),
             const SizedBox(height: AppSpacing.h),
             SizedBox(
@@ -230,7 +245,9 @@ class _ModeCard extends StatelessWidget {
               : cs.surfaceContainerHighest.withValues(alpha: 0.4),
           borderRadius: BorderRadius.circular(AppRadius.card),
           border: Border.all(
-            color: selected ? cs.primary : cs.outline.withValues(alpha: 0.3),
+            color: selected
+                ? cs.primary
+                : cs.outline.withValues(alpha: 0.3),
             width: selected ? 2 : 1,
           ),
         ),
