@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
-import '../../data/transactions_repository.dart';
-import '../../domain/transaction_entity.dart';
-import '../../domain/transaction_type.dart';
-import '../../../categories/data/categories_repository.dart';
-import '../../../categories/domain/category_entity.dart';
+import '../data/transactions_repository.dart';
+import '../domain/transaction_entity.dart';
+import '../domain/transaction_type.dart';
+import '../../categories/data/categories_repository.dart';
+import '../../categories/domain/category_entity.dart';
 
 class TransactionsPage extends StatefulWidget {
   const TransactionsPage({super.key});
@@ -60,7 +60,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
 
                 final isExpense = tx.type == TransactionType.expense;
                 final sign = isExpense ? '-' : '+';
-                final amountText = '$sign R$ ${tx.amount.amount.toStringAsFixed(2)}';
+                final amountText = '$sign R\$ ${tx.amount.amount.toStringAsFixed(2)}';
 
                 return ListTile(
                   title: Text(tx.description ?? 'Sem descrição'),
