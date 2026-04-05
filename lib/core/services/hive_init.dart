@@ -9,6 +9,7 @@ class HiveInit {
   static const String categoriesBoxName   = 'categories';
   static const String cardsBoxName        = 'cards';
   static const String goalsBoxName        = 'goals';
+  static const String settingsBoxName     = 'settings'; // preferências do app
 
   static Future<void> init() async {
     await Hive.initFlutter();
@@ -17,12 +18,15 @@ class HiveInit {
     Hive.registerAdapter(CategoryModelAdapter());
     Hive.registerAdapter(CardModelAdapter());
 
+    // Abre todos os boxes — settingsBox deve ser o primeiro para que
+    // AppModeController e ThemeController possam ler sem reabrir.
+    await Hive.openBox<String>(settingsBoxName);
+
     final transactionsBox =
         await Hive.openBox<TransactionModel>(transactionsBoxName);
     final categoriesBox =
         await Hive.openBox<CategoryModel>(categoriesBoxName);
-    final cardsBox   = await Hive.openBox<CardModel>(cardsBoxName);
-    // goals usa Box dinâmica (Map) – sem adapter gerado
+    final cardsBox = await Hive.openBox<CardModel>(cardsBoxName);
     await Hive.openBox(goalsBoxName);
 
     if (categoriesBox.isEmpty) {
