@@ -29,7 +29,7 @@ lib/
 │   │   ├── date_range.dart
 │   │   └── money.dart
 │   ├── services/
-│   │   ├── hive_init.dart             # Abre box 'accounts' + registra AccountModelAdapter
+│   │   ├── hive_init.dart             # Abre box 'accounts' + registra AccountModelAdapter (typeId 4)
 │   │   ├── app_mode_controller.dart
 │   │   ├── theme_controller.dart
 │   │   ├── recurrence_service.dart
@@ -65,7 +65,7 @@ docs/
     │   ├── domain/
     │   │   └── account_entity.dart
     │   ├── data/
-    │   │   ├── account_model.dart
+    │   │   ├── account_model.dart      # typeId 4 (era 3, conflitava com CardModel — fix #52)
     │   │   ├── accounts_repository.dart
     │   │   └── hive_accounts_repository.dart
     │   └── presentation/
@@ -133,7 +133,7 @@ docs/
 
 ### 3.9 Múltiplas Contas/Carteiras ✅ (M3-A)
 - `AccountEntity` com tipos: Conta Corrente, Poupança, Dinheiro, Investimento, Outro
-- `AccountModel` (typeId 3) + `AccountModelAdapter` manual
+- `AccountModel` (typeId **4**) + `AccountModelAdapter` manual
 - `HiveAccountsRepository` com CRUD e setDefault
 - `AccountsPage`: listagem com saldo calculado pelas transações, CRUD via bottom sheet, cor personalizada
 - Seed automático com 3 contas padrão no primeiro boot
@@ -159,8 +159,9 @@ docs/
 
 ### 3.13 Persistência
 - Hive com adapters manuais (sem build_runner)
-- TypeIds: `0` TransactionModel, `1` CategoryModel, `2` CardModel, `3` AccountModel, `5` GoalModel
+- TypeIds: `0` TransactionModel, `1` CategoryModel, `2` CardModel, `4` AccountModel, `5` GoalModel
 - Boxes: `transactions`, `categories`, `cards`, `settings`, `goals`, `accounts`
+- Todos os `registerAdapter` protegidos com `Hive.isAdapterRegistered(...)` ✅ fix #52
 
 ---
 
@@ -212,9 +213,10 @@ docs/
 | 0 | TransactionModel |
 | 1 | CategoryModel |
 | 2 | CardModel |
-| 3 | AccountModel ✅ |
-| 4 | *(reservado para BudgetModel — M3-E)* |
+| 3 | *(livre — não usar; era AccountModel antes do fix #52)* |
+| 4 | AccountModel ✅ |
 | 5 | GoalModel ✅ |
+| 6+ | *(reservado para BudgetModel — M3-E e futuros)* |
 
 ### Rotas
 | Rota | Tela |
@@ -242,6 +244,8 @@ docs/
 8. **AppRadius.chip:** Usar `AppRadius.chip` para chips/badges (commit #36).
 9. **TransactionType.transfer:** Ao exibir transações na UI, tratar `transfer` separado de `income`/`expense` — não somar ao saldo duas vezes. O par `_out`/`_in` representa os dois lados da transferência.
 10. **TransactionModel índices 15/16:** Campos `toAccountId` e `notes` são opcionais/nullable — registros antigos sem esses campos continuam lidos corretamente.
+11. **TypeId 3 está LIVRE:** Nunca reutilizar typeId 3 — era `AccountModel` antes do fix #52 e pode estar gravado em boxes de usuários antigos. Próximo typeId disponível é **6**.
+12. **isAdapterRegistered obrigatório:** Todo `Hive.registerAdapter(...)` em `hive_init.dart` deve ser envolvido com `if (!Hive.isAdapterRegistered(id))` para evitar crash em hot-restart.
 
 ---
 
@@ -454,6 +458,11 @@ Criado `docs/M3_REPORT.md` com rastreamento detalhado dos itens M3-C, M3-D e M3-
 ### #51 — fix(dashboard): null-safety em categoryId no RecentTransactionRow
 **SHA:** `9353359b` | **Tipo:** fix  
 Corrigido erro de compilação no Windows em `dashboard_page.dart`: `categoryId` é `String?` e estava sendo usado sem checagem de nulidade. Aplicado fallback `?? ''` e renderização condicional do texto.
+
+### #52 — fix(hive): corrige conflito typeId 3 entre CardModel e AccountModel
+**SHA:** `4f4f073c` | **Tipo:** fix  
+Crash de boot no Windows: `HiveError: There is already a TypeAdapter for typeId 3`. `AccountModelAdapter` usava o mesmo `typeId = 3` que `CardModelAdapter`. Corrigido: `AccountModelAdapter.typeId` alterado para `4`. Todos os `registerAdapter` em `hive_init.dart` protegidos com `Hive.isAdapterRegistered(...)` para evitar re-registro em hot-restart. TypeId 3 marcado como livre (não reutilizar). Próximo typeId disponível: **6**.
+
 ---
 
 *Este arquivo deve ser atualizado a cada commit. Marque os itens da seção 4 como ✅ conforme forem entregues.*
