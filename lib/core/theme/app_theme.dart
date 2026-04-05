@@ -35,8 +35,10 @@ abstract final class AppColors {
   // ── Status ───────────────────────────────────────────────────
   static const Color warning         = Color(0xFFFF9800);
   static const Color danger          = Color(0xFFE53935);
+  static const Color success         = Color(0xFF43A047);
   static const Color warningDark     = Color(0xFFFFB74D);
   static const Color dangerDark      = Color(0xFFEF5350);
+  static const Color successDark     = Color(0xFF66BB6A);
 
   // ── Utilitários internos ─────────────────────────────────────
   static const Color _divider        = Color(0x1F5F6368);
