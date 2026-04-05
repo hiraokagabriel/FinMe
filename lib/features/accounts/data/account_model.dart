@@ -1,7 +1,7 @@
 import 'package:hive/hive.dart';
 import '../domain/account_entity.dart';
 
-// typeId: 3 (reservado no CONTEXT.md)
+// typeId: 4 (3 era conflito com CardModelAdapter — corrigido em #52)
 class AccountModel extends HiveObject {
   String id;
   String name;
@@ -40,7 +40,7 @@ class AccountModel extends HiveObject {
 
 class AccountModelAdapter extends TypeAdapter<AccountModel> {
   @override
-  final int typeId = 3;
+  final int typeId = 4;
 
   @override
   AccountModel read(BinaryReader reader) {
