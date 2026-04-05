@@ -401,6 +401,8 @@ class _RecentTransactionRow extends StatelessWidget {
 
     // Usa description com fallback para string vazia se nulo
     final descriptionText = transaction.description ?? '';
+    // Usa categoryId com fallback para string vazia se nulo
+    final categoryText = transaction.categoryId ?? '';
 
     return Column(
       children: [
@@ -440,9 +442,9 @@ class _RecentTransactionRow extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    if (transaction.categoryId.isNotEmpty)
+                    if (categoryText.isNotEmpty)
                       Text(
-                        transaction.categoryId,
+                        categoryText,
                         style: AppText.secondary,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
