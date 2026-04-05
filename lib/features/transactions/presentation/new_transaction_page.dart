@@ -8,6 +8,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../cards/domain/card_entity.dart';
 import '../../categories/domain/category_entity.dart';
 import '../domain/payment_method.dart';
+import '../domain/recurrence_rule.dart';
 import '../domain/transaction_entity.dart';
 import '../domain/transaction_type.dart';
 
@@ -25,14 +26,15 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
   final _descriptionController = TextEditingController();
   final _amountController      = TextEditingController();
   final _installmentController = TextEditingController();
-  late DateTime     _selectedDate;
-  late TransactionType    _selectedType;
-  late PaymentMethod      _selectedPaymentMethod;
-  String? _selectedCategoryId;
-  String? _selectedCardId;
-  bool    _isProvisioned    = false;
-  DateTime? _provisionedDueDate;
-  bool    _isSaving         = false;
+  late DateTime        _selectedDate;
+  late TransactionType _selectedType;
+  late PaymentMethod   _selectedPaymentMethod;
+  String?          _selectedCategoryId;
+  String?          _selectedCardId;
+  bool             _isProvisioned   = false;
+  DateTime?        _provisionedDueDate;
+  RecurrenceRule   _recurrenceRule  = RecurrenceRule.none;
+  bool             _isSaving        = false;
 
   late final Future<List<dynamic>> _loadFuture;
 
@@ -52,6 +54,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
       _selectedCardId             = initial.cardId;
       _isProvisioned              = initial.isProvisioned;
       _provisionedDueDate         = initial.provisionedDueDate;
+      _recurrenceRule             = initial.recurrenceRule;
       if (initial.installmentCount != null) {
         _installmentController.text = initial.installmentCount.toString();
       }
@@ -125,21 +128,23 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
         : null;
 
     final tx = TransactionEntity(
-      id:                  baseId,
-      amount:              Money(amount),
-      date:                _selectedDate,
-      type:                _selectedType,
-      paymentMethod:       _selectedPaymentMethod,
-      description:         _descriptionController.text.isEmpty
+      id:                 baseId,
+      amount:             Money(amount),
+      date:               _selectedDate,
+      type:               _selectedType,
+      paymentMethod:      _selectedPaymentMethod,
+      description:        _descriptionController.text.isEmpty
           ? null
           : _descriptionController.text,
-      categoryId:          _selectedCategoryId!,
-      cardId:              effectiveCard,
-      isProvisioned:       isUltra ? _isProvisioned : false,
-      provisionedDueDate:  (isUltra && _isProvisioned)
+      categoryId:         _selectedCategoryId!,
+      cardId:             effectiveCard,
+      isProvisioned:      isUltra ? _isProvisioned : false,
+      provisionedDueDate: (isUltra && _isProvisioned)
           ? _provisionedDueDate
           : null,
-      installmentCount:    installments,
+      installmentCount:   installments,
+      recurrenceRule:     _recurrenceRule,
+      recurrenceSourceId: null, // sempre null ao criar manualmente
     );
 
     if (_isEdit) {
@@ -182,7 +187,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
               key: _formKey,
               child: ListView(
                 children: [
-                  // ── Descrição ──────────────────────────────────────────
+                  // ── Descrição ─────────────────────────────────────────────────
                   TextFormField(
                     controller: _descriptionController,
                     decoration: const InputDecoration(
@@ -192,7 +197,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                   ),
                   const SizedBox(height: AppSpacing.md),
 
-                  // ── Valor ─────────────────────────────────────────────
+                  // ── Valor ───────────────────────────────────────────────────────
                   TextFormField(
                     controller: _amountController,
                     keyboardType: const TextInputType.numberWithOptions(
@@ -215,7 +220,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                   ),
                   const SizedBox(height: AppSpacing.md),
 
-                  // ── Tipo + Pagamento ───────────────────────────────────
+                  // ── Tipo + Pagamento ─────────────────────────────────────────
                   Row(
                     children: [
                       Expanded(
@@ -234,7 +239,8 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                             ),
                           ],
                           onChanged: (v) {
-                            if (v != null) setState(() => _selectedType = v);
+                            if (v != null)
+                              setState(() => _selectedType = v);
                           },
                         ),
                       ),
@@ -242,8 +248,8 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                       Expanded(
                         child: DropdownButtonFormField<PaymentMethod>(
                           value: _selectedPaymentMethod,
-                          decoration:
-                              const InputDecoration(labelText: 'Pagamento'),
+                          decoration: const InputDecoration(
+                              labelText: 'Pagamento'),
                           items: const [
                             DropdownMenuItem(
                                 value: PaymentMethod.creditCard,
@@ -266,7 +272,8 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                           ],
                           onChanged: (v) {
                             if (v != null)
-                              setState(() => _selectedPaymentMethod = v);
+                              setState(
+                                  () => _selectedPaymentMethod = v);
                           },
                         ),
                       ),
@@ -274,7 +281,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                   ),
                   const SizedBox(height: AppSpacing.md),
 
-                  // ── Categoria ─────────────────────────────────────────
+                  // ── Categoria ─────────────────────────────────────────────────
                   DropdownButtonFormField<String>(
                     value: _selectedCategoryId,
                     decoration:
@@ -288,9 +295,9 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                     onChanged: (v) =>
                         setState(() => _selectedCategoryId = v),
                   ),
-
-                  // ── Data ──────────────────────────────────────────────
                   const SizedBox(height: AppSpacing.xs),
+
+                  // ── Data ─────────────────────────────────────────────────────────
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Data da transação'),
@@ -298,16 +305,55 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                     trailing: TextButton(
                       onPressed: () => _pickDate(
                         initial: _selectedDate,
-                        onPick: (d) => setState(() => _selectedDate = d),
+                        onPick: (d) =>
+                            setState(() => _selectedDate = d),
                       ),
                       child: const Text('Alterar'),
                     ),
                   ),
 
-                  // ── Modo Ultra ────────────────────────────────────────
+                  // ── Repetição (disponível em ambos os modos) ─────────────────
+                  DropdownButtonFormField<RecurrenceRule>(
+                    value: _recurrenceRule,
+                    decoration: const InputDecoration(
+                      labelText: 'Repetir',
+                      prefixIcon: Icon(Icons.repeat_outlined),
+                    ),
+                    items: RecurrenceRule.values
+                        .map((r) => DropdownMenuItem(
+                              value: r,
+                              child: Text(r.label),
+                            ))
+                        .toList(),
+                    onChanged: (v) {
+                      if (v != null)
+                        setState(() => _recurrenceRule = v);
+                    },
+                  ),
+                  if (_recurrenceRule != RecurrenceRule.none)
+                    Padding(
+                      padding: const EdgeInsets.only(
+                          top: AppSpacing.xs,
+                          left: AppSpacing.xs),
+                      child: Row(
+                        children: [
+                          Icon(Icons.info_outline,
+                              size: 14,
+                              color: AppColors.primary),
+                          const SizedBox(width: AppSpacing.xs),
+                          Flexible(
+                            child: Text(
+                              'Ocorrências futuras serão criadas automaticamente ao abrir o app.',
+                              style: AppText.secondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  // ── Modo Ultra ─────────────────────────────────────────────
                   if (isUltra) ...[
                     const Divider(height: AppSpacing.xxl),
-                    // Badge "Modo Ultra"
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: AppSpacing.md,
@@ -332,11 +378,13 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                           labelText: 'Cartão (opcional)'),
                       items: [
                         const DropdownMenuItem<String>(
-                            value: null, child: Text('Sem cartão')),
+                            value: null,
+                            child: Text('Sem cartão')),
                         ...cards.map(
                           (c) => DropdownMenuItem<String>(
                             value: c.id,
-                            child: Text('${c.name} — ${c.bankName}'),
+                            child: Text(
+                                '${c.name} — ${c.bankName}'),
                           ),
                         ),
                       ],
@@ -374,20 +422,22 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                         _isProvisioned = v;
                         if (!v) _provisionedDueDate = null;
                       }),
-                      title: const Text('Provisionar (ainda não pago)'),
+                      title:
+                          const Text('Provisionar (ainda não pago)'),
                       subtitle: const Text(
                         'Contabiliza o gasto mas indica que ainda não saiu da conta.',
                       ),
                     ),
 
-                    // Data de vencimento
                     if (_isProvisioned)
                       ListTile(
                         contentPadding: EdgeInsets.zero,
-                        leading: Icon(Icons.event_outlined,
-                            color: _provisionedDueDate == null
-                                ? AppColors.warning
-                                : AppColors.textSecondary),
+                        leading: Icon(
+                          Icons.event_outlined,
+                          color: _provisionedDueDate == null
+                              ? AppColors.warning
+                              : AppColors.textSecondary,
+                        ),
                         title: const Text('Vencimento'),
                         subtitle: Text(
                           _provisionedDueDate != null
@@ -396,7 +446,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                           style: TextStyle(
                             color: _provisionedDueDate == null
                                 ? AppColors.warning
-                                : AppColors.textPrimary,
+                                : null,
                           ),
                         ),
                         trailing: TextButton(
@@ -405,8 +455,8 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                                 DateTime.now()
                                     .add(const Duration(days: 7)),
                             firstDate: DateTime.now(),
-                            lastDate: DateTime.now()
-                                .add(const Duration(days: 365 * 2)),
+                            lastDate: DateTime.now().add(
+                                const Duration(days: 365 * 2)),
                             onPick: (d) => setState(
                                 () => _provisionedDueDate = d),
                           ),

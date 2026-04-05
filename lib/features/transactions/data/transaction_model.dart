@@ -4,6 +4,7 @@ import '../../../core/models/money.dart';
 import '../domain/transaction_entity.dart';
 import '../domain/transaction_type.dart';
 import '../domain/payment_method.dart';
+import '../domain/recurrence_rule.dart';
 
 class TransactionModel {
   final String id;
@@ -17,9 +18,11 @@ class TransactionModel {
   final String? cardId;
   final bool isBoleto;
   final bool isProvisioned;
-  // M3 - provisionamento avancado (indices 11 e 12 - retrocompativeis)
   final int? installmentCount;
   final DateTime? provisionedDueDate;
+  // índices 13 e 14: recorrência — retrocompatíveis com registros antigos
+  final int recurrenceRuleIndex;
+  final String? recurrenceSourceId;
 
   TransactionModel({
     required this.id,
@@ -35,6 +38,8 @@ class TransactionModel {
     required this.isProvisioned,
     this.installmentCount,
     this.provisionedDueDate,
+    this.recurrenceRuleIndex = 0,
+    this.recurrenceSourceId,
   });
 
   TransactionEntity toEntity() {
@@ -51,6 +56,10 @@ class TransactionModel {
       isProvisioned: isProvisioned,
       installmentCount: installmentCount,
       provisionedDueDate: provisionedDueDate,
+      recurrenceRule: recurrenceRuleIndex < RecurrenceRule.values.length
+          ? RecurrenceRule.values[recurrenceRuleIndex]
+          : RecurrenceRule.none,
+      recurrenceSourceId: recurrenceSourceId,
     );
   }
 
@@ -69,6 +78,8 @@ class TransactionModel {
       isProvisioned: entity.isProvisioned,
       installmentCount: entity.installmentCount,
       provisionedDueDate: entity.provisionedDueDate,
+      recurrenceRuleIndex: entity.recurrenceRule.index,
+      recurrenceSourceId: entity.recurrenceSourceId,
     );
   }
 }
@@ -95,16 +106,18 @@ class TransactionModelAdapter extends TypeAdapter<TransactionModel> {
       cardId: fields[8] as String?,
       isBoleto: fields[9] as bool,
       isProvisioned: fields[10] as bool,
-      // indices 11 e 12: opcionais - registros antigos nao terao esses campos
       installmentCount: fields[11] as int?,
       provisionedDueDate: fields[12] as DateTime?,
+      // índices 13 e 14: opcionais — registros antigos não terão esses campos
+      recurrenceRuleIndex: (fields[13] as int?) ?? 0,
+      recurrenceSourceId: fields[14] as String?,
     );
   }
 
   @override
   void write(BinaryWriter writer, TransactionModel obj) {
     writer
-      ..writeByte(13)
+      ..writeByte(15)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -130,6 +143,10 @@ class TransactionModelAdapter extends TypeAdapter<TransactionModel> {
       ..writeByte(11)
       ..write(obj.installmentCount)
       ..writeByte(12)
-      ..write(obj.provisionedDueDate);
+      ..write(obj.provisionedDueDate)
+      ..writeByte(13)
+      ..write(obj.recurrenceRuleIndex)
+      ..writeByte(14)
+      ..write(obj.recurrenceSourceId);
   }
 }

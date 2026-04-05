@@ -1,6 +1,7 @@
 import '../../../core/models/money.dart';
 import '../domain/payment_method.dart';
 import '../domain/transaction_type.dart';
+import '../domain/recurrence_rule.dart';
 
 class TransactionEntity {
   final String id;
@@ -13,12 +14,14 @@ class TransactionEntity {
   final String? cardId;
   final bool isBoleto;
   final bool isProvisioned;
-
-  // Provisionamento avancado (M3)
-  // installmentCount: numero de parcelas (null = nao parcelado)
-  // provisionedDueDate: data de vencimento do boleto/parcela provisionada
   final int? installmentCount;
   final DateTime? provisionedDueDate;
+
+  /// Regra de recorrência. `none` = sem repetição.
+  final RecurrenceRule recurrenceRule;
+
+  /// ID da transação-origem de onde esta foi gerada (null = é a origem).
+  final String? recurrenceSourceId;
 
   const TransactionEntity({
     required this.id,
@@ -33,5 +36,7 @@ class TransactionEntity {
     this.isProvisioned = false,
     this.installmentCount,
     this.provisionedDueDate,
+    this.recurrenceRule = RecurrenceRule.none,
+    this.recurrenceSourceId,
   });
 }
