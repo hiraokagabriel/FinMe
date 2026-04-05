@@ -1,4 +1,5 @@
 import '../domain/card_entity.dart';
+import '../domain/card_type.dart';
 
 abstract class CardsRepository {
   Future<List<CardEntity>> getAll();
