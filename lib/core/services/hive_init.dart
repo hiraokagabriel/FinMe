@@ -18,16 +18,19 @@ class HiveInit {
   static Future<void> init() async {
     await Hive.initFlutter();
 
-    // Guards evitam HiveError em hot-restart ou chamadas duplas
+    // typeId 0 = TransactionModelAdapter
     if (!Hive.isAdapterRegistered(0)) {
       Hive.registerAdapter(TransactionModelAdapter());
     }
-    if (!Hive.isAdapterRegistered(1)) {
+    // typeId 2 = CategoryModelAdapter
+    if (!Hive.isAdapterRegistered(2)) {
       Hive.registerAdapter(CategoryModelAdapter());
     }
-    if (!Hive.isAdapterRegistered(2)) {
+    // typeId 3 = CardModelAdapter
+    if (!Hive.isAdapterRegistered(3)) {
       Hive.registerAdapter(CardModelAdapter());
     }
+    // typeId 4 = AccountModelAdapter
     if (!Hive.isAdapterRegistered(4)) {
       Hive.registerAdapter(AccountModelAdapter());
     }
