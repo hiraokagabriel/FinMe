@@ -159,9 +159,9 @@ docs/
 
 ### 3.13 Persistência
 - Hive com adapters manuais (sem build_runner)
-- TypeIds: `0` TransactionModel, `1` CategoryModel, `2` CardModel, `4` AccountModel, `5` GoalModel
+- TypeIds: `0` TransactionModel, `2` CategoryModel, `3` CardModel, `4` AccountModel, `5` GoalModel
 - Boxes: `transactions`, `categories`, `cards`, `settings`, `goals`, `accounts`
-- Todos os `registerAdapter` protegidos com `Hive.isAdapterRegistered(...)` ✅ fix #52
+- Todos os `registerAdapter` protegidos com `Hive.isAdapterRegistered(typeId_correto)` ✅ fix #53
 
 ---
 
@@ -211,12 +211,14 @@ docs/
 | TypeId | Classe |
 |--------|--------|
 | 0 | TransactionModel |
-| 1 | CategoryModel |
-| 2 | CardModel |
-| 3 | *(livre — não usar; era AccountModel antes do fix #52)* |
+| 2 | CategoryModel |
+| 3 | CardModel |
+| 1 | *(livre — não usar)* |
 | 4 | AccountModel ✅ |
 | 5 | GoalModel ✅ |
 | 6+ | *(reservado para BudgetModel — M3-E e futuros)* |
+
+> ⚠️ **Atenção:** os guards `Hive.isAdapterRegistered(n)` em `hive_init.dart` devem usar o **mesmo typeId** declarado no adapter. Usar o typeId errado faz o guard considerar o adapter já registrado (por outro adapter) e pular o registro — causando crash `Cannot write, unknown type` no primeiro boot. Ver fix #53.
 
 ### Rotas
 | Rota | Tela |
@@ -244,8 +246,9 @@ docs/
 8. **AppRadius.chip:** Usar `AppRadius.chip` para chips/badges (commit #36).
 9. **TransactionType.transfer:** Ao exibir transações na UI, tratar `transfer` separado de `income`/`expense` — não somar ao saldo duas vezes. O par `_out`/`_in` representa os dois lados da transferência.
 10. **TransactionModel índices 15/16:** Campos `toAccountId` e `notes` são opcionais/nullable — registros antigos sem esses campos continuam lidos corretamente.
-11. **TypeId 3 está LIVRE:** Nunca reutilizar typeId 3 — era `AccountModel` antes do fix #52 e pode estar gravado em boxes de usuários antigos. Próximo typeId disponível é **6**.
-12. **isAdapterRegistered obrigatório:** Todo `Hive.registerAdapter(...)` em `hive_init.dart` deve ser envolvido com `if (!Hive.isAdapterRegistered(id))` para evitar crash em hot-restart.
+11. **TypeId 3 está em uso (CardModel):** Nunca reutilizar typeIds existentes. TypeId 1 está livre mas evitar por precaução. Próximo typeId disponível: **6**.
+12. **isAdapterRegistered — typeId DEVE ser o mesmo do adapter:** O argumento de `Hive.isAdapterRegistered(n)` deve ser exatamente o `typeId` declarado no `TypeAdapter` correspondente. Usar o typeId errado faz o guard falhar silenciosamente — o adapter não é registrado e o Hive lança `Cannot write, unknown type` no primeiro boot. Ver fix #53.
+13. **Apagar arquivos .hive em caso de corrupção:** Se o typeId de um adapter for alterado após dados já gravados, os arquivos `.hive` locais ficam com typeIds obsoletos e o Hive lança `Cannot read, unknown typeId` no boot. Solução: apagar os arquivos em `AppData\Roaming\com.example.finme\` e rodar novamente — o seed recria os dados.
 
 ---
 
@@ -463,6 +466,6 @@ Corrigido erro de compilação no Windows em `dashboard_page.dart`: `categoryId`
 **SHA:** `4f4f073c` | **Tipo:** fix  
 Crash de boot no Windows: `HiveError: There is already a TypeAdapter for typeId 3`. `AccountModelAdapter` usava o mesmo `typeId = 3` que `CardModelAdapter`. Corrigido: `AccountModelAdapter.typeId` alterado para `4`. Todos os `registerAdapter` em `hive_init.dart` protegidos com `Hive.isAdapterRegistered(...)` para evitar re-registro em hot-restart. TypeId 3 marcado como livre (não reutilizar). Próximo typeId disponível: **6**.
 
----
-
-*Este arquivo deve ser atualizado a cada commit. Marque os itens da seção 4 como ✅ conforme forem entregues.*
+### #53 — fix(hive): corrige typeIds nos guards isAdapterRegistered
+**SHA:** `33146b0f` | **Tipo:** fix  
+Crash de boot: `HiveError: Cannot write, unknown type: CategoryModel`. Os guards `isAdapterRegistered(n)` em `hive_init.dart` usavam typeIds errados — `CategoryModelAdapter` (typeId real **2**) estava sendo verificado com `isAdapterRegistered(1)`, e `CardModelAdapter` (typeId real **3**) com `isAdapterRegistered(2)`. O guard considerava o adapter já registrado (por outro adapter com aquele typeId) e pulava o registro. Corrigido para que cada guard use o mesmo typeId declarado no adapter correspondente. Mapa final: `0=Transaction`, `2=Category`, `3=Card`, `4=Account`. Arquivos `.hive` corrompidos devem ser apagados de `AppData\Roaming\com.example.finme\` e o app reiniciado para o seed recriar os dados.
