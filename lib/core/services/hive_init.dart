@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
 import '../../features/transactions/data/transaction_model.dart';
@@ -9,7 +10,7 @@ class HiveInit {
   static const String categoriesBoxName   = 'categories';
   static const String cardsBoxName        = 'cards';
   static const String goalsBoxName        = 'goals';
-  static const String settingsBoxName     = 'settings'; // preferências do app
+  static const String settingsBoxName     = 'settings';
 
   static Future<void> init() async {
     await Hive.initFlutter();
@@ -18,8 +19,6 @@ class HiveInit {
     Hive.registerAdapter(CategoryModelAdapter());
     Hive.registerAdapter(CardModelAdapter());
 
-    // Abre todos os boxes — settingsBox deve ser o primeiro para que
-    // AppModeController e ThemeController possam ler sem reabrir.
     await Hive.openBox<String>(settingsBoxName);
 
     final transactionsBox =
@@ -36,24 +35,28 @@ class HiveInit {
           name: 'Alimentação',
           kindIndex: 0,
           colorValue: 0xFFF44336,
+          iconCodePoint: Icons.restaurant_outlined.codePoint,
         ),
         CategoryModel(
           id: 'cat_transport',
           name: 'Transporte',
           kindIndex: 0,
           colorValue: 0xFF2196F3,
+          iconCodePoint: Icons.directions_car_outlined.codePoint,
         ),
         CategoryModel(
           id: 'cat_subscriptions',
           name: 'Assinaturas',
           kindIndex: 0,
           colorValue: 0xFF607D8B,
+          iconCodePoint: Icons.subscriptions_outlined.codePoint,
         ),
         CategoryModel(
           id: 'cat_salary',
           name: 'Salário',
           kindIndex: 1,
           colorValue: 0xFF43A047,
+          iconCodePoint: Icons.account_balance_wallet_outlined.codePoint,
         ),
       ];
       await categoriesBox.putAll({

@@ -8,12 +8,15 @@ class CategoryModel {
   final String name;
   final int kindIndex;
   final int? colorValue;
+  // índice 4: iconCodePoint — retrocompatível com registros antigos
+  final int? iconCodePoint;
 
   const CategoryModel({
     required this.id,
     required this.name,
     required this.kindIndex,
     required this.colorValue,
+    this.iconCodePoint,
   });
 
   CategoryEntity toEntity() {
@@ -22,6 +25,7 @@ class CategoryModel {
       name: name,
       kind: CategoryKind.values[kindIndex],
       colorValue: colorValue,
+      iconCodePoint: iconCodePoint,
     );
   }
 
@@ -31,6 +35,7 @@ class CategoryModel {
       name: entity.name,
       kindIndex: entity.kind.index,
       colorValue: entity.colorValue,
+      iconCodePoint: entity.iconCodePoint,
     );
   }
 }
@@ -50,13 +55,15 @@ class CategoryModelAdapter extends TypeAdapter<CategoryModel> {
       name: fields[1] as String,
       kindIndex: fields[2] as int,
       colorValue: fields[3] as int?,
+      // índice 4: opcional — registros antigos não terão esse campo
+      iconCodePoint: fields[4] as int?,
     );
   }
 
   @override
   void write(BinaryWriter writer, CategoryModel obj) {
     writer
-      ..writeByte(4)
+      ..writeByte(5)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -64,6 +71,8 @@ class CategoryModelAdapter extends TypeAdapter<CategoryModel> {
       ..writeByte(2)
       ..write(obj.kindIndex)
       ..writeByte(3)
-      ..write(obj.colorValue);
+      ..write(obj.colorValue)
+      ..writeByte(4)
+      ..write(obj.iconCodePoint);
   }
 }

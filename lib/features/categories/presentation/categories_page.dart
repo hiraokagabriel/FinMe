@@ -6,6 +6,34 @@ import '../domain/category_kind.dart';
 import '../../../core/services/repository_locator.dart';
 import '../../../core/theme/app_theme.dart';
 
+// Paleta de ícones disponíveis para seleção
+const List<IconData> _kIconOptions = [
+  Icons.restaurant_outlined,
+  Icons.directions_car_outlined,
+  Icons.subscriptions_outlined,
+  Icons.account_balance_wallet_outlined,
+  Icons.home_outlined,
+  Icons.local_hospital_outlined,
+  Icons.school_outlined,
+  Icons.shopping_bag_outlined,
+  Icons.sports_esports_outlined,
+  Icons.flight_outlined,
+  Icons.pets_outlined,
+  Icons.fitness_center_outlined,
+  Icons.local_gas_station_outlined,
+  Icons.phone_outlined,
+  Icons.computer_outlined,
+  Icons.coffee_outlined,
+  Icons.theaters_outlined,
+  Icons.child_care_outlined,
+  Icons.savings_outlined,
+  Icons.work_outline,
+  Icons.attach_money,
+  Icons.card_giftcard_outlined,
+  Icons.build_outlined,
+  Icons.emoji_transportation_outlined,
+];
+
 class CategoriesPage extends StatefulWidget {
   const CategoriesPage({super.key});
 
@@ -35,6 +63,11 @@ class _CategoriesPageState extends State<CategoriesPage> {
 
   Color _colorOf(CategoryEntity cat) =>
       cat.colorValue != null ? Color(cat.colorValue!) : AppColors.textSecondary;
+
+  IconData _iconOf(CategoryEntity cat) {
+    if (cat.iconCodePoint == null) return Icons.label_outline;
+    return IconData(cat.iconCodePoint!, fontFamily: 'MaterialIcons');
+  }
 
   Future<void> _openForm({CategoryEntity? initial}) async {
     await showDialog(
@@ -122,6 +155,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
                       ...expenses.map((cat) => _CategoryTile(
                             category: cat,
                             color: _colorOf(cat),
+                            icon: _iconOf(cat),
                             onEdit: () => _openForm(initial: cat),
                             onDelete: () => _confirmDelete(cat),
                           )),
@@ -132,6 +166,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
                       ...incomes.map((cat) => _CategoryTile(
                             category: cat,
                             color: _colorOf(cat),
+                            icon: _iconOf(cat),
                             onEdit: () => _openForm(initial: cat),
                             onDelete: () => _confirmDelete(cat),
                           )),
@@ -160,12 +195,14 @@ class _CategoryTile extends StatelessWidget {
   const _CategoryTile({
     required this.category,
     required this.color,
+    required this.icon,
     required this.onEdit,
     required this.onDelete,
   });
 
   final CategoryEntity category;
   final Color          color;
+  final IconData       icon;
   final VoidCallback   onEdit;
   final VoidCallback   onDelete;
 
@@ -174,11 +211,7 @@ class _CategoryTile extends StatelessWidget {
     return ListTile(
       leading: CircleAvatar(
         backgroundColor: color.withOpacity(0.18),
-        child: Text(
-          category.name.isNotEmpty ? category.name[0].toUpperCase() : '?',
-          style: TextStyle(
-              color: color, fontWeight: FontWeight.bold),
-        ),
+        child: Icon(icon, color: color, size: 20),
       ),
       title: Text(category.name),
       subtitle: Text(
@@ -191,7 +224,6 @@ class _CategoryTile extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.edit_outlined, size: 20),
             tooltip: 'Editar',
-            color: AppColors.textSecondary,
             onPressed: onEdit,
           ),
           IconButton(
@@ -220,6 +252,7 @@ class _CategoryFormDialogState extends State<_CategoryFormDialog> {
   final _nameController = TextEditingController();
   late CategoryKind _kind;
   late int _colorValue;
+  late IconData _selectedIcon;
   bool _saving = false;
 
   static const List<int> _palette = [
@@ -236,9 +269,14 @@ class _CategoryFormDialogState extends State<_CategoryFormDialog> {
       _nameController.text = widget.initial!.name;
       _kind       = widget.initial!.kind;
       _colorValue = widget.initial!.colorValue ?? _palette.first;
+      _selectedIcon = widget.initial!.iconCodePoint != null
+          ? IconData(widget.initial!.iconCodePoint!,
+              fontFamily: 'MaterialIcons')
+          : _kIconOptions.first;
     } else {
-      _kind       = CategoryKind.expense;
-      _colorValue = _palette.first;
+      _kind         = CategoryKind.expense;
+      _colorValue   = _palette.first;
+      _selectedIcon = _kIconOptions.first;
     }
   }
 
@@ -254,11 +292,12 @@ class _CategoryFormDialogState extends State<_CategoryFormDialog> {
     setState(() => _saving = true);
 
     final entity = CategoryEntity(
-      id:         widget.initial?.id ??
+      id:            widget.initial?.id ??
           'cat_${DateTime.now().microsecondsSinceEpoch}',
-      name:       name,
-      kind:       _kind,
-      colorValue: _colorValue,
+      name:          name,
+      kind:          _kind,
+      colorValue:    _colorValue,
+      iconCodePoint: _selectedIcon.codePoint,
     );
 
     await widget.onSave(entity);
@@ -268,85 +307,142 @@ class _CategoryFormDialogState extends State<_CategoryFormDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final color = Color(_colorValue);
+
     return AlertDialog(
       title: Text(
           widget.initial == null ? 'Nova categoria' : 'Editar categoria'),
       content: SizedBox(
         width: 360,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: _nameController,
-              decoration: const InputDecoration(
-                labelText: 'Nome da categoria',
-                hintText: 'Ex: Alimentação, Salário...',
-              ),
-              textCapitalization: TextCapitalization.sentences,
-              autofocus: true,
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            Text('Tipo',
-                style: AppText.secondary
-                    .copyWith(fontWeight: FontWeight.w500)),
-            const SizedBox(height: AppSpacing.xs),
-            SegmentedButton<CategoryKind>(
-              style: SegmentedButton.styleFrom(
-                selectedBackgroundColor: AppColors.primarySubtle,
-                selectedForegroundColor: AppColors.primary,
-              ),
-              segments: const [
-                ButtonSegment(
-                  value: CategoryKind.expense,
-                  label: Text('Despesa'),
-                  icon: Icon(Icons.arrow_downward),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Preview
+              Center(
+                child: CircleAvatar(
+                  radius: 28,
+                  backgroundColor: color.withOpacity(0.18),
+                  child: Icon(_selectedIcon, color: color, size: 26),
                 ),
-                ButtonSegment(
-                  value: CategoryKind.income,
-                  label: Text('Receita'),
-                  icon: Icon(Icons.arrow_upward),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+
+              // Nome
+              TextField(
+                controller: _nameController,
+                decoration: const InputDecoration(
+                  labelText: 'Nome da categoria',
+                  hintText: 'Ex: Alimentação, Salário...',
                 ),
-              ],
-              selected: {_kind},
-              onSelectionChanged: (s) =>
-                  setState(() => _kind = s.first),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            Text('Cor',
-                style: AppText.secondary
-                    .copyWith(fontWeight: FontWeight.w500)),
-            const SizedBox(height: AppSpacing.sm),
-            Wrap(
-              spacing: AppSpacing.sm,
-              runSpacing: AppSpacing.sm,
-              children: _palette.map((c) {
-                final selected = c == _colorValue;
-                return GestureDetector(
-                  onTap: () => setState(() => _colorValue = c),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    width: 28,
-                    height: 28,
-                    decoration: BoxDecoration(
-                      color: Color(c),
-                      shape: BoxShape.circle,
-                      border: Border.all(
+                textCapitalization: TextCapitalization.sentences,
+                autofocus: true,
+              ),
+              const SizedBox(height: AppSpacing.lg),
+
+              // Tipo
+              Text('Ícone',
+                  style: AppText.secondary
+                      .copyWith(fontWeight: FontWeight.w500)),
+              const SizedBox(height: AppSpacing.sm),
+              Wrap(
+                spacing: AppSpacing.sm,
+                runSpacing: AppSpacing.sm,
+                children: _kIconOptions.map((ic) {
+                  final selected = ic.codePoint == _selectedIcon.codePoint;
+                  return GestureDetector(
+                    onTap: () => setState(() => _selectedIcon = ic),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
                         color: selected
-                            ? AppColors.textPrimary
+                            ? color.withOpacity(0.18)
                             : Colors.transparent,
-                        width: 2.5,
+                        borderRadius:
+                            BorderRadius.circular(AppRadius.card),
+                        border: Border.all(
+                          color: selected ? color : Colors.transparent,
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Icon(
+                        ic,
+                        size: 18,
+                        color: selected ? color : null,
                       ),
                     ),
-                    child: selected
-                        ? const Icon(Icons.check,
-                            size: 14, color: Colors.white)
-                        : null,
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+
+              // Tipo de transação
+              Text('Tipo',
+                  style: AppText.secondary
+                      .copyWith(fontWeight: FontWeight.w500)),
+              const SizedBox(height: AppSpacing.xs),
+              SegmentedButton<CategoryKind>(
+                style: SegmentedButton.styleFrom(
+                  selectedBackgroundColor: AppColors.primarySubtle,
+                  selectedForegroundColor: AppColors.primary,
+                ),
+                segments: const [
+                  ButtonSegment(
+                    value: CategoryKind.expense,
+                    label: Text('Despesa'),
+                    icon: Icon(Icons.arrow_downward),
                   ),
-                );
-              }).toList(),
-            ),
-          ],
+                  ButtonSegment(
+                    value: CategoryKind.income,
+                    label: Text('Receita'),
+                    icon: Icon(Icons.arrow_upward),
+                  ),
+                ],
+                selected: {_kind},
+                onSelectionChanged: (s) =>
+                    setState(() => _kind = s.first),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+
+              // Cor
+              Text('Cor',
+                  style: AppText.secondary
+                      .copyWith(fontWeight: FontWeight.w500)),
+              const SizedBox(height: AppSpacing.sm),
+              Wrap(
+                spacing: AppSpacing.sm,
+                runSpacing: AppSpacing.sm,
+                children: _palette.map((c) {
+                  final selected = c == _colorValue;
+                  return GestureDetector(
+                    onTap: () => setState(() => _colorValue = c),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: Color(c),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: selected
+                              ? Colors.white
+                              : Colors.transparent,
+                          width: 2.5,
+                        ),
+                      ),
+                      child: selected
+                          ? const Icon(Icons.check,
+                              size: 14, color: Colors.white)
+                          : null,
+                    ),
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
         ),
       ),
       actions: [
@@ -365,9 +461,7 @@ class _CategoryFormDialogState extends State<_CategoryFormDialog> {
                   width: 18,
                   height: 18,
                   child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
-                  ))
+                      strokeWidth: 2, color: Colors.white))
               : const Text('Salvar'),
         ),
       ],
