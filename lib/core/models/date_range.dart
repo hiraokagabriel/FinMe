@@ -2,7 +2,7 @@ class DateRange {
   final DateTime start;
   final DateTime end;
 
-  const DateRange({required this.start, required this.end})
+  DateRange({required this.start, required this.end})
       : assert(!end.isBefore(start), 'end must be on or after start');
 
   bool contains(DateTime date) {
