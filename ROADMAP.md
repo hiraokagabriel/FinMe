@@ -26,7 +26,7 @@ FinMe é um app de finanças para pessoas que lidam com **alto volume de cartõe
 - Progresso geral atual:
   - **M1: concluído**.
   - **M2: concluído**.
-  - **M3: parcialmente concluído**.
+  - **M3: parcialmente concluído** — 3 itens restantes.
 
 ---
 
@@ -56,10 +56,6 @@ FinMe é um app de finanças para pessoas que lidam com **alto volume de cartõe
     - `settings/` (configurações do app, incluindo Modo Simples/Ultra – `presentation/`).
 - Navegação básica entre dashboard, transações, cartões e configurações.
 - Dashboard inicial com placeholder funcional e ações rápidas.
-
-**Observação:**
-
-- A base de infraestrutura já suporta evolução incremental por feature.
 
 ---
 
@@ -97,65 +93,39 @@ FinMe é um app de finanças para pessoas que lidam com **alto volume de cartõe
   - Dados persistidos com Hive.
   - Seeds iniciais para categorias, cartões e transações.
 
-**O que ainda evolui depois do M2:**
-
-- Filtros mais avançados.
-- Relatórios exportáveis.
-- Modelagem mais rica para contas e transferências.
-
 ---
 
 ## M3 – Modo Simples vs Modo Ultra
 
 **Objetivo:** Entregar experiências distintas de uso, respeitando o nível de complexidade desejado.
 
-**Status:** 🟡 **Parcialmente concluído**
+**Status:** 🟡 **Parcialmente concluído** — 3 itens pendentes
 
-**Funcionalidades já entregues:**
+### Funcionalidades entregues ✅
 
-- **Modo Simples**
-  - Configuração nas preferências do app.
-  - Interface reduzida em partes importantes da navegação.
-  - Menos campos e menos informação visível em fluxos principais.
-  - Filtros simplificados em transações.
+| Item | Commit |
+|------|--------|
+| Modo Simples vs Ultra — UI adaptativa | #13, #27 |
+| Persistência de preferências (modo + tema) | #38 |
+| Padronização visual tema claro (tokens em `app_theme.dart`) | #28–#30 |
+| Recorrência automática de transações | #39 |
+| Ícones personalizados por categoria | #40 |
+| Dashboard aprimorado (KPIs + gráfico de linha mensal + últimas transações) | #32, #41 |
+| Tela de metas (Meta de Economia + Teto de Gastos) | #33, #44 |
+| Relatórios com filtros e exportação CSV | #34 |
+| Tema escuro com toggle persistido | #36 |
+| Múltiplas contas/carteiras (`AccountsPage`, seed, rota `/accounts`) | #48 |
+| Transferência entre contas (`TransferPage`, rota `/transfer`) | #49 |
 
-- **Modo Ultra**
-  - Interface com maior densidade de informações.
-  - Visão de gastos por cartão e por categoria.
-  - Seção de provisionados / "A vencer".
-  - Campos avançados no cadastro de transações, como cartão, parcelas e vencimento provisionado.
+### Itens ainda pendentes 🔲
 
-- **Persistência das preferências**
-  - O modo atual é controlado centralmente por `AppModeController`.
+| # | Feature | Descrição |
+|---|---------|----------|
+| M3-C | **Splash Screen / Onboarding** | Tela de boas-vindas no primeiro boot, apresentando os dois modos e guiando o setup inicial |
+| M3-D | **Persistência definitiva de preferências avançadas** | Box `preferences` dedicado com `PreferencesService` — moeda padrão, idioma, formato de data, etc. |
+| M3-E | **Orçamento mensal por categoria** | Tela `BudgetPage`, `BudgetEntity/Model` (typeId 6), alerta quando o usuário ultrapassa o teto definido por categoria |
 
-- **Padronização visual do tema claro**
-  - Criação de tokens visuais centralizados em `app_theme.dart`.
-  - Aplicação do padrão visual nos menus e telas principais já trabalhadas na conversa:
-    - dashboard
-    - cartões
-    - transações
-    - nova transação
-    - categorias
-    - configurações
-
-- **Recorrência automática de transações** ✅
-- **Ícones personalizados por categoria** ✅
-
-**Itens ainda pendentes dentro de M3:**
-
-- Dashboard/Home aprimorado com gráfico de linha mensal.
-- Tela de metas.
-- Tela de relatórios exportáveis.
-- Múltiplas contas/carteiras além de cartões.
-- Transferência entre contas.
-- Orçamento mensal por categoria.
-- Tema escuro.
-- Splash / onboarding.
-- Persistência explícita e definitiva de preferências de visualização avançadas.
-
-**Observação:**
-
-- O M3 já tem base funcional e visual, mas ainda não cobre toda a visão planejada inicialmente.
+> Detalhes de implementação em `docs/M3_REPORT.md`.
 
 ---
 
@@ -171,8 +141,8 @@ FinMe é um app de finanças para pessoas que lidam com **alto volume de cartõe
   - Assinaturas recorrentes (streamings, serviços, etc.).
   - Anuidades e tarifas de cartões.
 - Relatórios como:
-  - "Gastos recorrentes deste mês" vs meses anteriores.
-  - "Top categorias onde você mais gastou neste período".
+  - “Gastos recorrentes deste mês” vs meses anteriores.
+  - “Top categorias onde você mais gastou neste período”.
 - Visão de volume de gastos no **débito**:
   - Para onde está indo o dinheiro do dia a dia.
   - Sumarização por categoria e por estabelecimento (quando houver).
@@ -216,6 +186,6 @@ FinMe é um app de finanças para pessoas que lidam com **alto volume de cartõe
 - Suporte completo a:
   - iOS / iPadOS.
   - macOS.
-- Painel "Saúde financeira" com indicadores e dicas.
+- Painel “Saúde financeira” com indicadores e dicas.
 - Possíveis integrações com bancos, APIs de extrato ou agregadores financeiros.
-- Modo "auditoria rápida" para revisar um período (ex.: últimos 15 dias) e marcar gastos como essenciais/supérfluos.
+- Modo “auditoria rápida” para revisar um período (ex.: últimos 15 dias) e marcar gastos como essenciais/supérfluos.
