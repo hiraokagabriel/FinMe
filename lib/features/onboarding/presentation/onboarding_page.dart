@@ -13,50 +13,11 @@ class OnboardingPage extends StatefulWidget {
   State<OnboardingPage> createState() => _OnboardingPageState();
 }
 
-class _OnboardingPageState extends State<OnboardingPage>
-    with SingleTickerProviderStateMixin {
+class _OnboardingPageState extends State<OnboardingPage> {
   int _step = 0; // 0 = splash, 1 = modo
   AppMode? _selectedMode;
-  bool _waitingForStep = false; // evita duplo disparo
 
-  late final AnimationController _fadeCtrl;
-  late final Animation<double> _fadeAnim;
-
-  @override
-  void initState() {
-    super.initState();
-    _fadeCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 500),
-    );
-    _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeInOut);
-
-    // Ouve o fim da animação de saída para trocar o step
-    _fadeCtrl.addStatusListener(_onAnimationStatus);
-    _fadeCtrl.forward();
-  }
-
-  void _onAnimationStatus(AnimationStatus status) {
-    if (status == AnimationStatus.dismissed && _waitingForStep) {
-      _waitingForStep = false;
-      if (!mounted) return;
-      setState(() => _step = 1);
-      _fadeCtrl.forward();
-    }
-  }
-
-  @override
-  void dispose() {
-    _fadeCtrl.removeStatusListener(_onAnimationStatus);
-    _fadeCtrl.dispose();
-    super.dispose();
-  }
-
-  void _goToModeStep() {
-    if (_waitingForStep) return;
-    _waitingForStep = true;
-    _fadeCtrl.reverse(); // quando chegar em dismissed, _onAnimationStatus troca o step
-  }
+  void _goToModeStep() => setState(() => _step = 1);
 
   Future<void> _finish() async {
     if (_selectedMode == null) return;
@@ -69,21 +30,38 @@ class _OnboardingPageState extends State<OnboardingPage>
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
+    final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
       backgroundColor: cs.surface,
-      body: FadeTransition(
-        opacity: _fadeAnim,
-        child: _step == 0 ? _buildSplash(cs) : _buildModeStep(cs),
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 400),
+        switchInCurve: Curves.easeIn,
+        switchOutCurve: Curves.easeOut,
+        transitionBuilder: (child, animation) =>
+            FadeTransition(opacity: animation, child: child),
+        child: _step == 0
+            ? _SplashStep(key: const ValueKey(0), onNext: _goToModeStep)
+            : _ModeStep(
+                key: const ValueKey(1),
+                selectedMode: _selectedMode,
+                onSelect: (mode) => setState(() => _selectedMode = mode),
+                onFinish: _finish,
+              ),
       ),
     );
   }
+}
 
-  // ───────────────────────────── SPLASH ─────────────────────────────
+// ───────────────────────────── SPLASH ─────────────────────────────
 
-  Widget _buildSplash(ColorScheme cs) {
+class _SplashStep extends StatelessWidget {
+  final VoidCallback onNext;
+  const _SplashStep({super.key, required this.onNext});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 48),
@@ -128,7 +106,7 @@ class _OnboardingPageState extends State<OnboardingPage>
             SizedBox(
               width: double.infinity,
               child: FilledButton(
-                onPressed: _goToModeStep,
+                onPressed: onNext,
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
@@ -143,10 +121,24 @@ class _OnboardingPageState extends State<OnboardingPage>
       ),
     );
   }
+}
 
-  // ───────────────────────────── MODO ─────────────────────────────
+// ───────────────────────────── SELEÇÃO DE MODO ─────────────────────────────
 
-  Widget _buildModeStep(ColorScheme cs) {
+class _ModeStep extends StatelessWidget {
+  final AppMode? selectedMode;
+  final ValueChanged<AppMode> onSelect;
+  final VoidCallback onFinish;
+
+  const _ModeStep({
+    super.key,
+    required this.selectedMode,
+    required this.onSelect,
+    required this.onFinish,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -172,8 +164,8 @@ class _OnboardingPageState extends State<OnboardingPage>
               description:
                   'Visão enxuta. Ideal para quem quer controlar gastos do dia a dia sem complicação.',
               icon: Icons.wb_sunny_outlined,
-              selected: _selectedMode == AppMode.simple,
-              onTap: () => setState(() => _selectedMode = AppMode.simple),
+              selected: selectedMode == AppMode.simple,
+              onTap: () => onSelect(AppMode.simple),
             ),
             const SizedBox(height: AppSpacing.md),
             _ModeCard(
@@ -181,14 +173,14 @@ class _OnboardingPageState extends State<OnboardingPage>
               description:
                   'Visão completa com gráficos, múltiplos cartões, provisionamentos e análises detalhadas.',
               icon: Icons.bolt_outlined,
-              selected: _selectedMode == AppMode.ultra,
-              onTap: () => setState(() => _selectedMode = AppMode.ultra),
+              selected: selectedMode == AppMode.ultra,
+              onTap: () => onSelect(AppMode.ultra),
             ),
             const SizedBox(height: AppSpacing.h),
             SizedBox(
               width: double.infinity,
               child: FilledButton(
-                onPressed: _selectedMode != null ? _finish : null,
+                onPressed: selectedMode != null ? onFinish : null,
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
