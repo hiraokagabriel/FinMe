@@ -7,7 +7,9 @@ import '../domain/transaction_entity.dart';
 import '../domain/transaction_type.dart';
 
 class NewTransactionPage extends StatefulWidget {
-  const NewTransactionPage({super.key});
+  const NewTransactionPage({super.key, this.initialTransaction});
+
+  final TransactionEntity? initialTransaction;
 
   @override
   State<NewTransactionPage> createState() => _NewTransactionPageState();
@@ -17,12 +19,33 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
   final _formKey = GlobalKey<FormState>();
   final _descriptionController = TextEditingController();
   final _amountController = TextEditingController();
-  DateTime _selectedDate = DateTime.now();
-  TransactionType _selectedType = TransactionType.expense;
-  PaymentMethod _selectedPaymentMethod = PaymentMethod.creditCard;
+  late DateTime _selectedDate;
+  late TransactionType _selectedType;
+  late PaymentMethod _selectedPaymentMethod;
   String? _selectedCategoryId;
 
   bool _isSaving = false;
+
+  bool get _isEdit => widget.initialTransaction != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final initial = widget.initialTransaction;
+    if (initial != null) {
+      _descriptionController.text = initial.description ?? '';
+      _amountController.text = initial.amount.amount.toStringAsFixed(2);
+      _selectedDate = initial.date;
+      _selectedType = initial.type;
+      _selectedPaymentMethod = initial.paymentMethod;
+      _selectedCategoryId = initial.categoryId;
+    } else {
+      _selectedDate = DateTime.now();
+      _selectedType = TransactionType.expense;
+      _selectedPaymentMethod = PaymentMethod.creditCard;
+    }
+    _loadInitialCategory();
+  }
 
   @override
   void dispose() {
@@ -56,12 +79,6 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
     }
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _loadInitialCategory();
-  }
-
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) {
       return;
@@ -84,8 +101,11 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
         ) ??
         0;
 
+    final baseId = widget.initialTransaction?.id ??
+        DateTime.now().microsecondsSinceEpoch.toString();
+
     final tx = TransactionEntity(
-      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      id: baseId,
       amount: Money(amount),
       date: _selectedDate,
       type: _selectedType,
@@ -93,10 +113,14 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
       description:
           _descriptionController.text.isEmpty ? null : _descriptionController.text,
       categoryId: _selectedCategoryId!,
-      cardId: null,
+      cardId: widget.initialTransaction?.cardId,
     );
 
-    await locator.transactions.add(tx);
+    if (_isEdit) {
+      await locator.transactions.update(tx);
+    } else {
+      await locator.transactions.add(tx);
+    }
 
     if (!mounted) return;
     setState(() {
@@ -108,9 +132,11 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
 
   @override
   Widget build(BuildContext context) {
+    final title = _isEdit ? 'Editar transacao' : 'Nova transacao';
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Nova transacao'),
+        title: Text(title),
       ),
       body: FutureBuilder(
         future: RepositoryLocator.instance.categories.getAll(),
@@ -264,7 +290,9 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                               width: 20,
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
-                          : const Text('Salvar transacao'),
+                          : Text(_isEdit
+                              ? 'Salvar alteracoes'
+                              : 'Salvar transacao'),
                     ),
                   ),
                 ],

@@ -57,13 +57,41 @@ class _TransactionsPageState extends State<TransactionsPage> {
     });
   }
 
-  Future<void> _openNewTransactionForm() async {
-    final created = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (context) => const NewTransactionPage()),
+  Future<void> _openNewTransactionForm({TransactionEntity? initial}) async {
+    final createdOrUpdated = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (context) => NewTransactionPage(
+          initialTransaction: initial,
+        ),
+      ),
     );
-    if (created == true) {
+    if (createdOrUpdated == true) {
       await _loadData();
     }
+  }
+
+  Future<bool?> _confirmDelete(TransactionEntity tx) async {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Excluir transacao'),
+          content: Text(
+            'Tem certeza que deseja excluir esta transacao?\n\n${tx.description ?? 'Sem descricao'}',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Excluir'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
@@ -80,7 +108,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
             title: const Text('Transacoes'),
           ),
           floatingActionButton: FloatingActionButton.extended(
-            onPressed: _openNewTransactionForm,
+            onPressed: () => _openNewTransactionForm(),
             icon: const Icon(Icons.add),
             label: const Text('Nova transacao'),
           ),
@@ -160,14 +188,43 @@ class _TransactionsPageState extends State<TransactionsPage> {
                                   dateText,
                                 ].join(' • ');
 
-                          return ListTile(
-                            title: Text(tx.description ?? 'Sem descricao'),
-                            subtitle: Text(subtitleText),
-                            trailing: Text(
-                              amountText,
-                              style: TextStyle(
-                                color: isExpense ? Colors.red : Colors.green,
-                                fontWeight: FontWeight.bold,
+                          return Dismissible(
+                            key: ValueKey(tx.id),
+                            direction: DismissDirection.endToStart,
+                            confirmDismiss: (_) => _confirmDelete(tx),
+                            onDismissed: (_) async {
+                              await _transactionsRepository.remove(tx.id);
+                              await _loadData();
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content:
+                                      Text('Transacao excluida com sucesso'),
+                                ),
+                              );
+                            },
+                            background: Container(
+                              color: Colors.red,
+                              alignment: Alignment.centerRight,
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 16),
+                              child: const Icon(
+                                Icons.delete,
+                                color: Colors.white,
+                              ),
+                            ),
+                            child: ListTile(
+                              onTap: () => _openNewTransactionForm(initial: tx),
+                              title:
+                                  Text(tx.description ?? 'Sem descricao'),
+                              subtitle: Text(subtitleText),
+                              trailing: Text(
+                                amountText,
+                                style: TextStyle(
+                                  color:
+                                      isExpense ? Colors.red : Colors.green,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                             ),
                           );
