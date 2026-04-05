@@ -26,7 +26,7 @@ class HiveInit {
     // put(entity.id, ...)) overwrites the same record instead of creating a
     // second one with a different auto-numeric key.
     if (categoriesBox.isEmpty) {
-      const seedCategories = [
+      final seedCategories = [
         CategoryModel(
           id: 'cat_food',
           name: 'Alimentacao',
@@ -58,7 +58,7 @@ class HiveInit {
     }
 
     if (cardsBox.isEmpty) {
-      const seedCards = [
+      final seedCards = [
         CardModel(
           id: 'card_1',
           name: 'Cartao Principal',

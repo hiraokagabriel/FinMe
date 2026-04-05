@@ -311,7 +311,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                         ...cards.map(
                           (c) => DropdownMenuItem<String>(
                             value: c.id,
-                            child: Text('\${c.name} - \${c.bankName}'),
+                            child: Text('${c.name} - ${c.bankName}'),
                           ),
                         ),
                       ],
@@ -327,7 +327,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Data'),
                     subtitle: Text(
-                      '\${_selectedDate.day.toString().padLeft(2, '0')}/\${_selectedDate.month.toString().padLeft(2, '0')}/\${_selectedDate.year}',
+                      '${_selectedDate.day.toString().padLeft(2, '0')}/${_selectedDate.month.toString().padLeft(2, '0')}/${_selectedDate.year}',
                     ),
                     trailing: TextButton(
                       onPressed: _pickDate,
