@@ -21,7 +21,11 @@ class _AccountsPageState extends State<AccountsPage> {
     _load();
   }
 
-  void _load() => setState(() => _accounts = _repo.getAll());
+  Future<void> _load() async {
+    final accounts = await _repo.getAll();
+    if (!mounted) return;
+    setState(() => _accounts = accounts);
+  }
 
   Future<void> _openForm({AccountEntity? editing}) async {
     await showModalBottomSheet(
@@ -57,15 +61,15 @@ class _AccountsPageState extends State<AccountsPage> {
     }
   }
 
-  double _computeBalance(AccountEntity account) {
-    final txs = RepositoryLocator.instance.transactions.getAll();
+  Future<double> _computeBalance(AccountEntity account) async {
+    final txs = await RepositoryLocator.instance.transactions.getAll();
     double balance = account.initialBalance;
     for (final tx in txs) {
       if (tx.accountId != account.id) continue;
-      if (tx.typeIndex == 0) {
-        balance += tx.amount;
+      if (tx.type.index == 0) {
+        balance += tx.amount.amount;
       } else {
-        balance -= tx.amount;
+        balance -= tx.amount.amount;
       }
     }
     return balance;
@@ -112,102 +116,106 @@ class _AccountsPageState extends State<AccountsPage> {
               separatorBuilder: (_, __) => const SizedBox(height: 8),
               itemBuilder: (context, index) {
                 final account = _accounts[index];
-                final balance = _computeBalance(account);
                 final color = Color(account.colorValue);
-                return Dismissible(
-                  key: Key(account.id),
-                  direction: DismissDirection.endToStart,
-                  background: Container(
-                    alignment: Alignment.centerRight,
-                    padding: const EdgeInsets.only(right: 20),
-                    decoration: BoxDecoration(
-                      color: cs.error,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(Icons.delete_outline, color: Colors.white),
-                  ),
-                  confirmDismiss: (_) async {
-                    await _delete(account);
-                    return false;
-                  },
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: () => _openForm(editing: account),
-                    child: Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: cs.surface,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: cs.outline.withOpacity(0.15),
+                return FutureBuilder<double>(
+                  future: _computeBalance(account),
+                  builder: (context, snap) {
+                    final balance = snap.data ?? account.initialBalance;
+                    return Dismissible(
+                      key: Key(account.id),
+                      direction: DismissDirection.endToStart,
+                      background: Container(
+                        alignment: Alignment.centerRight,
+                        padding: const EdgeInsets.only(right: 20),
+                        decoration: BoxDecoration(
+                          color: cs.error,
+                          borderRadius: BorderRadius.circular(12),
                         ),
+                        child: const Icon(Icons.delete_outline, color: Colors.white),
                       ),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              color: color.withOpacity(0.15),
-                              borderRadius: BorderRadius.circular(10),
+                      confirmDismiss: (_) async {
+                        await _delete(account);
+                        return false;
+                      },
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: () => _openForm(editing: account),
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: cs.surface,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: cs.outline.withOpacity(0.15),
                             ),
-                            child: Icon(account.type.icon, color: color, size: 22),
                           ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 44,
+                                height: 44,
+                                decoration: BoxDecoration(
+                                  color: color.withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Icon(account.type.icon, color: color, size: 22),
+                              ),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(account.name,
-                                        style: theme.textTheme.titleSmall
-                                            ?.copyWith(fontWeight: FontWeight.w600)),
-                                    if (account.isDefault) ...
-                                      [
-                                        const SizedBox(width: 6),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 6, vertical: 2),
-                                          decoration: BoxDecoration(
-                                            color: cs.primary.withOpacity(0.12),
-                                            borderRadius: BorderRadius.circular(20),
+                                    Row(
+                                      children: [
+                                        Text(account.name,
+                                            style: theme.textTheme.titleSmall
+                                                ?.copyWith(fontWeight: FontWeight.w600)),
+                                        if (account.isDefault) ...[
+                                          const SizedBox(width: 6),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: cs.primary.withOpacity(0.12),
+                                              borderRadius: BorderRadius.circular(20),
+                                            ),
+                                            child: Text('principal',
+                                                style: TextStyle(
+                                                    fontSize: 10,
+                                                    color: cs.primary,
+                                                    fontWeight: FontWeight.w600)),
                                           ),
-                                          child: Text('principal',
-                                              style: TextStyle(
-                                                  fontSize: 10,
-                                                  color: cs.primary,
-                                                  fontWeight: FontWeight.w600)),
-                                        ),
+                                        ],
                                       ],
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(account.type.label,
+                                        style: theme.textTheme.bodySmall
+                                            ?.copyWith(color: cs.onSurface.withOpacity(0.5))),
                                   ],
                                 ),
-                                const SizedBox(height: 2),
-                                Text(account.type.label,
-                                    style: theme.textTheme.bodySmall
-                                        ?.copyWith(color: cs.onSurface.withOpacity(0.5))),
-                              ],
-                            ),
-                          ),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Text(
-                                'R\$ ${balance.toStringAsFixed(2).replaceAll('.', ',')}',
-                                style: theme.textTheme.titleSmall?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                  color: balance >= 0 ? const Color(0xFF43A047) : cs.error,
-                                ),
                               ),
-                              Text('saldo atual',
-                                  style: theme.textTheme.labelSmall
-                                      ?.copyWith(color: cs.onSurface.withOpacity(0.4))),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Text(
+                                    'R\$ ${balance.toStringAsFixed(2).replaceAll('.', ',')}',
+                                    style: theme.textTheme.titleSmall?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                      color: balance >= 0 ? const Color(0xFF43A047) : cs.error,
+                                    ),
+                                  ),
+                                  Text('saldo atual',
+                                      style: theme.textTheme.labelSmall
+                                          ?.copyWith(color: cs.onSurface.withOpacity(0.4))),
+                                ],
+                              ),
                             ],
                           ),
-                        ],
+                        ),
                       ),
-                    ),
-                  ),
+                    );
+                  },
                 );
               },
             ),

@@ -5,6 +5,7 @@ import '../../features/transactions/data/transaction_model.dart';
 import '../../features/categories/data/category_model.dart';
 import '../../features/cards/data/card_model.dart';
 import '../../features/accounts/data/account_model.dart';
+import '../../features/accounts/domain/account_entity.dart';
 
 class HiveInit {
   static const String transactionsBoxName = 'transactions';

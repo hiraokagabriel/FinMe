@@ -136,15 +136,16 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
       description:        _descriptionController.text.isEmpty
           ? null
           : _descriptionController.text,
-      categoryId:         _selectedCategoryId!,
+      categoryId:         _selectedCategoryId,
       cardId:             effectiveCard,
+      isBoleto:           false,
       isProvisioned:      isUltra ? _isProvisioned : false,
       provisionedDueDate: (isUltra && _isProvisioned)
           ? _provisionedDueDate
           : null,
       installmentCount:   installments,
       recurrenceRule:     _recurrenceRule,
-      recurrenceSourceId: null, // sempre null ao criar manualmente
+      recurrenceSourceId: null,
     );
 
     if (_isEdit) {
@@ -187,7 +188,6 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
               key: _formKey,
               child: ListView(
                 children: [
-                  // ── Descrição ─────────────────────────────────────────────────
                   TextFormField(
                     controller: _descriptionController,
                     decoration: const InputDecoration(
@@ -197,7 +197,6 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                   ),
                   const SizedBox(height: AppSpacing.md),
 
-                  // ── Valor ───────────────────────────────────────────────────────
                   TextFormField(
                     controller: _amountController,
                     keyboardType: const TextInputType.numberWithOptions(
@@ -220,7 +219,6 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                   ),
                   const SizedBox(height: AppSpacing.md),
 
-                  // ── Tipo + Pagamento ─────────────────────────────────────────
                   Row(
                     children: [
                       Expanded(
@@ -281,7 +279,6 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                   ),
                   const SizedBox(height: AppSpacing.md),
 
-                  // ── Categoria ─────────────────────────────────────────────────
                   DropdownButtonFormField<String>(
                     value: _selectedCategoryId,
                     decoration:
@@ -297,7 +294,6 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                   ),
                   const SizedBox(height: AppSpacing.xs),
 
-                  // ── Data ─────────────────────────────────────────────────────────
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Data da transação'),
@@ -312,7 +308,6 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                     ),
                   ),
 
-                  // ── Repetição (disponível em ambos os modos) ─────────────────
                   DropdownButtonFormField<RecurrenceRule>(
                     value: _recurrenceRule,
                     decoration: const InputDecoration(
@@ -351,7 +346,6 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                       ),
                     ),
 
-                  // ── Modo Ultra ─────────────────────────────────────────────
                   if (isUltra) ...[
                     const Divider(height: AppSpacing.xxl),
                     Container(
@@ -371,7 +365,6 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                     ),
                     const SizedBox(height: AppSpacing.md),
 
-                    // Cartão
                     DropdownButtonFormField<String>(
                       value: _selectedCardId,
                       decoration: const InputDecoration(
@@ -393,7 +386,6 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                     ),
                     const SizedBox(height: AppSpacing.md),
 
-                    // Parcelas
                     TextFormField(
                       controller: _installmentController,
                       keyboardType: TextInputType.number,
@@ -414,7 +406,6 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                     ),
                     const SizedBox(height: AppSpacing.xs),
 
-                    // Toggle provisionado
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       value: _isProvisioned,
