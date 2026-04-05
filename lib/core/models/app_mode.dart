@@ -1,0 +1,4 @@
+enum AppMode {
+  simple,
+  ultra,
+}
