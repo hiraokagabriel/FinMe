@@ -282,6 +282,12 @@ class _DashboardPageState extends State<DashboardPage> {
               icon: const Icon(Icons.flag_outlined),
               label: const Text('Metas'),
             ),
+            OutlinedButton.icon(
+              onPressed: () =>
+                  Navigator.of(context).pushNamed(AppRouter.reports),
+              icon: const Icon(Icons.bar_chart_outlined),
+              label: const Text('Relatórios'),
+            ),
             if (isUltra)
               OutlinedButton.icon(
                 onPressed: () =>
