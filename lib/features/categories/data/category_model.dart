@@ -9,7 +9,7 @@ class CategoryModel {
   final int kindIndex;
   final int? colorValue;
 
-  CategoryModel({
+  const CategoryModel({
     required this.id,
     required this.name,
     required this.kindIndex,

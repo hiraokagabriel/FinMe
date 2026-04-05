@@ -5,6 +5,7 @@ import '../../../core/models/money.dart';
 import '../../../core/models/app_mode.dart';
 import '../../../core/services/app_mode_controller.dart';
 import '../../cards/domain/card_entity.dart';
+import '../../categories/domain/category_entity.dart';
 import '../domain/payment_method.dart';
 import '../domain/transaction_entity.dart';
 import '../domain/transaction_type.dart';
@@ -30,6 +31,11 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
 
   bool _isSaving = false;
 
+  // Cache the future so it is not recreated on every rebuild, which would
+  // cause the DropdownButton to receive a new items list mid-frame and crash
+  // when a duplicate value exists in the box.
+  late final Future<List<dynamic>> _loadFuture;
+
   bool get _isEdit => widget.initialTransaction != null;
 
   @override
@@ -49,7 +55,25 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
       _selectedType = TransactionType.expense;
       _selectedPaymentMethod = PaymentMethod.creditCard;
     }
-    _loadInitialCategory();
+
+    _loadFuture = Future.wait([
+      RepositoryLocator.instance.categories.getAll(),
+      RepositoryLocator.instance.cards.getAll(),
+    ]).then((results) {
+      // Deduplicate categories by id to guard against corrupted box data
+      // (legacy rows inserted via addAll without an explicit key).
+      final rawCategories = List<CategoryEntity>.from(results[0] as List);
+      final seen = <String>{};
+      final categories =
+          rawCategories.where((c) => seen.add(c.id)).toList(growable: false);
+
+      // Set a default category once we have the list
+      if (_selectedCategoryId == null && categories.isNotEmpty) {
+        setState(() => _selectedCategoryId = categories.first.id);
+      }
+
+      return [categories, results[1]];
+    });
   }
 
   @override
@@ -70,16 +94,6 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
     if (result != null) {
       setState(() {
         _selectedDate = result;
-      });
-    }
-  }
-
-  Future<void> _loadInitialCategory() async {
-    if (_selectedCategoryId != null) return;
-    final categories = await RepositoryLocator.instance.categories.getAll();
-    if (categories.isNotEmpty) {
-      setState(() {
-        _selectedCategoryId = categories.first.id;
       });
     }
   }
@@ -147,14 +161,11 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
         title: Text(title),
       ),
       body: FutureBuilder<List<dynamic>>(
-        future: Future.wait([
-          RepositoryLocator.instance.categories.getAll(),
-          RepositoryLocator.instance.cards.getAll(),
-        ]),
+        future: _loadFuture,
         builder: (context, snapshot) {
           final categories = snapshot.data != null
-              ? List.from(snapshot.data![0])
-              : <dynamic>[];
+              ? List<CategoryEntity>.from(snapshot.data![0] as List)
+              : <CategoryEntity>[];
           final cards = snapshot.data != null
               ? List<CardEntity>.from(snapshot.data![1] as List)
               : <CardEntity>[];
@@ -274,8 +285,8 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                     items: categories
                         .map(
                           (c) => DropdownMenuItem<String>(
-                            value: c.id as String,
-                            child: Text(c.name as String),
+                            value: c.id,
+                            child: Text(c.name),
                           ),
                         )
                         .toList(),
@@ -300,7 +311,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                         ...cards.map(
                           (c) => DropdownMenuItem<String>(
                             value: c.id,
-                            child: Text('${c.name} - ${c.bankName}'),
+                            child: Text('\${c.name} - \${c.bankName}'),
                           ),
                         ),
                       ],
@@ -316,7 +327,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Data'),
                     subtitle: Text(
-                      '${_selectedDate.day.toString().padLeft(2, '0')}/${_selectedDate.month.toString().padLeft(2, '0')}/${_selectedDate.year}',
+                      '\${_selectedDate.day.toString().padLeft(2, '0')}/\${_selectedDate.month.toString().padLeft(2, '0')}/\${_selectedDate.year}',
                     ),
                     trailing: TextButton(
                       onPressed: _pickDate,

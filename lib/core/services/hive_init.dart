@@ -22,8 +22,11 @@ class HiveInit {
         await Hive.openBox<CategoryModel>(categoriesBoxName);
     final cardsBox = await Hive.openBox<CardModel>(cardsBoxName);
 
+    // Use put() with the entity id as key so that update() (which also uses
+    // put(entity.id, ...)) overwrites the same record instead of creating a
+    // second one with a different auto-numeric key.
     if (categoriesBox.isEmpty) {
-      await categoriesBox.addAll([
+      const seedCategories = [
         CategoryModel(
           id: 'cat_food',
           name: 'Alimentacao',
@@ -48,11 +51,14 @@ class HiveInit {
           kindIndex: 1,
           colorValue: null,
         ),
-      ]);
+      ];
+      await categoriesBox.putAll({
+        for (final c in seedCategories) c.id: c,
+      });
     }
 
     if (cardsBox.isEmpty) {
-      await cardsBox.addAll([
+      const seedCards = [
         CardModel(
           id: 'card_1',
           name: 'Cartao Principal',
@@ -69,12 +75,15 @@ class HiveInit {
           dueDay: 20,
           limit: 5000,
         ),
-      ]);
+      ];
+      await cardsBox.putAll({
+        for (final c in seedCards) c.id: c,
+      });
     }
 
     if (transactionsBox.isEmpty) {
       final now = DateTime.now();
-      await transactionsBox.addAll([
+      final seedTransactions = [
         TransactionModel(
           id: 'tx_1',
           amount: 120.50,
@@ -127,7 +136,10 @@ class HiveInit {
           isBoleto: false,
           isProvisioned: false,
         ),
-      ]);
+      ];
+      await transactionsBox.putAll({
+        for (final t in seedTransactions) t.id: t,
+      });
     }
   }
 }
