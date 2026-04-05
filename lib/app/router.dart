@@ -7,6 +7,7 @@ import '../features/settings/presentation/settings_page.dart';
 import '../features/goals/presentation/goals_page.dart';
 import '../features/reports/presentation/reports_page.dart';
 import '../features/accounts/presentation/accounts_page.dart';
+import '../features/transfer/presentation/transfer_page.dart';
 
 class AppRouter {
   static const String dashboard    = '/';
@@ -16,6 +17,7 @@ class AppRouter {
   static const String goals        = '/goals';
   static const String reports      = '/reports';
   static const String accounts     = '/accounts';
+  static const String transfer     = '/transfer';
 
   static final Map<String, WidgetBuilder> routes = {
     dashboard:    (context) => const DashboardPage(),
@@ -25,5 +27,6 @@ class AppRouter {
     goals:        (context) => const GoalsPage(),
     reports:      (context) => const ReportsPage(),
     accounts:     (context) => const AccountsPage(),
+    transfer:     (context) => const TransferPage(),
   };
 }

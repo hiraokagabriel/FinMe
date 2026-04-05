@@ -22,7 +22,7 @@ lib/
 ├── main.dart
 ├── app/
 │   ├── app.dart
-│   └── router.dart                    # Rotas: /, /transactions, /cards, /settings, /goals, /reports, /accounts
+│   └── router.dart                    # Rotas: /, /transactions, /cards, /settings, /goals, /reports, /accounts, /transfer
 ├── core/
 │   ├── models/
 │   │   ├── app_mode.dart
@@ -40,12 +40,12 @@ lib/
 └── features/
     ├── transactions/
     │   ├── domain/
-    │   │   ├── transaction_entity.dart # Campo accountId adicionado (M3-A)
-    │   │   ├── transaction_type.dart
+    │   │   ├── transaction_entity.dart # accountId + toAccountId + notes (M3-B)
+    │   │   ├── transaction_type.dart   # income | expense | transfer (M3-B)
     │   │   ├── payment_method.dart
     │   │   └── recurrence_rule.dart
     │   ├── data/
-    │   │   ├── transaction_model.dart
+    │   │   ├── transaction_model.dart  # índices 15 (toAccountId) e 16 (notes) adicionados
     │   │   ├── transactions_repository.dart
     │   │   └── hive_transactions_repository.dart
     │   └── presentation/
@@ -59,15 +59,18 @@ lib/
     │   ├── domain/
     │   ├── data/
     │   └── presentation/
-    ├── accounts/                       # ✅ NOVO — M3-A
+    ├── accounts/                       # ✅ M3-A
     │   ├── domain/
-    │   │   └── account_entity.dart     # AccountEntity + AccountType enum
+    │   │   └── account_entity.dart
     │   ├── data/
-    │   │   ├── account_model.dart      # HiveObject typeId 3
+    │   │   ├── account_model.dart
     │   │   ├── accounts_repository.dart
     │   │   └── hive_accounts_repository.dart
     │   └── presentation/
-    │       └── accounts_page.dart      # CRUD + saldo calculado por transações
+    │       └── accounts_page.dart
+    ├── transfer/                       # ✅ M3-B
+    │   └── presentation/
+    │       └── transfer_page.dart      # Seleciona origem/destino, valor, data, descrição
     ├── dashboard/
     │   └── presentation/
     │       └── dashboard_page.dart
@@ -90,13 +93,13 @@ lib/
 
 ### 3.1 Transações
 - CRUD completo de transações (criar, editar, excluir)
-- Tipos: receita (`income`) e despesa (`expense`)
+- Tipos: receita (`income`), despesa (`expense`) e transferência (`transfer`) ✅ M3-B
 - Métodos de pagamento: dinheiro, débito, crédito, pix, boleto, outros
 - Filtros: por período, por tipo, por categoria, por método de pagamento
 - Busca textual por título
 - Agrupamento por data na listagem
 - Suporte a notas/observações por transação
-- Campo `accountId` na `TransactionEntity` (preparado para M3-A)
+- Campo `accountId` + `toAccountId` na `TransactionEntity` (M3-A / M3-B)
 
 ### 3.2 Recorrência Automática ✅ (M3)
 - `RecurrenceRule` com frequências: `daily`, `weekly`, `monthly`, `yearly`
@@ -136,14 +139,23 @@ lib/
 - `RepositoryLocator.instance.accounts` disponível globalmente
 - `TransactionEntity.accountId` preparado para vincular transações a contas
 
-### 3.10 Modo Privacidade
+### 3.10 Transferência entre Contas ✅ (M3-B)
+- `TransactionType.transfer` adicionado ao enum
+- `TransactionEntity.toAccountId` + `notes` adicionados
+- `TransactionModel` atualizado: índices 15 (`toAccountId`) e 16 (`notes`) retrocompatíveis
+- `TransferPage`: seleção de conta origem/destino, valor, data, descrição opcional
+- Lança débito na origem e crédito no destino como par de transações vinculadas
+- Empty state se o usuário tem menos de 2 contas (com botão para criar)
+- Rota `/transfer` registrada no router
+
+### 3.11 Modo Privacidade
 - Valores monetários ocultados quando ativo
 
-### 3.11 Modo Simples / Ultra
+### 3.12 Modo Simples / Ultra
 - UI diferenciada por modo
 - Persistência via Hive
 
-### 3.12 Persistência
+### 3.13 Persistência
 - Hive com adapters manuais (sem build_runner)
 - TypeIds: `0` TransactionModel, `1` CategoryModel, `2` CardModel, `3` AccountModel, `5` GoalModel
 - Boxes: `transactions`, `categories`, `cards`, `settings`, `goals`, `accounts`
@@ -154,7 +166,6 @@ lib/
 
 | # | Feature | Arquivo(s) alvo | Status |
 |---|---------|-----------------|--------|
-| M3-B | **Transferência entre Contas** | Novo tipo de transação `transfer` + tela | 🔲 Pendente |
 | M3-C | **Splash Screen / Onboarding** | `lib/features/onboarding/` + ajuste `main.dart` | 🔲 Pendente |
 | M3-D | **Persistência definitiva de preferências avançadas** | `lib/core/services/` + Hive box `preferences` | 🔲 Pendente |
 | M3-E | **Orçamento Mensal por Categoria** | `lib/features/budget/` | 🔲 Pendente |
@@ -211,6 +222,7 @@ lib/
 | `/goals` | GoalsPage |
 | `/reports` | ReportsPage |
 | `/accounts` | AccountsPage ✅ |
+| `/transfer` | TransferPage ✅ |
 
 ---
 
@@ -224,7 +236,8 @@ lib/
 6. **AppText sem cores fixas:** `AppText` herda cor do tema (commit #37).
 7. **Chave Hive por id (string):** Todos registros usam `entity.id` como chave (commit #26).
 8. **AppRadius.chip:** Usar `AppRadius.chip` para chips/badges (commit #36).
-9. **AccountId nas transações:** `TransactionEntity.accountId` existe mas o campo no `TransactionModel` ainda não foi adicionado — fazer isso no próximo commit que mexer no model de transação.
+9. **TransactionType.transfer:** Ao exibir transações na UI, tratar `transfer` separado de `income`/`expense` — não somar ao saldo duas vezes. O par `_out`/`_in` representa os dois lados da transferência.
+10. **TransactionModel índices 15/16:** Campos `toAccountId` e `notes` são opcionais/nullable — registros antigos sem esses campos continuam lidos corretamente.
 
 ---
 
@@ -423,18 +436,20 @@ Histórico #1–#46 adicionado.
 CONTEXT.md reescrito com histórico oficial.
 
 ### #48 — feat(accounts): múltiplas contas/carteiras ✅ (M3-A)
-**SHA:** *(este commit)* | **Tipo:** feat (M3)  
-**M3-A — Múltiplas Contas.** Feature completa de contas/carteiras implementada:
-- `AccountEntity` + `AccountType` enum (5 tipos: Conta Corrente, Poupança, Dinheiro, Investimento, Outro)
-- `AccountModel` (Hive typeId 3) com adapter manual
-- `HiveAccountsRepository` com CRUD e setDefault
-- `AccountsPage`: listagem com saldo calculado (saldo inicial + transações vinculadas), CRUD via bottom sheet, seletor de cor, badge "principal", Dismissible para excluir
-- Seed automático com 3 contas padrão (Conta Corrente, Poupança, Dinheiro)
-- `HiveInit` atualizado: registra AccountModelAdapter + abre box `accounts`
-- `RepositoryLocator` atualizado: expõe `accounts`
-- `router.dart` atualizado: rota `/accounts` registrada
-- `TransactionEntity.accountId` (nullable String) adicionado ao domínio
-- `CONTEXT.md` atualizado com estado M3-A concluído
+**SHA:** *(commit anterior)* | **Tipo:** feat (M3)  
+M3-A completo — AccountEntity, AccountModel, HiveAccountsRepository, AccountsPage, seed automático, rota /accounts.
+
+### #49 — feat(transfer): transferência entre contas ✅ (M3-B)
+**SHA:** `c871a23a` | **Tipo:** feat (M3)  
+**M3-B — Transferência entre Contas.** Feature completa implementada:
+- `TransactionType.transfer` adicionado ao enum
+- `TransactionEntity.toAccountId` + `notes` adicionados
+- `TransactionModel` atualizado: índices 15 (`toAccountId`) e 16 (`notes`) retrocompatíveis
+- `TransferPage`: seleção de conta origem/destino, valor, data, descrição opcional
+- Lança débito na origem e crédito no destino como par de transações
+- Empty state se < 2 contas cadastradas
+- Rota `/transfer` registrada no router
+- CONTEXT.md atualizado
 
 ---
 
