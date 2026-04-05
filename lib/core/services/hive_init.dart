@@ -15,6 +15,22 @@ class HiveInit {
   static const String settingsBoxName     = 'settings';
   static const String accountsBoxName     = 'accounts';
 
+  static const String _onboardingDoneKey  = 'onboardingDone';
+
+  // ─── Onboarding ──────────────────────────────────────────────────
+
+  static bool isOnboardingDone() {
+    final box = Hive.box<String>(settingsBoxName);
+    return box.get(_onboardingDoneKey) == 'true';
+  }
+
+  static Future<void> markOnboardingDone() async {
+    final box = Hive.box<String>(settingsBoxName);
+    await box.put(_onboardingDoneKey, 'true');
+  }
+
+  // ─── Init ─────────────────────────────────────────────────────────
+
   static Future<void> init() async {
     await Hive.initFlutter();
 

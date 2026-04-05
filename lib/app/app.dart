@@ -5,7 +5,9 @@ import '../core/theme/app_theme.dart';
 import 'router.dart';
 
 class FinMeApp extends StatelessWidget {
-  const FinMeApp({super.key});
+  final bool showOnboarding;
+
+  const FinMeApp({super.key, required this.showOnboarding});
 
   @override
   Widget build(BuildContext context) {
@@ -19,7 +21,8 @@ class FinMeApp extends StatelessWidget {
           theme: finMeLightTheme(),
           darkTheme: finMeDarkTheme(),
           themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
-          initialRoute: AppRouter.dashboard,
+          initialRoute:
+              showOnboarding ? AppRouter.onboarding : AppRouter.dashboard,
           routes: AppRouter.routes,
         );
       },

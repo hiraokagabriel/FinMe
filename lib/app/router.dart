@@ -8,8 +8,10 @@ import '../features/goals/presentation/goals_page.dart';
 import '../features/reports/presentation/reports_page.dart';
 import '../features/accounts/presentation/accounts_page.dart';
 import '../features/transfer/presentation/transfer_page.dart';
+import '../features/onboarding/presentation/onboarding_page.dart';
 
 class AppRouter {
+  static const String onboarding   = '/onboarding';
   static const String dashboard    = '/';
   static const String transactions = '/transactions';
   static const String cards        = '/cards';
@@ -20,6 +22,7 @@ class AppRouter {
   static const String transfer     = '/transfer';
 
   static final Map<String, WidgetBuilder> routes = {
+    onboarding:   (context) => const OnboardingPage(),
     dashboard:    (context) => const DashboardPage(),
     transactions: (context) => const TransactionsPage(),
     cards:        (context) => const CardsPage(),

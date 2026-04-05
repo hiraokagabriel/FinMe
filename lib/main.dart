@@ -19,5 +19,8 @@ void main() async {
     RecurrenceService.generatePending(),
   ]);
 
-  runApp(const FinMeApp());
+  // 3. Verifica se onboarding já foi exibido
+  final showOnboarding = !HiveInit.isOnboardingDone();
+
+  runApp(FinMeApp(showOnboarding: showOnboarding));
 }
