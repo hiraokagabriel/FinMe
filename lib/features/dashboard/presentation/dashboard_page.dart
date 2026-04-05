@@ -166,8 +166,6 @@ class _DashboardPageState extends State<DashboardPage> {
     final balance = income - expense;
     final provisioned = _totalProvisioned;
 
-    // "A vencer" aparece em ambos os modos — no Ultra fica após o Saldo,
-    // no Simples fica no fim da linha para não sobrecarregar visualmente.
     final cards = [
       _SummaryCardData(
         label: 'Receitas',
@@ -401,6 +399,9 @@ class _RecentTransactionRow extends StatelessWidget {
         isIncome ? AppColors.limitLow : AppColors.danger;
     final amountPrefix = isIncome ? '+ R\$' : '- R\$';
 
+    // Usa description com fallback para string vazia se nulo
+    final descriptionText = transaction.description ?? '';
+
     return Column(
       children: [
         Padding(
@@ -426,20 +427,22 @@ class _RecentTransactionRow extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: AppSpacing.md),
-              // Descrição + categoria
+              // Descrição + categoryId como fallback visual
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      transaction.description,
+                      descriptionText.isNotEmpty
+                          ? descriptionText
+                          : 'Sem descrição',
                       style: AppText.body,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    if (transaction.category != null)
+                    if (transaction.categoryId.isNotEmpty)
                       Text(
-                        transaction.category!.name,
+                        transaction.categoryId,
                         style: AppText.secondary,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
