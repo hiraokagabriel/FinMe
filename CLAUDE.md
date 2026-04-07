@@ -178,11 +178,11 @@ Estrutura principal em `lib/`:
 
 - `lib/app/`
   - `app.dart`: widget raiz (`MaterialApp`) e inicialização global.
-  - `router.dart`: definição de rotas e navegação.
+  - `router.dart`: definição de rotas e navegação (inclui `/onboarding` apontando para `OnboardingPage`).
 
 - `lib/core/`
   - `models/`: modelos genéricos e compartilhados (ex.: tipos de valor monetário, intervalos de datas).
-  - `services/`: serviços reutilizáveis (ex.: abstrações de storage local, logger).
+  - `services/`: serviços reutilizáveis (ex.: abstrações de storage local, logger, `HiveInit` com flag `onboardingDone`, `AppModeController`).
   - `utils/`: helpers e funções utilitárias.
   - `theme/`: temas, cores, tipografia e estilos globais.
 
@@ -201,10 +201,20 @@ Estrutura principal em `lib/`:
     - `presentation/`: tela inicial e visões consolidadas (por período, por categoria, etc.).
   - `settings/`
     - `presentation/`: telas de configuração, incluindo toggle entre Modo Simples e Modo Ultra.
+  - `goals/`
+    - `data/`, `domain/`, `presentation/` para metas.
+  - `reports/`
+    - `presentation/` para relatórios e exportação CSV.
+  - `accounts/`
+    - `data/`, `domain/`, `presentation/` para múltiplas contas/carteiras.
+  - `transfer/`
+    - `presentation/` para transferência entre contas.
+  - `onboarding/`
+    - `presentation/`: `OnboardingPage` com splash + seleção de modo e integração com `AppModeController`/`HiveInit`.
 
 Ao sugerir novos arquivos:
 
-- Prefira colocá-los dentro do **módulo de feature correto** (`cards`, `transactions`, `categories`, `dashboard`, `settings`).
+- Prefira colocá-los dentro do **módulo de feature correto** (`cards`, `transactions`, `categories`, `dashboard`, `settings`, `onboarding`, etc.).
 - Separe responsabilidades:
   - **`data`**: acesso a dados, storage, repositórios.
   - **`domain`**: modelos de domínio e regras de negócio.

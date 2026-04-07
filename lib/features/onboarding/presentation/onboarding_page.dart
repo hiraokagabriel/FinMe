@@ -40,7 +40,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
 
   Future<void> _finish() async {
     if (_selectedMode == null) return;
-    await AppModeController.instance.setMode(_selectedMode!);
+    AppModeController.instance.setMode(_selectedMode!);
     await HiveInit.markOnboardingDone();
     if (mounted) {
       await Navigator.pushReplacementNamed(context, AppRouter.dashboard);

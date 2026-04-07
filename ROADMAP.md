@@ -26,7 +26,7 @@ FinMe é um app de finanças para pessoas que lidam com **alto volume de cartõe
 - Progresso geral atual:
   - **M1: concluído**.
   - **M2: concluído**.
-  - **M3: parcialmente concluído** — 3 itens restantes.
+  - **M3: parcialmente concluído** — 2 itens restantes (M3-D e M3-E).
 
 ---
 
@@ -45,7 +45,7 @@ FinMe é um app de finanças para pessoas que lidam com **alto volume de cartõe
     - `router.dart` (definição de rotas/navegação).
   - `lib/core/`
     - `models/` (modelos genéricos, ex.: Money, DateRange).
-    - `services/` (serviços genéricos, ex.: storage local, controller de modo, inicialização Hive).
+    - `services` (serviços genéricos, ex.: storage local, controller de modo, inicialização Hive).
     - `utils/` (helpers e funções utilitárias).
     - `theme/` (cores, tipografia, temas).
   - `lib/features/`
@@ -99,7 +99,7 @@ FinMe é um app de finanças para pessoas que lidam com **alto volume de cartõe
 
 **Objetivo:** Entregar experiências distintas de uso, respeitando o nível de complexidade desejado.
 
-**Status:** 🟡 **Parcialmente concluído** — 3 itens pendentes
+**Status:** 🟡 **Parcialmente concluído** — 2 itens pendentes (M3-D e M3-E)
 
 ### Funcionalidades entregues ✅
 
@@ -116,12 +116,12 @@ FinMe é um app de finanças para pessoas que lidam com **alto volume de cartõe
 | Tema escuro com toggle persistido | #36 |
 | Múltiplas contas/carteiras (`AccountsPage`, seed, rota `/accounts`) | #48 |
 | Transferência entre contas (`TransferPage`, rota `/transfer`) | #49 |
+| Splash + onboarding com seleção de modo (`OnboardingPage`, flag Hive em `HiveInit`, rota `/onboarding`) | #56+ |
 
 ### Itens ainda pendentes 🔲
 
 | # | Feature | Descrição |
 |---|---------|----------|
-| M3-C | **Splash Screen / Onboarding** | Tela de boas-vindas no primeiro boot, apresentando os dois modos e guiando o setup inicial |
 | M3-D | **Persistência definitiva de preferências avançadas** | Box `preferences` dedicado com `PreferencesService` — moeda padrão, idioma, formato de data, etc. |
 | M3-E | **Orçamento mensal por categoria** | Tela `BudgetPage`, `BudgetEntity/Model` (typeId 6), alerta quando o usuário ultrapassa o teto definido por categoria |
 
