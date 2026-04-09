@@ -62,19 +62,20 @@ class ProfileService extends ChangeNotifier {
   }
 
   Future<void> _closeProfileBoxes(String profileId) async {
-    final names = [
-      boxName(HiveInit.transactionsBoxName, profileId),
-      boxName(HiveInit.categoriesBoxName,   profileId),
-      boxName(HiveInit.cardsBoxName,        profileId),
-      boxName(HiveInit.goalsBoxName,        profileId),
-      boxName(HiveInit.accountsBoxName,     profileId),
-      boxName(HiveInit.budgetsBoxName,      profileId),
-    ];
-    for (final name in names) {
-      if (Hive.isBoxOpen(name)) {
-        // Fecha sem cast de tipo — Hive aceita fechar qualquer box pelo nome
-        await (Hive.box(name) as BoxBase).close();
-      }
-    }
+    // Fecha cada box usando o mesmo tipo genérico com que foi aberto.
+    // Hive rejeita acesso sem tipo a boxes tipados.
+    final tx = boxName(HiveInit.transactionsBoxName, profileId);
+    final ca = boxName(HiveInit.categoriesBoxName,   profileId);
+    final cd = boxName(HiveInit.cardsBoxName,        profileId);
+    final go = boxName(HiveInit.goalsBoxName,        profileId);
+    final ac = boxName(HiveInit.accountsBoxName,     profileId);
+    final bu = boxName(HiveInit.budgetsBoxName,      profileId);
+
+    if (Hive.isBoxOpen(tx)) await Hive.box<TransactionModel>(tx).close();
+    if (Hive.isBoxOpen(ca)) await Hive.box<CategoryModel>(ca).close();
+    if (Hive.isBoxOpen(cd)) await Hive.box<CardModel>(cd).close();
+    if (Hive.isBoxOpen(go)) await Hive.box(go).close();
+    if (Hive.isBoxOpen(ac)) await Hive.box<AccountModel>(ac).close();
+    if (Hive.isBoxOpen(bu)) await Hive.box(bu).close();
   }
 }
