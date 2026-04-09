@@ -1,6 +1,6 @@
-import '../transactions/domain/transaction_entity.dart';
-import '../transactions/domain/transaction_type.dart';
-import '../transactions/domain/recurrence_rule.dart';
+import '../../features/transactions/domain/transaction_entity.dart';
+import '../../features/transactions/domain/transaction_type.dart';
+import '../../features/transactions/domain/recurrence_rule.dart';
 import 'subscription_summary.dart';
 
 /// Detecta assinaturas recorrentes a partir de uma lista de transações.
@@ -70,7 +70,6 @@ List<SubscriptionSummary> _detectManual(List<TransactionEntity> txs) {
 // ── Assinaturas automáticas (padrão de repetição) ─────────────────────────
 
 List<SubscriptionSummary> _detectAuto(List<TransactionEntity> txs) {
-  // Apenas despesas efetivadas
   final expenses = txs
       .where((tx) =>
           tx.type == TransactionType.expense &&
@@ -93,7 +92,6 @@ List<SubscriptionSummary> _detectAuto(List<TransactionEntity> txs) {
 
         list.sort((a, b) => a.date.compareTo(b.date));
 
-        // Verifica padrão mensal: ao menos um par com 25–35 dias de intervalo
         bool hasPattern = false;
         for (int i = 1; i < list.length; i++) {
           final diff = list[i].date.difference(list[i - 1].date).inDays;
@@ -104,12 +102,12 @@ List<SubscriptionSummary> _detectAuto(List<TransactionEntity> txs) {
         }
         if (!hasPattern) return false;
 
-        // Variação de valor ≤ 10%
         final amounts = list.map((t) => t.amount.amount).toList();
         final avg = amounts.reduce((a, b) => a + b) / amounts.length;
         if (avg == 0) return false;
-        final maxDev =
-            amounts.map((v) => (v - avg).abs() / avg).reduce((a, b) => a > b ? a : b);
+        final maxDev = amounts
+            .map((v) => (v - avg).abs() / avg)
+            .reduce((a, b) => a > b ? a : b);
         return maxDev <= 0.10;
       })
       .map((e) {
@@ -131,8 +129,6 @@ List<SubscriptionSummary> _detectAuto(List<TransactionEntity> txs) {
       .toList();
 }
 
-/// Normaliza descrição para agrupamento:
-/// lowercase + trim + remove números/pontuação no final.
 String _normalize(String s) {
   return s
       .toLowerCase()
