@@ -2,12 +2,42 @@ import 'package:flutter/material.dart';
 
 import '../../../core/models/app_mode.dart';
 import '../../../core/services/app_mode_controller.dart';
+import '../../../core/services/preferences_service.dart';
 import '../../../core/services/theme_controller.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../categories/presentation/categories_page.dart';
 
-class SettingsPage extends StatelessWidget {
+class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  late String _currency;
+  late String _dateFormat;
+
+  static const _currencies = ['BRL', 'USD', 'EUR', 'GBP', 'JPY'];
+  static const _dateFormats = ['dd/MM/yyyy', 'MM/dd/yyyy', 'yyyy-MM-dd'];
+
+  @override
+  void initState() {
+    super.initState();
+    final prefs = PreferencesService.instance;
+    _currency   = prefs.currency;
+    _dateFormat = prefs.dateFormat;
+  }
+
+  Future<void> _setCurrency(String value) async {
+    await PreferencesService.instance.setCurrency(value);
+    setState(() => _currency = value);
+  }
+
+  Future<void> _setDateFormat(String value) async {
+    await PreferencesService.instance.setDateFormat(value);
+    setState(() => _dateFormat = value);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -39,20 +69,65 @@ class SettingsPage extends StatelessWidget {
                 ),
                 title: const Text('Tema escuro'),
                 subtitle: Text(
-                  isDark
-                      ? 'Interface escura ativa'
-                      : 'Interface clara ativa',
+                  isDark ? 'Interface escura ativa' : 'Interface clara ativa',
                 ),
                 value: isDark,
                 onChanged: themeController.setDark,
               ),
               const Divider(height: AppSpacing.h),
 
+              // ── Preferências regionais ─────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xs),
+                child: Text('Regional', style: AppText.sectionLabel),
+              ),
+              ListTile(
+                leading: const Icon(Icons.attach_money_outlined),
+                title: const Text('Moeda'),
+                subtitle: Text(_currency),
+                trailing: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _currency,
+                    isDense: true,
+                    items: _currencies
+                        .map((c) => DropdownMenuItem(
+                              value: c,
+                              child: Text(c, style: AppText.body),
+                            ))
+                        .toList(),
+                    onChanged: (v) {
+                      if (v != null) _setCurrency(v);
+                    },
+                  ),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.calendar_today_outlined),
+                title: const Text('Formato de data'),
+                subtitle: Text(_dateFormat),
+                trailing: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _dateFormat,
+                    isDense: true,
+                    items: _dateFormats
+                        .map((f) => DropdownMenuItem(
+                              value: f,
+                              child: Text(f, style: AppText.body),
+                            ))
+                        .toList(),
+                    onChanged: (v) {
+                      if (v != null) _setDateFormat(v);
+                    },
+                  ),
+                ),
+              ),
+              const Divider(height: AppSpacing.h),
+
               // ── Modo de uso ────────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.lg, 0,
-                    AppSpacing.lg, AppSpacing.xs),
+                    AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xs),
                 child: Text('Modo de uso', style: AppText.sectionLabel),
               ),
               RadioListTile<AppMode>(
@@ -104,8 +179,7 @@ class SettingsPage extends StatelessWidget {
               // ── Dados ──────────────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.lg, 0,
-                    AppSpacing.lg, AppSpacing.xs),
+                    AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xs),
                 child: Text('Dados', style: AppText.sectionLabel),
               ),
               ListTile(
