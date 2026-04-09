@@ -11,6 +11,7 @@ import '../../../core/services/app_mode_controller.dart';
 import '../../../core/services/preferences_service.dart';
 import '../../../core/services/repository_locator.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/app_empty_state.dart';
 import 'new_transaction_page.dart';
 
 enum _PeriodFilter { thisMonth, lastMonth, thisWeek, all }
@@ -81,7 +82,6 @@ class _TransactionsPageState extends State<TransactionsPage> {
   void initState() {
     super.initState();
     _transactionsRepository = RepositoryLocator.instance.transactions;
-    // Restaura filtros persistidos
     final prefs = PreferencesService.instance;
     _period = _PeriodFilterPersistence.fromKey(prefs.transactionsPeriod);
     _filterCategoryId = prefs.transactionsCategoryId;
@@ -604,17 +604,12 @@ class _TransactionsPageState extends State<TransactionsPage> {
   Widget _buildTransactionList(bool isSimple) {
     if (_filtered.isEmpty) {
       return SliverFillRemaining(
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.receipt_long_outlined,
-                  size: 48, color: AppColors.textSecondary),
-              const SizedBox(height: AppSpacing.md),
-              Text('Nenhuma transação neste período.',
-                  style: AppText.secondary),
-            ],
-          ),
+        child: AppEmptyState(
+          icon: Icons.receipt_long_outlined,
+          title: 'Nenhuma transação',
+          message: 'Nenhuma transação encontrada para o período selecionado.',
+          actionLabel: 'Adicionar transação',
+          onAction: () => _openForm(),
         ),
       );
     }
