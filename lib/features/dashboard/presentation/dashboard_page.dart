@@ -27,7 +27,6 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   void initState() {
     super.initState();
-    // Recarrega dados sempre que o perfil ativo mudar
     ProfileService.instance.addListener(_onProfileChanged);
     _load();
   }
@@ -77,13 +76,13 @@ class _DashboardPageState extends State<DashboardPage> {
     });
   }
 
-  (double, double) get _currentMonthTotals {
-    final now = DateTime.now();
+  /// Retorna (income, expense) para um mês/ano específico.
+  (double, double) _totalsForMonth(int year, int month) {
     double income = 0;
     double expense = 0;
     for (final tx in _transactions) {
       if (tx.isProvisioned) continue;
-      if (tx.date.year == now.year && tx.date.month == now.month) {
+      if (tx.date.year == year && tx.date.month == month) {
         if (tx.type == TransactionType.income) {
           income += tx.amount.amount;
         } else {
@@ -92,6 +91,16 @@ class _DashboardPageState extends State<DashboardPage> {
       }
     }
     return (income, expense);
+  }
+
+  (double, double) get _currentMonthTotals {
+    final now = DateTime.now();
+    return _totalsForMonth(now.year, now.month);
+  }
+
+  (double, double) get _previousMonthTotals {
+    final prev = DateTime(DateTime.now().year, DateTime.now().month - 1);
+    return _totalsForMonth(prev.year, prev.month);
   }
 
   double get _totalProvisioned {
@@ -203,13 +212,16 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _buildSummaryCards(bool isUltra) {
     final (income, expense) = _currentMonthTotals;
+    final (prevIncome, prevExpense) = _previousMonthTotals;
     final balance = income - expense;
+    final prevBalance = prevIncome - prevExpense;
     final provisioned = _totalProvisioned;
 
     final cards = [
       _SummaryCardData(
         label: 'Receitas',
         value: income,
+        prevValue: prevIncome,
         icon: Icons.arrow_upward_rounded,
         color: AppColors.limitLow,
         prefix: '+ R\$',
@@ -217,13 +229,16 @@ class _DashboardPageState extends State<DashboardPage> {
       _SummaryCardData(
         label: 'Despesas',
         value: expense,
+        prevValue: prevExpense,
         icon: Icons.arrow_downward_rounded,
         color: AppColors.danger,
         prefix: '- R\$',
+        invertDelta: true, // despesa menor = positivo
       ),
       _SummaryCardData(
         label: 'Saldo',
         value: balance,
+        prevValue: prevBalance,
         icon: Icons.account_balance_wallet_outlined,
         color: balance >= 0 ? AppColors.primary : AppColors.danger,
         prefix: 'R\$',
@@ -231,6 +246,7 @@ class _DashboardPageState extends State<DashboardPage> {
       _SummaryCardData(
         label: 'A vencer',
         value: provisioned,
+        prevValue: null, // sem comparativo para provisionados
         icon: Icons.schedule_outlined,
         color: AppColors.warning,
         prefix: 'R\$',
@@ -378,7 +394,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                   child: Text(
-                    'Ver todas',
+                    'Ver todas →',
                     style: AppText.secondary.copyWith(
                       color: AppColors.primary,
                       fontSize: 12,
@@ -735,15 +751,20 @@ class _SummaryCardData {
   const _SummaryCardData({
     required this.label,
     required this.value,
+    required this.prevValue,
     required this.icon,
     required this.color,
     required this.prefix,
+    this.invertDelta = false,
   });
   final String label;
   final double value;
+  final double? prevValue;
   final IconData icon;
   final Color color;
   final String prefix;
+  /// Se true, delta negativo (queda) é verde — usado em Despesas.
+  final bool invertDelta;
 }
 
 class _SummaryCard extends StatelessWidget {
@@ -752,6 +773,19 @@ class _SummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Calcula delta absoluto vs mês anterior
+    final prev = data.prevValue;
+    final hasDelta = prev != null && prev != 0;
+    final delta = hasDelta ? data.value - prev! : 0.0;
+    final isPositive = data.invertDelta ? delta <= 0 : delta >= 0;
+    final deltaColor = hasDelta
+        ? (isPositive ? AppColors.limitLow : AppColors.danger)
+        : AppColors.textSecondary;
+    final deltaSign = delta >= 0 ? '+' : '';
+    final deltaLabel = hasDelta
+        ? '$deltaSign R\$ ${delta.abs().toStringAsFixed(0)}'
+        : null;
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.md),
@@ -776,6 +810,19 @@ class _SummaryCard extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
+            if (deltaLabel != null) ...[
+              const SizedBox(height: 2),
+              Text(
+                deltaLabel,
+                style: AppText.secondary.copyWith(
+                  fontSize: 10,
+                  color: deltaColor,
+                  fontWeight: FontWeight.w500,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
           ],
         ),
       ),
