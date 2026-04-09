@@ -9,6 +9,7 @@ import '../features/reports/presentation/reports_page.dart';
 import '../features/accounts/presentation/accounts_page.dart';
 import '../features/transfer/presentation/transfer_page.dart';
 import '../features/onboarding/presentation/onboarding_page.dart';
+import '../features/budget/presentation/budget_page.dart';
 
 class AppRouter {
   static const String onboarding   = '/onboarding';
@@ -20,6 +21,7 @@ class AppRouter {
   static const String reports      = '/reports';
   static const String accounts     = '/accounts';
   static const String transfer     = '/transfer';
+  static const String budget       = '/budget';
 
   static final Map<String, WidgetBuilder> routes = {
     onboarding:   (context) => const OnboardingPage(),
@@ -31,5 +33,6 @@ class AppRouter {
     reports:      (context) => const ReportsPage(),
     accounts:     (context) => const AccountsPage(),
     transfer:     (context) => const TransferPage(),
+    budget:       (context) => const BudgetPage(),
   };
 }

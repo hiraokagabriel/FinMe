@@ -15,10 +15,11 @@ class HiveInit {
   static const String settingsBoxName     = 'settings';
   static const String accountsBoxName     = 'accounts';
   static const String preferencesBoxName  = 'preferences';
+  static const String budgetsBoxName      = 'budgets';
 
   static const String _onboardingDoneKey  = 'onboardingDone';
 
-  // ─── Onboarding ──────────────────────────────────────────────────
+  // ─── Onboarding ──────────────────────────────────────────────
 
   static bool isOnboardingDone() {
     final box = Hive.box<String>(settingsBoxName);
@@ -51,6 +52,8 @@ class HiveInit {
     if (!Hive.isAdapterRegistered(4)) {
       Hive.registerAdapter(AccountModelAdapter());
     }
+    // typeId 5 = GoalModel — persiste como Map dinâmico, sem adapter registrado
+    // typeId 6 = BudgetModel — persiste como Map dinâmico, sem adapter registrado
 
     await Hive.openBox<String>(settingsBoxName);
     await Hive.openBox<String>(preferencesBoxName);
@@ -61,6 +64,7 @@ class HiveInit {
         await Hive.openBox<CategoryModel>(categoriesBoxName);
     final cardsBox = await Hive.openBox<CardModel>(cardsBoxName);
     await Hive.openBox(goalsBoxName);
+    await Hive.openBox(budgetsBoxName);
     final accountsBox =
         await Hive.openBox<AccountModel>(accountsBoxName);
 
