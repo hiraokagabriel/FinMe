@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 
 import '../../../app/router.dart';
+import '../../../core/analysis/subscription_detector.dart';
+import '../../../core/analysis/subscription_summary.dart';
 import '../../../core/models/app_mode.dart';
 import '../../../core/services/app_mode_controller.dart';
 import '../../../core/services/repository_locator.dart';
@@ -18,6 +20,7 @@ class DashboardPage extends StatefulWidget {
 
 class _DashboardPageState extends State<DashboardPage> {
   List<TransactionEntity> _transactions = const [];
+  List<SubscriptionSummary> _subscriptions = const [];
   bool _isLoading = true;
 
   @override
@@ -29,8 +32,10 @@ class _DashboardPageState extends State<DashboardPage> {
   Future<void> _load() async {
     final txs = await RepositoryLocator.instance.transactions.getAll();
     if (!mounted) return;
+    final subs = detectSubscriptions(txs);
     setState(() {
       _transactions = txs;
+      _subscriptions = subs;
       _isLoading = false;
     });
   }
@@ -85,7 +90,6 @@ class _DashboardPageState extends State<DashboardPage> {
     return total;
   }
 
-  /// Retorna as últimas [limit] transações não-provisionadas, mais recentes primeiro.
   List<TransactionEntity> _recentTransactions({int limit = 5}) {
     final filtered = _transactions.where((t) => !t.isProvisioned).toList()
       ..sort((a, b) => b.date.compareTo(a.date));
@@ -131,6 +135,11 @@ class _DashboardPageState extends State<DashboardPage> {
                       const SizedBox(height: AppSpacing.lg),
                       _buildLineChartCard(),
                       const SizedBox(height: AppSpacing.lg),
+                      // Card de assinaturas — apenas Modo Ultra
+                      if (isUltra && _subscriptions.isNotEmpty) ...[
+                        _buildSubscriptionsCard(context),
+                        const SizedBox(height: AppSpacing.lg),
+                      ],
                       _buildRecentTransactions(context),
                       const SizedBox(height: AppSpacing.lg),
                       _buildQuickActions(context, isUltra),
@@ -150,8 +159,7 @@ class _DashboardPageState extends State<DashboardPage> {
           padding: const EdgeInsets.symmetric(
               horizontal: AppSpacing.md, vertical: AppSpacing.xs),
           decoration: BoxDecoration(
-            color:
-                isUltra ? AppColors.primarySubtle : AppColors.sidebar,
+            color: isUltra ? AppColors.primarySubtle : AppColors.sidebar,
             borderRadius: BorderRadius.circular(AppRadius.full),
           ),
           child: Text(
@@ -210,9 +218,7 @@ class _DashboardPageState extends State<DashboardPage> {
           .map((e) => Expanded(
                 child: Padding(
                   padding: EdgeInsets.only(
-                      right: e.key < cards.length - 1
-                          ? AppSpacing.sm
-                          : 0),
+                      right: e.key < cards.length - 1 ? AppSpacing.sm : 0),
                   child: _SummaryCard(data: e.value),
                 ),
               ))
@@ -234,11 +240,9 @@ class _DashboardPageState extends State<DashboardPage> {
               children: [
                 Text('Evolução mensal', style: AppText.sectionLabel),
                 const Spacer(),
-                _LegendDot(
-                    color: AppColors.limitLow, label: 'Receitas'),
+                _LegendDot(color: AppColors.limitLow, label: 'Receitas'),
                 const SizedBox(width: AppSpacing.md),
-                _LegendDot(
-                    color: AppColors.danger, label: 'Despesas'),
+                _LegendDot(color: AppColors.danger, label: 'Despesas'),
               ],
             ),
             const SizedBox(height: AppSpacing.lg),
@@ -250,8 +254,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(Icons.show_chart_outlined,
-                          size: 36,
-                          color: AppColors.textSecondary),
+                          size: 36, color: AppColors.textSecondary),
                       const SizedBox(height: AppSpacing.sm),
                       Text('Sem dados nos últimos 6 meses',
                           style: AppText.secondary),
@@ -270,7 +273,64 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  /// Seção de últimas transações — 5 mais recentes com link para ver todas.
+  /// Card de assinaturas ativas — Modo Ultra apenas.
+  Widget _buildSubscriptionsCard(BuildContext context) {
+    final totalMonthly = _subscriptions
+        .fold<double>(0, (sum, s) => sum + s.monthlyAmount);
+    final count = _subscriptions.length;
+
+    return Card(
+      child: InkWell(
+        onTap: () => Navigator.of(context).pushNamed(AppRouter.reports),
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: AppColors.primarySubtle,
+                  borderRadius: BorderRadius.circular(AppRadius.chip),
+                ),
+                child: Icon(Icons.autorenew_outlined,
+                    size: 18, color: AppColors.primary),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Assinaturas ativas', style: AppText.sectionLabel),
+                    Text(
+                      '$count assinatura${count != 1 ? 's' : ''} detectada${count != 1 ? 's' : ''}',
+                      style: AppText.secondary,
+                    ),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    'R\$ ${totalMonthly.toStringAsFixed(2)}',
+                    style: AppText.amount
+                        .copyWith(color: AppColors.danger, fontSize: 14),
+                  ),
+                  Text('por mês', style: AppText.secondary),
+                ],
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Icon(Icons.chevron_right,
+                  size: 18, color: AppColors.textSecondary),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildRecentTransactions(BuildContext context) {
     final recent = _recentTransactions(limit: 5);
 
@@ -346,8 +406,8 @@ class _DashboardPageState extends State<DashboardPage> {
           runSpacing: AppSpacing.md,
           children: [
             OutlinedButton.icon(
-              onPressed: () => Navigator.of(context)
-                  .pushNamed(AppRouter.transactions),
+              onPressed: () =>
+                  Navigator.of(context).pushNamed(AppRouter.transactions),
               icon: const Icon(Icons.receipt_long_outlined),
               label: const Text('Transações'),
             ),
@@ -407,18 +467,13 @@ class _RecentTransactionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isIncome = transaction.type == TransactionType.income;
-    final amountColor =
-        isIncome ? AppColors.limitLow : AppColors.danger;
+    final amountColor = isIncome ? AppColors.limitLow : AppColors.danger;
     final amountPrefix = isIncome ? '+ R\$' : '- R\$';
-
-    final descriptionText = transaction.description ?? '';
-    final categoryText = transaction.categoryId ?? '';
 
     return Column(
       children: [
         Padding(
-          padding:
-              const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
           child: Row(
             children: [
               Container(
@@ -426,8 +481,7 @@ class _RecentTransactionRow extends StatelessWidget {
                 height: 28,
                 decoration: BoxDecoration(
                   color: amountColor.withOpacity(0.12),
-                  borderRadius:
-                      BorderRadius.circular(AppRadius.chip),
+                  borderRadius: BorderRadius.circular(AppRadius.chip),
                 ),
                 child: Icon(
                   isIncome
@@ -443,16 +497,16 @@ class _RecentTransactionRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      descriptionText.isNotEmpty
-                          ? descriptionText
+                      transaction.description?.isNotEmpty == true
+                          ? transaction.description!
                           : 'Sem descrição',
                       style: AppText.body,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    if (categoryText.isNotEmpty)
+                    if ((transaction.categoryId ?? '').isNotEmpty)
                       Text(
-                        categoryText,
+                        transaction.categoryId!,
                         style: AppText.secondary,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -471,21 +525,14 @@ class _RecentTransactionRow extends StatelessWidget {
                       fontSize: 13,
                     ),
                   ),
-                  Text(
-                    _formattedDate,
-                    style: AppText.secondary,
-                  ),
+                  Text(_formattedDate, style: AppText.secondary),
                 ],
               ),
             ],
           ),
         ),
         if (showDivider)
-          Divider(
-            height: 1,
-            thickness: 1,
-            color: AppColors.divider,
-          ),
+          Divider(height: 1, thickness: 1, color: AppColors.divider),
       ],
     );
   }
@@ -512,12 +559,10 @@ class _MonthlyLineChart extends StatelessWidget {
     FlSpot toSpot(int i, double v) => FlSpot(i.toDouble(), v);
 
     final incomeSpots = [
-      for (int i = 0; i < summary.length; i++)
-        toSpot(i, summary[i].income)
+      for (int i = 0; i < summary.length; i++) toSpot(i, summary[i].income)
     ];
     final expenseSpots = [
-      for (int i = 0; i < summary.length; i++)
-        toSpot(i, summary[i].expense)
+      for (int i = 0; i < summary.length; i++) toSpot(i, summary[i].expense)
     ];
 
     return LineChart(
@@ -542,8 +587,7 @@ class _MonthlyLineChart extends StatelessWidget {
                     ? 'R\$${(value / 1000).toStringAsFixed(0)}k'
                     : 'R\$${value.toStringAsFixed(0)}';
                 return Text(label,
-                    style: AppText.secondary
-                        .copyWith(fontSize: 10));
+                    style: AppText.secondary.copyWith(fontSize: 10));
               },
             ),
           ),
@@ -553,13 +597,10 @@ class _MonthlyLineChart extends StatelessWidget {
               reservedSize: 24,
               getTitlesWidget: (value, _) {
                 final i = value.toInt();
-                if (i < 0 || i >= summary.length) {
-                  return const SizedBox.shrink();
-                }
+                if (i < 0 || i >= summary.length) return const SizedBox.shrink();
                 return Text(
                   _monthAbbr[summary[i].month.month],
-                  style:
-                      AppText.secondary.copyWith(fontSize: 10),
+                  style: AppText.secondary.copyWith(fontSize: 10),
                 );
               },
             ),
@@ -577,8 +618,7 @@ class _MonthlyLineChart extends StatelessWidget {
             barWidth: 2.5,
             dotData: FlDotData(
               show: true,
-              getDotPainter: (_, __, ___, ____) =>
-                  FlDotCirclePainter(
+              getDotPainter: (_, __, ___, ____) => FlDotCirclePainter(
                 radius: 3.5,
                 color: AppColors.limitLow,
                 strokeWidth: 0,
@@ -596,8 +636,7 @@ class _MonthlyLineChart extends StatelessWidget {
             barWidth: 2.5,
             dotData: FlDotData(
               show: true,
-              getDotPainter: (_, __, ___, ____) =>
-                  FlDotCirclePainter(
+              getDotPainter: (_, __, ___, ____) => FlDotCirclePainter(
                 radius: 3.5,
                 color: AppColors.danger,
                 strokeWidth: 0,
@@ -619,9 +658,7 @@ class _MonthlyLineChart extends StatelessWidget {
                 return LineTooltipItem(
                   'R\$ ${s.y.toStringAsFixed(2)}',
                   AppText.secondary.copyWith(
-                    color: isIncome
-                        ? AppColors.limitLow
-                        : AppColors.danger,
+                    color: isIncome ? AppColors.limitLow : AppColors.danger,
                     fontWeight: FontWeight.w600,
                   ),
                 );
@@ -638,9 +675,7 @@ class _MonthlyLineChart extends StatelessWidget {
 
 class _MonthSummary {
   const _MonthSummary(
-      {required this.month,
-      required this.income,
-      required this.expense});
+      {required this.month, required this.income, required this.expense});
   final DateTime month;
   final double income;
   final double expense;
@@ -687,8 +722,7 @@ class _SummaryCard extends StatelessWidget {
             const SizedBox(height: AppSpacing.xs),
             Text(
               '${data.prefix} ${data.value.toStringAsFixed(2)}',
-              style: AppText.amount
-                  .copyWith(color: data.color, fontSize: 13),
+              style: AppText.amount.copyWith(color: data.color, fontSize: 13),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -712,8 +746,7 @@ class _LegendDot extends StatelessWidget {
         Container(
           width: 8,
           height: 8,
-          decoration:
-              BoxDecoration(color: color, shape: BoxShape.circle),
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: AppSpacing.xs),
         Text(label, style: AppText.secondary),

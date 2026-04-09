@@ -4,6 +4,8 @@ import 'package:csv/csv.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/analysis/subscription_detector.dart';
+import '../../../core/analysis/subscription_summary.dart';
 import '../../../core/services/preferences_service.dart';
 import '../../../core/services/repository_locator.dart';
 import '../../../core/theme/app_theme.dart';
@@ -19,12 +21,16 @@ class ReportsPage extends StatefulWidget {
   State<ReportsPage> createState() => _ReportsPageState();
 }
 
-class _ReportsPageState extends State<ReportsPage> {
+class _ReportsPageState extends State<ReportsPage>
+    with SingleTickerProviderStateMixin {
   List<TransactionEntity> _allTransactions = const [];
   List<CategoryEntity> _categories = const [];
   List<CardEntity> _cards = const [];
+  List<SubscriptionSummary> _subscriptions = const [];
   bool _isLoading = true;
   bool _isExporting = false;
+
+  late TabController _tabController;
 
   // Filtros
   DateTime? _from;
@@ -34,7 +40,7 @@ class _ReportsPageState extends State<ReportsPage> {
   @override
   void initState() {
     super.initState();
-    // Restaura preset persistido
+    _tabController = TabController(length: 3, vsync: this);
     final saved = PreferencesService.instance.reportsPeriod;
     final restoredPreset = _FilterPreset.values.firstWhere(
       (e) => e.name == saved,
@@ -44,21 +50,28 @@ class _ReportsPageState extends State<ReportsPage> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
     final locator = RepositoryLocator.instance;
     final txs = await locator.transactions.getAll();
     final cats = await locator.categories.getAll();
     final cds = await locator.cards.getAll();
     if (!mounted) return;
+    final subs = detectSubscriptions(txs);
     setState(() {
       _allTransactions = txs;
       _categories = cats;
       _cards = cds;
+      _subscriptions = subs;
       _isLoading = false;
     });
   }
 
-  // Aplica preset de período e persiste
   void _applyPreset(_FilterPreset preset) {
     final now = DateTime.now();
     setState(() {
@@ -80,7 +93,6 @@ class _ReportsPageState extends State<ReportsPage> {
           break;
       }
     });
-    // Não persiste 'custom' — preset personalizado não é reproduzível só com o nome
     if (preset != _FilterPreset.custom) {
       PreferencesService.instance.setReportsPeriod(preset.name);
     }
@@ -108,19 +120,16 @@ class _ReportsPageState extends State<ReportsPage> {
     });
   }
 
-  // Transações filtradas pelo período
   List<TransactionEntity> get _filtered {
     return _allTransactions.where((tx) {
       if (_from != null && tx.date.isBefore(_from!)) return false;
-      if (_to != null && tx.date.isAfter(_to!.add(const Duration(days: 1)))) {
-        return false;
-      }
+      if (_to != null &&
+          tx.date.isAfter(_to!.add(const Duration(days: 1)))) return false;
       return true;
     }).toList()
       ..sort((a, b) => b.date.compareTo(a.date));
   }
 
-  // Totais do período
   (double, double) get _totals {
     double income = 0;
     double expense = 0;
@@ -135,7 +144,6 @@ class _ReportsPageState extends State<ReportsPage> {
     return (income, expense);
   }
 
-  // Gasto por categoria
   Map<String, double> get _byCategory {
     final map = <String, double>{};
     for (final tx in _filtered) {
@@ -147,7 +155,6 @@ class _ReportsPageState extends State<ReportsPage> {
         map.entries.toList()..sort((a, b) => b.value.compareTo(a.value)));
   }
 
-  // Exporta CSV
   Future<void> _exportCsv() async {
     final txs = _filtered;
     if (txs.isEmpty) {
@@ -155,17 +162,23 @@ class _ReportsPageState extends State<ReportsPage> {
           const SnackBar(content: Text('Nenhuma transação no período')));
       return;
     }
-
     setState(() => _isExporting = true);
-
     try {
       final rows = <List<String>>[
-        ['Data', 'Descrição', 'Tipo', 'Categoria', 'Cartão/Banco', 'Valor (R\$)', 'Provisionado'],
+        [
+          'Data',
+          'Descrição',
+          'Tipo',
+          'Categoria',
+          'Cartão/Banco',
+          'Valor (R\$)',
+          'Provisionado'
+        ],
       ];
-
       final catMap = {for (final c in _categories) c.id: c.name};
-      final cardMap = {for (final c in _cards) c.id: '${c.bankName} - ${c.name}'};
-
+      final cardMap = {
+        for (final c in _cards) c.id: '${c.bankName} - ${c.name}'
+      };
       for (final tx in txs) {
         rows.add([
           '${tx.date.day.toString().padLeft(2, '0')}/${tx.date.month.toString().padLeft(2, '0')}/${tx.date.year}',
@@ -177,23 +190,18 @@ class _ReportsPageState extends State<ReportsPage> {
           tx.isProvisioned ? 'Sim' : 'Não',
         ]);
       }
-
       final csvContent = const ListToCsvConverter().convert(rows);
       final fileName =
           'finme_relatorio_${DateTime.now().millisecondsSinceEpoch}.csv';
-
       final FileSaveLocation? result = await getSaveLocation(
         suggestedName: fileName,
         acceptedTypeGroups: [
           const XTypeGroup(label: 'CSV', extensions: ['csv']),
         ],
       );
-
       if (result == null) return;
-
       final file = File(result.path);
       await file.writeAsString(csvContent);
-
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -203,9 +211,8 @@ class _ReportsPageState extends State<ReportsPage> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao exportar: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Erro ao exportar: $e')));
     } finally {
       if (mounted) setState(() => _isExporting = false);
     }
@@ -213,14 +220,17 @@ class _ReportsPageState extends State<ReportsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final (income, expense) = _totals;
-    final balance = income - expense;
-    final byCat = _byCategory;
-    final filtered = _filtered;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Relatórios'),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(text: 'Resumo'),
+            Tab(text: 'Categorias'),
+            Tab(text: 'Insights'),
+          ],
+        ),
         actions: [
           TextButton.icon(
             onPressed: _isExporting ? null : _exportCsv,
@@ -236,250 +246,340 @@ class _ReportsPageState extends State<ReportsPage> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(AppSpacing.lg),
+          : TabBarView(
+              controller: _tabController,
               children: [
-                // ── Filtro de período ──────────────────────────────────────────────
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(AppSpacing.lg),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Período', style: AppText.sectionLabel),
-                        const SizedBox(height: AppSpacing.md),
-                        Wrap(
-                          spacing: AppSpacing.sm,
-                          runSpacing: AppSpacing.sm,
-                          children: _FilterPreset.values.map((p) {
-                            final selected = _preset == p;
-                            return ChoiceChip(
-                              label: Text(p.label),
-                              selected: selected,
-                              onSelected: (_) {
-                                if (p == _FilterPreset.custom) {
-                                  setState(() =>
-                                      _preset = _FilterPreset.custom);
-                                } else {
-                                  _applyPreset(p);
-                                }
-                              },
-                              selectedColor: AppColors.primarySubtle,
-                              labelStyle: TextStyle(
-                                color: selected
-                                    ? AppColors.primary
-                                    : AppColors.textSecondary,
-                                fontWeight: selected
-                                    ? FontWeight.w600
-                                    : FontWeight.w400,
-                              ),
-                            );
-                          }).toList(),
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _DateTile(
-                                label: 'De',
-                                date: _from,
-                                onTap: () => _pickDate(isFrom: true),
-                              ),
-                            ),
-                            const SizedBox(width: AppSpacing.md),
-                            Expanded(
-                              child: _DateTile(
-                                label: 'Até',
-                                date: _to,
-                                onTap: () => _pickDate(isFrom: false),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.lg),
-
-                // ── Totais do período ─────────────────────────────────────────────────
-                Row(
-                  children: [
-                    _TotalChip(
-                        label: 'Receitas',
-                        value: income,
-                        color: AppColors.limitLow),
-                    const SizedBox(width: AppSpacing.md),
-                    _TotalChip(
-                        label: 'Despesas',
-                        value: expense,
-                        color: AppColors.danger),
-                    const SizedBox(width: AppSpacing.md),
-                    _TotalChip(
-                        label: 'Saldo',
-                        value: balance,
-                        color: balance >= 0
-                            ? AppColors.primary
-                            : AppColors.danger),
-                  ].map((w) => Expanded(child: w)).toList(),
-                ),
-                const SizedBox(height: AppSpacing.lg),
-
-                // ── Gastos por categoria ─────────────────────────────────────────────
-                if (byCat.isNotEmpty) ...[
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(AppSpacing.lg),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Despesas por categoria',
-                              style: AppText.sectionLabel),
-                          const SizedBox(height: AppSpacing.md),
-                          ...byCat.entries.map((e) {
-                            final cat = _categories
-                                .where((c) => c.id == e.key)
-                                .firstOrNull;
-                            final pct = expense > 0
-                                ? e.value / expense
-                                : 0.0;
-                            final catColor = cat?.colorValue != null
-                                ? Color(cat!.colorValue!)
-                                : AppColors.primary;
-                            return Padding(
-                              padding: const EdgeInsets.only(
-                                  bottom: AppSpacing.md),
-                              child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Text(cat?.name ?? e.key,
-                                          style: AppText.body),
-                                      Text(
-                                        'R\$ ${e.value.toStringAsFixed(2)}  (${(pct * 100).toStringAsFixed(0)}%)',
-                                        style: AppText.secondary,
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: AppSpacing.xs),
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(
-                                        AppRadius.chip),
-                                    child: LinearProgressIndicator(
-                                      value: pct.clamp(0.0, 1.0),
-                                      minHeight: 5,
-                                      backgroundColor:
-                                          AppColors.limitTrack,
-                                      valueColor:
-                                          AlwaysStoppedAnimation<Color>(
-                                              catColor),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          }),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.lg),
-                ],
-
-                // ── Lista de transações do período ───────────────────────────────
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(AppSpacing.lg),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment:
-                              MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text('Transações',
-                                style: AppText.sectionLabel),
-                            Text('${filtered.length} registros',
-                                style: AppText.secondary),
-                          ],
-                        ),
-                        if (filtered.isEmpty)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                                vertical: AppSpacing.lg),
-                            child: Center(
-                              child: Text(
-                                  'Nenhuma transação no período',
-                                  style: AppText.secondary),
-                            ),
-                          )
-                        else ...[
-                          const SizedBox(height: AppSpacing.md),
-                          ...filtered.take(50).map((tx) {
-                            final cat = _categories
-                                .where((c) => c.id == tx.categoryId)
-                                .firstOrNull;
-                            final isIncome =
-                                tx.type == TransactionType.income;
-                            final valueColor = isIncome
-                                ? AppColors.limitLow
-                                : AppColors.danger;
-                            return Padding(
-                              padding: const EdgeInsets.only(
-                                  bottom: AppSpacing.sm),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                            tx.description ?? 'Sem descrição',
-                                            style: AppText.body),
-                                        Text(
-                                          '${tx.date.day.toString().padLeft(2, '0')}/${tx.date.month.toString().padLeft(2, '0')}/${tx.date.year}'  '${cat?.name ?? ''}',
-                                          style: AppText.secondary,
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  Text(
-                                    '${isIncome ? '+' : '-'} R\$ ${tx.amount.amount.toStringAsFixed(2)}',
-                                    style: AppText.amount.copyWith(
-                                        color: valueColor,
-                                        fontSize: 13),
-                                  ),
-                                ],
-                              ),
-                            );
-                          }),
-                          if (filtered.length > 50)
-                            Padding(
-                              padding: const EdgeInsets.only(
-                                  top: AppSpacing.sm),
-                              child: Text(
-                                'Mostrando 50 de ${filtered.length} — exporte o CSV para ver todos.',
-                                style: AppText.secondary,
-                                textAlign: TextAlign.center,
-                              ),
-                            ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
+                _buildResumoTab(),
+                _buildCategoriasTab(),
+                _buildInsightsTab(),
               ],
             ),
     );
   }
+
+  // ── Aba Resumo ─────────────────────────────────────────────────────────────
+
+  Widget _buildResumoTab() {
+    final (income, expense) = _totals;
+    final balance = income - expense;
+    final filtered = _filtered;
+
+    return ListView(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      children: [
+        // Filtro de período
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Período', style: AppText.sectionLabel),
+                const SizedBox(height: AppSpacing.md),
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: _FilterPreset.values.map((p) {
+                    final selected = _preset == p;
+                    return ChoiceChip(
+                      label: Text(p.label),
+                      selected: selected,
+                      onSelected: (_) => p == _FilterPreset.custom
+                          ? setState(() => _preset = _FilterPreset.custom)
+                          : _applyPreset(p),
+                      selectedColor: AppColors.primarySubtle,
+                      labelStyle: TextStyle(
+                        color: selected
+                            ? AppColors.primary
+                            : AppColors.textSecondary,
+                        fontWeight: selected
+                            ? FontWeight.w600
+                            : FontWeight.w400,
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _DateTile(
+                        label: 'De',
+                        date: _from,
+                        onTap: () => _pickDate(isFrom: true),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(
+                      child: _DateTile(
+                        label: 'Até',
+                        date: _to,
+                        onTap: () => _pickDate(isFrom: false),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        Row(
+          children: [
+            _TotalChip(label: 'Receitas', value: income, color: AppColors.limitLow),
+            const SizedBox(width: AppSpacing.md),
+            _TotalChip(label: 'Despesas', value: expense, color: AppColors.danger),
+            const SizedBox(width: AppSpacing.md),
+            _TotalChip(
+              label: 'Saldo',
+              value: balance,
+              color: balance >= 0 ? AppColors.primary : AppColors.danger,
+            ),
+          ].map((w) => Expanded(child: w)).toList(),
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        // Lista de transações
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Transações', style: AppText.sectionLabel),
+                    Text('${filtered.length} registros',
+                        style: AppText.secondary),
+                  ],
+                ),
+                if (filtered.isEmpty)
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(vertical: AppSpacing.lg),
+                    child: Center(
+                      child: Text('Nenhuma transação no período',
+                          style: AppText.secondary),
+                    ),
+                  )
+                else ...[
+                  const SizedBox(height: AppSpacing.md),
+                  ...filtered.take(50).map((tx) {
+                    final cat = _categories
+                        .where((c) => c.id == tx.categoryId)
+                        .firstOrNull;
+                    final isIncome = tx.type == TransactionType.income;
+                    final valueColor =
+                        isIncome ? AppColors.limitLow : AppColors.danger;
+                    return Padding(
+                      padding:
+                          const EdgeInsets.only(bottom: AppSpacing.sm),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(tx.description ?? 'Sem descrição',
+                                    style: AppText.body),
+                                Text(
+                                  '${tx.date.day.toString().padLeft(2, '0')}/${tx.date.month.toString().padLeft(2, '0')}/${tx.date.year}  ${cat?.name ?? ''}',
+                                  style: AppText.secondary,
+                                ),
+                              ],
+                            ),
+                          ),
+                          Text(
+                            '${isIncome ? '+' : '-'} R\$ ${tx.amount.amount.toStringAsFixed(2)}',
+                            style: AppText.amount
+                                .copyWith(color: valueColor, fontSize: 13),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                  if (filtered.length > 50)
+                    Padding(
+                      padding: const EdgeInsets.only(top: AppSpacing.sm),
+                      child: Text(
+                        'Mostrando 50 de ${filtered.length} — exporte o CSV para ver todos.',
+                        style: AppText.secondary,
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Aba Categorias ─────────────────────────────────────────────────────────
+
+  Widget _buildCategoriasTab() {
+    final byCat = _byCategory;
+    final (_, expense) = _totals;
+
+    return ListView(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      children: [
+        if (byCat.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg * 2),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.pie_chart_outline,
+                      size: 36, color: AppColors.textSecondary),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text('Sem despesas no período',
+                      style: AppText.secondary),
+                ],
+              ),
+            ),
+          )
+        else
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Despesas por categoria',
+                      style: AppText.sectionLabel),
+                  const SizedBox(height: AppSpacing.md),
+                  ...byCat.entries.map((e) {
+                    final cat = _categories
+                        .where((c) => c.id == e.key)
+                        .firstOrNull;
+                    final pct = expense > 0 ? e.value / expense : 0.0;
+                    final catColor = cat?.colorValue != null
+                        ? Color(cat!.colorValue!)
+                        : AppColors.primary;
+                    return Padding(
+                      padding:
+                          const EdgeInsets.only(bottom: AppSpacing.md),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment:
+                                MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(cat?.name ?? e.key,
+                                  style: AppText.body),
+                              Text(
+                                'R\$ ${e.value.toStringAsFixed(2)}  (${(pct * 100).toStringAsFixed(0)}%)',
+                                style: AppText.secondary,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: AppSpacing.xs),
+                          ClipRRect(
+                            borderRadius:
+                                BorderRadius.circular(AppRadius.chip),
+                            child: LinearProgressIndicator(
+                              value: pct.clamp(0.0, 1.0),
+                              minHeight: 5,
+                              backgroundColor: AppColors.limitTrack,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                  catColor),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  // ── Aba Insights ───────────────────────────────────────────────────────────
+
+  Widget _buildInsightsTab() {
+    final subs = _subscriptions;
+    final totalMonthly = subs.fold<double>(0, (sum, s) => sum + s.monthlyAmount);
+    final totalAnnual = totalMonthly * 12;
+
+    return ListView(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      children: [
+        // Header com totais
+        if (subs.isNotEmpty) ...[
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Custo mensal', style: AppText.secondary),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          'R\$ ${totalMonthly.toStringAsFixed(2)}',
+                          style: AppText.amount.copyWith(
+                              color: AppColors.danger, fontSize: 16),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    width: 1,
+                    height: 36,
+                    color: AppColors.divider,
+                  ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: AppSpacing.lg),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Custo anual', style: AppText.secondary),
+                          const SizedBox(height: AppSpacing.xs),
+                          Text(
+                            'R\$ ${totalAnnual.toStringAsFixed(2)}',
+                            style: AppText.amount.copyWith(
+                                color: AppColors.textPrimary, fontSize: 16),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+        ],
+        // Lista de assinaturas
+        Text('Assinaturas detectadas', style: AppText.sectionLabel),
+        const SizedBox(height: AppSpacing.md),
+        if (subs.isEmpty)
+          _InsightsEmptyState(
+            icon: Icons.autorenew_outlined,
+            message: 'Nenhuma assinatura detectada',
+            hint: 'Transações com padrão mensal repetido aparecerão aqui.',
+          )
+        else
+          ...subs.map((s) => _SubscriptionTile(
+                subscription: s,
+                category: _categories.where((c) => c.id == s.categoryId).firstOrNull,
+              )),
+      ],
+    );
+  }
 }
 
-// ── Enum presets ───────────────────────────────────────────────────────────────
+// ── Enum presets ───────────────────────────────────────────────────────────
 
 enum _FilterPreset {
   thisMonth,
@@ -497,13 +597,135 @@ enum _FilterPreset {
       };
 }
 
+// ── Widgets da aba Insights ────────────────────────────────────────────────
+
+class _SubscriptionTile extends StatelessWidget {
+  const _SubscriptionTile({
+    required this.subscription,
+    required this.category,
+  });
+
+  final SubscriptionSummary subscription;
+  final dynamic category; // CategoryEntity?
+
+  static const _monthAbbr = [
+    '', 'jan', 'fev', 'mar', 'abr', 'mai', 'jun',
+    'jul', 'ago', 'set', 'out', 'nov', 'dez',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final d = subscription.lastDate;
+    final lastDateStr =
+        '${d.day.toString().padLeft(2, '0')} ${_monthAbbr[d.month]} ${d.year}';
+    final freqLabel =
+        subscription.frequency == 'yearly' ? 'Anual' : 'Mensal';
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.lg, vertical: AppSpacing.md),
+        child: Row(
+          children: [
+            // Ícone
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: AppColors.primarySubtle,
+                borderRadius: BorderRadius.circular(AppRadius.chip),
+              ),
+              child: Icon(Icons.autorenew_outlined,
+                  size: 18, color: AppColors.primary),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            // Descrição + meta
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    subscription.description,
+                    style: AppText.body,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    '${category?.name ?? 'Sem categoria'} · $freqLabel · última em $lastDateStr',
+                    style: AppText.secondary,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            // Valores
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  'R\$ ${subscription.avgAmount.toStringAsFixed(2)}',
+                  style: AppText.amount
+                      .copyWith(color: AppColors.danger, fontSize: 13),
+                ),
+                Text(
+                  subscription.frequency == 'yearly'
+                      ? 'R\$ ${subscription.monthlyAmount.toStringAsFixed(2)}/mês'
+                      : '${subscription.occurrences}x detectado',
+                  style: AppText.secondary,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _InsightsEmptyState extends StatelessWidget {
+  const _InsightsEmptyState({
+    required this.icon,
+    required this.message,
+    required this.hint,
+  });
+
+  final IconData icon;
+  final String message;
+  final String hint;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg * 2),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 36, color: AppColors.textSecondary),
+            const SizedBox(height: AppSpacing.sm),
+            Text(message,
+                style: AppText.body.copyWith(
+                    color: AppColors.textPrimary,
+                    fontWeight: FontWeight.w600)),
+            const SizedBox(height: AppSpacing.xs),
+            Text(hint,
+                style: AppText.secondary,
+                textAlign: TextAlign.center),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // ── Widgets auxiliares ─────────────────────────────────────────────────────
 
 class _DateTile extends StatelessWidget {
   const _DateTile(
-      {required this.label,
-      required this.date,
-      required this.onTap});
+      {required this.label, required this.date, required this.onTap});
   final String label;
   final DateTime? date;
   final VoidCallback onTap;
@@ -531,7 +753,8 @@ class _DateTile extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label, style: AppText.secondary.copyWith(fontSize: 10)),
+                Text(label,
+                    style: AppText.secondary.copyWith(fontSize: 10)),
                 Text(text, style: AppText.body),
               ],
             ),
@@ -544,9 +767,7 @@ class _DateTile extends StatelessWidget {
 
 class _TotalChip extends StatelessWidget {
   const _TotalChip(
-      {required this.label,
-      required this.value,
-      required this.color});
+      {required this.label, required this.value, required this.color});
   final String label;
   final double value;
   final Color color;
@@ -563,8 +784,8 @@ class _TotalChip extends StatelessWidget {
             const SizedBox(height: AppSpacing.xs),
             Text(
               'R\$ ${value.toStringAsFixed(2)}',
-              style: AppText.amount
-                  .copyWith(color: color, fontSize: 13),
+              style:
+                  AppText.amount.copyWith(color: color, fontSize: 13),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),

@@ -1,123 +1,143 @@
-import '../../features/transactions/domain/transaction_entity.dart';
-import '../../features/transactions/domain/transaction_type.dart';
-import '../../features/transactions/domain/recurrence_rule.dart';
+import '../transactions/domain/transaction_entity.dart';
+import '../transactions/domain/transaction_type.dart';
+import '../transactions/domain/recurrence_rule.dart';
 import 'subscription_summary.dart';
 
 /// Detecta assinaturas recorrentes a partir de uma lista de transações.
 /// Função pura — sem side-effects, sem acesso a Hive.
-class SubscriptionDetector {
-  static List<SubscriptionSummary> detect(
-      List<TransactionEntity> transactions) {
-    // Apenas despesas não provisionadas dos últimos 12 meses
-    final cutoff = DateTime.now().subtract(const Duration(days: 365));
-    final expenses = transactions
-        .where((tx) =>
-            tx.type == TransactionType.expense &&
-            !tx.isProvisioned &&
-            tx.date.isAfter(cutoff))
-        .toList();
+///
+/// Estratégia:
+/// 1. Transações com [RecurrenceRule] != none → assinaturas manuais (sempre incluídas)
+/// 2. Despesas com descrição repetida em intervalo 25–35 dias e variação de valor ≤ 10%
+///    → assinaturas automáticas
+/// Resultado ordenado por [avgAmount] decrescente.
+List<SubscriptionSummary> detectSubscriptions(
+  List<TransactionEntity> transactions,
+) {
+  final manual = _detectManual(transactions);
+  final auto = _detectAuto(transactions);
 
-    final results = <SubscriptionSummary>[];
-    final seen = <String>{};
+  final manualKeys = manual.map((s) => _key(s.description, s.categoryId)).toSet();
+  final autoFiltered =
+      auto.where((s) => !manualKeys.contains(_key(s.description, s.categoryId))).toList();
 
-    // 1. Candidatas diretas: recurrenceRule != none
-    for (final tx in expenses) {
-      if (tx.recurrenceRule == RecurrenceRule.none) continue;
-      final key = _normalize(tx.description ?? tx.id);
-      if (seen.contains(key)) continue;
-      seen.add(key);
+  return [...manual, ...autoFiltered]
+    ..sort((a, b) => b.avgAmount.compareTo(a.avgAmount));
+}
 
-      final group = expenses
-          .where((t) =>
-              _normalize(t.description ?? t.id) == key ||
-              t.recurrenceSourceId == tx.id ||
-              t.id == tx.recurrenceSourceId)
-          .toList()
-        ..sort((a, b) => a.date.compareTo(b.date));
+String _key(String desc, String? catId) =>
+    '${desc.toLowerCase().trim()}_${catId ?? ''}';
 
-      final avg = group.fold(0.0, (s, t) => s + t.amount.amount) /
-          group.length;
-      final freq = (tx.recurrenceRule == RecurrenceRule.yearly)
-          ? 'yearly'
-          : 'monthly';
+// ── Assinaturas manuais (recurrenceRule != none) ───────────────────────────
 
-      results.add(SubscriptionSummary(
-        description: tx.description ?? key,
-        categoryId: tx.categoryId,
-        avgAmount: avg,
-        frequency: freq,
-        lastDate: group.last.date,
-        occurrences: group.length,
-      ));
-    }
+List<SubscriptionSummary> _detectManual(List<TransactionEntity> txs) {
+  final recurring = txs
+      .where((tx) =>
+          tx.recurrenceRule != RecurrenceRule.none &&
+          tx.type != TransactionType.transfer)
+      .toList();
 
-    // 2. Detecção por padrão: agrupamento por description normalizada
-    final groups = <String, List<TransactionEntity>>{};
-    for (final tx in expenses) {
-      if (tx.recurrenceRule != RecurrenceRule.none) continue;
-      final key = _normalize(tx.description ?? '');
-      if (key.isEmpty) continue;
-      groups.putIfAbsent(key, () => []).add(tx);
-    }
-
-    for (final entry in groups.entries) {
-      final key = entry.key;
-      if (seen.contains(key)) continue;
-
-      final group = entry.value
-        ..sort((a, b) => a.date.compareTo(b.date));
-
-      if (group.length < 2) continue;
-
-      // Verifica intervalo entre ocorrências consecutivas
-      final intervals = <int>[];
-      for (int i = 1; i < group.length; i++) {
-        intervals.add(
-            group[i].date.difference(group[i - 1].date).inDays);
-      }
-
-      final avgInterval =
-          intervals.fold(0, (s, v) => s + v) / intervals.length;
-
-      String? freq;
-      if (avgInterval >= 25 && avgInterval <= 35) {
-        freq = 'monthly';
-      } else if (avgInterval >= 350 && avgInterval <= 380) {
-        freq = 'yearly';
-      }
-      if (freq == null) continue;
-
-      // Verifica variação de valor ≤ 10%
-      final amounts = group.map((t) => t.amount.amount).toList();
-      final avg = amounts.fold(0.0, (s, v) => s + v) / amounts.length;
-      final maxDev = amounts
-          .map((v) => (v - avg).abs() / avg)
-          .fold(0.0, (a, b) => a > b ? a : b);
-      if (maxDev > 0.10) continue;
-
-      seen.add(key);
-      results.add(SubscriptionSummary(
-        description: group.last.description ?? key,
-        categoryId: group.last.categoryId,
-        avgAmount: avg,
-        frequency: freq,
-        lastDate: group.last.date,
-        occurrences: group.length,
-      ));
-    }
-
-    results.sort((a, b) => b.avgAmount.compareTo(a.avgAmount));
-    return results;
+  final Map<String, List<TransactionEntity>> groups = {};
+  for (final tx in recurring) {
+    final k = _key(tx.description ?? '', tx.categoryId);
+    groups.putIfAbsent(k, () => []).add(tx);
   }
 
-  /// Normaliza texto: lowercase, remove números e pontuação.
-  static String _normalize(String input) {
-    return input
-        .toLowerCase()
-        .trim()
-        .replaceAll(RegExp(r'[0-9]'), '')
-        .replaceAll(RegExp(r'[^\w\s]'), '')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
+  return groups.entries
+      .where((e) => e.value.length >= 2)
+      .map((e) {
+        final list = e.value;
+        final avg = list.map((t) => t.amount.amount).reduce((a, b) => a + b) /
+            list.length;
+        final lastDate =
+            list.map((t) => t.date).reduce((a, b) => a.isAfter(b) ? a : b);
+        final freq = list.any((t) => t.recurrenceRule == RecurrenceRule.yearly)
+            ? 'yearly'
+            : 'monthly';
+        return SubscriptionSummary(
+          description: list.first.description ?? 'Sem descrição',
+          categoryId: list.first.categoryId,
+          avgAmount: avg,
+          frequency: freq,
+          lastDate: lastDate,
+          occurrences: list.length,
+          isManual: true,
+        );
+      })
+      .toList();
+}
+
+// ── Assinaturas automáticas (padrão de repetição) ─────────────────────────
+
+List<SubscriptionSummary> _detectAuto(List<TransactionEntity> txs) {
+  // Apenas despesas efetivadas
+  final expenses = txs
+      .where((tx) =>
+          tx.type == TransactionType.expense &&
+          !tx.isProvisioned &&
+          tx.recurrenceRule == RecurrenceRule.none)
+      .toList();
+
+  final Map<String, List<TransactionEntity>> groups = {};
+  for (final tx in expenses) {
+    final normalized = _normalize(tx.description ?? '');
+    if (normalized.isEmpty) continue;
+    final k = _key(normalized, tx.categoryId);
+    groups.putIfAbsent(k, () => []).add(tx);
   }
+
+  return groups.entries
+      .where((e) {
+        final list = e.value;
+        if (list.length < 2) return false;
+
+        list.sort((a, b) => a.date.compareTo(b.date));
+
+        // Verifica padrão mensal: ao menos um par com 25–35 dias de intervalo
+        bool hasPattern = false;
+        for (int i = 1; i < list.length; i++) {
+          final diff = list[i].date.difference(list[i - 1].date).inDays;
+          if (diff >= 25 && diff <= 35) {
+            hasPattern = true;
+            break;
+          }
+        }
+        if (!hasPattern) return false;
+
+        // Variação de valor ≤ 10%
+        final amounts = list.map((t) => t.amount.amount).toList();
+        final avg = amounts.reduce((a, b) => a + b) / amounts.length;
+        if (avg == 0) return false;
+        final maxDev =
+            amounts.map((v) => (v - avg).abs() / avg).reduce((a, b) => a > b ? a : b);
+        return maxDev <= 0.10;
+      })
+      .map((e) {
+        final list = e.value;
+        final avg = list.map((t) => t.amount.amount).reduce((a, b) => a + b) /
+            list.length;
+        final lastDate =
+            list.map((t) => t.date).reduce((a, b) => a.isAfter(b) ? a : b);
+        return SubscriptionSummary(
+          description: list.first.description ?? 'Sem descrição',
+          categoryId: list.first.categoryId,
+          avgAmount: avg,
+          frequency: 'monthly',
+          lastDate: lastDate,
+          occurrences: list.length,
+          isManual: false,
+        );
+      })
+      .toList();
+}
+
+/// Normaliza descrição para agrupamento:
+/// lowercase + trim + remove números/pontuação no final.
+String _normalize(String s) {
+  return s
+      .toLowerCase()
+      .trim()
+      .replaceAll(RegExp(r'[\d.,/\\\-]+\s*$'), '')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
 }
