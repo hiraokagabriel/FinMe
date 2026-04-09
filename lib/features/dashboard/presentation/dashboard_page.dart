@@ -6,6 +6,7 @@ import '../../../core/analysis/subscription_detector.dart';
 import '../../../core/analysis/subscription_summary.dart';
 import '../../../core/models/app_mode.dart';
 import '../../../core/services/app_mode_controller.dart';
+import '../../../core/services/profile_service.dart';
 import '../../../core/services/repository_locator.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../transactions/domain/transaction_entity.dart';
@@ -26,6 +27,22 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   void initState() {
     super.initState();
+    // Recarrega dados sempre que o perfil ativo mudar
+    ProfileService.instance.addListener(_onProfileChanged);
+    _load();
+  }
+
+  @override
+  void dispose() {
+    ProfileService.instance.removeListener(_onProfileChanged);
+    super.dispose();
+  }
+
+  void _onProfileChanged() {
+    setState(() {
+      _transactions = const [];
+      _isLoading = true;
+    });
     _load();
   }
 
@@ -99,14 +116,26 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: AppModeController.instance,
+      animation: Listenable.merge([
+        AppModeController.instance,
+        ProfileService.instance,
+      ]),
       builder: (context, _) {
-        final isUltra =
-            AppModeController.instance.mode == AppMode.ultra;
+        final isUltra = AppModeController.instance.mode == AppMode.ultra;
+        final isDemo  = ProfileService.instance.isDemoActive;
 
         return Scaffold(
           appBar: AppBar(
-            title: const Text('FinMe'),
+            title: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('FinMe'),
+                if (isDemo) ...[
+                  const SizedBox(width: 8),
+                  _DemoChip(),
+                ],
+              ],
+            ),
             actions: [
               IconButton(
                 tooltip: 'Orçamento',
@@ -135,7 +164,6 @@ class _DashboardPageState extends State<DashboardPage> {
                       const SizedBox(height: AppSpacing.lg),
                       _buildLineChartCard(),
                       const SizedBox(height: AppSpacing.lg),
-                      // Card de assinaturas — apenas Modo Ultra
                       if (isUltra && _subscriptions.isNotEmpty) ...[
                         _buildSubscriptionsCard(context),
                         const SizedBox(height: AppSpacing.lg),
@@ -165,9 +193,7 @@ class _DashboardPageState extends State<DashboardPage> {
           child: Text(
             isUltra ? 'Modo Ultra' : 'Modo Simples',
             style: AppText.badge.copyWith(
-              color: isUltra
-                  ? AppColors.primary
-                  : AppColors.textSecondary,
+              color: isUltra ? AppColors.primary : AppColors.textSecondary,
             ),
           ),
         ),
@@ -273,7 +299,6 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  /// Card de assinaturas ativas — Modo Ultra apenas.
   Widget _buildSubscriptionsCard(BuildContext context) {
     final totalMonthly = _subscriptions
         .fold<double>(0, (sum, s) => sum + s.monthlyAmount);
@@ -439,6 +464,31 @@ class _DashboardPageState extends State<DashboardPage> {
           ],
         ),
       ],
+    );
+  }
+}
+
+// ── Chip DEMO ─────────────────────────────────────────────────────────────
+
+class _DemoChip extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppColors.warning.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(AppRadius.chip),
+        border: Border.all(color: AppColors.warning.withOpacity(0.4)),
+      ),
+      child: Text(
+        'DEMO',
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          color: AppColors.warning,
+          letterSpacing: 0.5,
+        ),
+      ),
     );
   }
 }
