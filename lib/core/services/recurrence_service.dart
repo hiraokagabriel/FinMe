@@ -1,76 +1,62 @@
-import 'package:hive/hive.dart';
-
 import '../../features/transactions/data/transaction_model.dart';
 import '../../features/transactions/domain/recurrence_rule.dart';
+import 'repository_locator.dart';
 
 /// Gera automaticamente as transações recorrentes pendentes.
-///
-/// Deve ser chamado uma vez no startup, após o Hive estar inicializado.
-/// Para cada transação com [RecurrenceRule] != none, verifica se a próxima
-/// ocorrência já existe e, caso não exista, a cria.
+/// Deve ser chamado após ProfileService.loadFromStorage() e DefaultSeedService.
 class RecurrenceService {
-  static const String _boxName = 'transactions';
-
-  /// Ponto de entrada — chame em main() após HiveInit.init().
+  /// Ponto de entrada — chame em main() após o perfil estar carregado.
   static Future<void> generatePending() async {
-    final box = await Hive.openBox<TransactionModel>(_boxName);
-    final all = box.values.toList();
-    final now = DateTime.now();
+    final repo = RepositoryLocator.instance.transactions;
+    final all  = await repo.getAll();
+    final now  = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
 
-    // Monta set de IDs existentes para evitar duplicatas
-    final existingIds = box.keys.toSet();
+    final existing = (await repo.getAll()).map((t) => t.id).toSet();
+    final toAdd = <TransactionModel>[];
 
-    final toAdd = <String, TransactionModel>{};
-
-    for (final model in all) {
-      final rule = model.recurrenceRuleIndex < RecurrenceRule.values.length
-          ? RecurrenceRule.values[model.recurrenceRuleIndex]
-          : RecurrenceRule.none;
-
+    for (final tx in all) {
+      final rule = tx.recurrenceRule;
       if (rule == RecurrenceRule.none) continue;
-      // Só processa as transações-origem (não as geradas automaticamente)
-      if (model.recurrenceSourceId != null) continue;
+      if (tx.recurrenceSourceId != null) continue;
 
-      // Avança a partir da data da transação-origem até cobrir hoje
       DateTime cursor = rule.next(
-        DateTime(model.date.year, model.date.month, model.date.day),
+        DateTime(tx.date.year, tx.date.month, tx.date.day),
       );
 
-      int safety = 0; // limite de segurança: máx 730 iterações (~2 anos)
+      int safety = 0;
       while (!cursor.isAfter(today) && safety < 730) {
         safety++;
-        // ID determinístico: sourceId + timestamp da ocorrência
-        final occurrenceId =
-            '${model.id}_rec_${cursor.millisecondsSinceEpoch}';
+        final occurrenceId = '${tx.id}_rec_${cursor.millisecondsSinceEpoch}';
 
-        if (!existingIds.contains(occurrenceId) &&
-            !toAdd.containsKey(occurrenceId)) {
-          toAdd[occurrenceId] = TransactionModel(
+        if (!existing.contains(occurrenceId)) {
+          toAdd.add(TransactionModel(
             id: occurrenceId,
-            amount: model.amount,
-            currency: model.currency,
+            amount: tx.amount.amount,
+            currency: tx.amount.currency,
             date: cursor,
-            typeIndex: model.typeIndex,
-            paymentMethodIndex: model.paymentMethodIndex,
-            description: model.description,
-            categoryId: model.categoryId,
-            cardId: model.cardId,
-            isBoleto: model.isBoleto,
+            typeIndex: tx.type.index,
+            paymentMethodIndex: tx.paymentMethod.index,
+            description: tx.description,
+            categoryId: tx.categoryId ?? '',
+            cardId: tx.cardId,
+            isBoleto: tx.isBoleto,
             isProvisioned: false,
-            installmentCount: null,
-            provisionedDueDate: null,
-            recurrenceRuleIndex: 0, // gerada = sem regra própria
-            recurrenceSourceId: model.id,
-          );
-          existingIds.add(occurrenceId);
+            recurrenceRuleIndex: 0,
+            recurrenceSourceId: tx.id,
+          ));
+          existing.add(occurrenceId);
         }
         cursor = rule.next(cursor);
       }
     }
 
     if (toAdd.isNotEmpty) {
-      await box.putAll(toAdd);
+      for (final model in toAdd) {
+        await repo.save(TransactionModel.fromEntity(
+          model.toEntity(),
+        ));
+      }
     }
   }
 }
