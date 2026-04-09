@@ -4,6 +4,8 @@ import 'package:csv/csv.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/analysis/spending_alert.dart';
+import '../../../core/analysis/spending_analyzer.dart';
 import '../../../core/analysis/subscription_detector.dart';
 import '../../../core/analysis/subscription_summary.dart';
 import '../../../core/services/preferences_service.dart';
@@ -27,6 +29,7 @@ class _ReportsPageState extends State<ReportsPage>
   List<CategoryEntity> _categories = const [];
   List<CardEntity> _cards = const [];
   List<SubscriptionSummary> _subscriptions = const [];
+  List<SpendingAlert> _alerts = const [];
   bool _isLoading = true;
   bool _isExporting = false;
 
@@ -63,11 +66,13 @@ class _ReportsPageState extends State<ReportsPage>
     final cds = await locator.cards.getAll();
     if (!mounted) return;
     final subs = detectSubscriptions(txs);
+    final alerts = analyzeSpending(txs);
     setState(() {
       _allTransactions = txs;
       _categories = cats;
       _cards = cds;
       _subscriptions = subs;
+      _alerts = alerts;
       _isLoading = false;
     });
   }
@@ -225,10 +230,40 @@ class _ReportsPageState extends State<ReportsPage>
         title: const Text('Relatórios'),
         bottom: TabBar(
           controller: _tabController,
-          tabs: const [
-            Tab(text: 'Resumo'),
-            Tab(text: 'Categorias'),
-            Tab(text: 'Insights'),
+          tabs: [
+            const Tab(text: 'Resumo'),
+            const Tab(text: 'Categorias'),
+            Tab(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Insights'),
+                  if (_alerts.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      width: 16,
+                      height: 16,
+                      decoration: BoxDecoration(
+                        color: _alerts.any((a) => a.severity == 3)
+                            ? AppColors.danger
+                            : AppColors.warning,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(
+                        child: Text(
+                          '${_alerts.length}',
+                          style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                              height: 1),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ],
         ),
         actions: [
@@ -267,7 +302,6 @@ class _ReportsPageState extends State<ReportsPage>
     return ListView(
       padding: const EdgeInsets.all(AppSpacing.lg),
       children: [
-        // Filtro de período
         Card(
           child: Padding(
             padding: const EdgeInsets.all(AppSpacing.lg),
@@ -338,7 +372,6 @@ class _ReportsPageState extends State<ReportsPage>
           ].map((w) => Expanded(child: w)).toList(),
         ),
         const SizedBox(height: AppSpacing.lg),
-        // Lista de transações
         Card(
           child: Padding(
             padding: const EdgeInsets.all(AppSpacing.lg),
@@ -505,13 +538,30 @@ class _ReportsPageState extends State<ReportsPage>
 
   Widget _buildInsightsTab() {
     final subs = _subscriptions;
-    final totalMonthly = subs.fold<double>(0, (sum, s) => sum + s.monthlyAmount);
+    final alerts = _alerts;
+    final totalMonthly =
+        subs.fold<double>(0, (sum, s) => sum + s.monthlyAmount);
     final totalAnnual = totalMonthly * 12;
 
     return ListView(
       padding: const EdgeInsets.all(AppSpacing.lg),
       children: [
-        // Header com totais
+        // ── Alertas ──────────────────────────────────────────────────────
+        if (alerts.isNotEmpty) ...[
+          Text('Alertas', style: AppText.sectionLabel),
+          const SizedBox(height: AppSpacing.md),
+          ...alerts.map((alert) {
+            final cat = alert.categoryId != null
+                ? _categories
+                    .where((c) => c.id == alert.categoryId)
+                    .firstOrNull
+                : null;
+            return _AlertTile(alert: alert, category: cat);
+          }),
+          const SizedBox(height: AppSpacing.lg),
+        ],
+
+        // ── Assinaturas ───────────────────────────────────────────────────
         if (subs.isNotEmpty) ...[
           Card(
             child: Padding(
@@ -533,10 +583,9 @@ class _ReportsPageState extends State<ReportsPage>
                     ),
                   ),
                   Container(
-                    width: 1,
-                    height: 36,
-                    color: AppColors.divider,
-                  ),
+                      width: 1,
+                      height: 36,
+                      color: AppColors.divider),
                   Expanded(
                     child: Padding(
                       padding: const EdgeInsets.only(left: AppSpacing.lg),
@@ -548,7 +597,8 @@ class _ReportsPageState extends State<ReportsPage>
                           Text(
                             'R\$ ${totalAnnual.toStringAsFixed(2)}',
                             style: AppText.amount.copyWith(
-                                color: AppColors.textPrimary, fontSize: 16),
+                                color: AppColors.textPrimary,
+                                fontSize: 16),
                           ),
                         ],
                       ),
@@ -560,19 +610,21 @@ class _ReportsPageState extends State<ReportsPage>
           ),
           const SizedBox(height: AppSpacing.lg),
         ],
-        // Lista de assinaturas
         Text('Assinaturas detectadas', style: AppText.sectionLabel),
         const SizedBox(height: AppSpacing.md),
         if (subs.isEmpty)
           _InsightsEmptyState(
             icon: Icons.autorenew_outlined,
             message: 'Nenhuma assinatura detectada',
-            hint: 'Transações com padrão mensal repetido aparecerão aqui.',
+            hint:
+                'Transações com padrão mensal repetido aparecerão aqui.',
           )
         else
           ...subs.map((s) => _SubscriptionTile(
                 subscription: s,
-                category: _categories.where((c) => c.id == s.categoryId).firstOrNull,
+                category: _categories
+                    .where((c) => c.id == s.categoryId)
+                    .firstOrNull,
               )),
       ],
     );
@@ -597,7 +649,87 @@ enum _FilterPreset {
       };
 }
 
-// ── Widgets da aba Insights ────────────────────────────────────────────────
+// ── Widget de alerta ───────────────────────────────────────────────────────
+
+class _AlertTile extends StatelessWidget {
+  const _AlertTile({required this.alert, required this.category});
+
+  final SpendingAlert alert;
+  final dynamic category; // CategoryEntity?
+
+  @override
+  Widget build(BuildContext context) {
+    final Color accentColor = switch (alert.severity) {
+      3 => AppColors.danger,
+      2 => AppColors.warning,
+      _ => AppColors.primary,
+    };
+    final IconData iconData = switch (alert.type) {
+      SpendingAlertType.categoryDominant => Icons.donut_large_outlined,
+      SpendingAlertType.monthlySpike => Icons.trending_up_outlined,
+      SpendingAlertType.categorySpike => Icons.north_east_outlined,
+    };
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.lg, vertical: AppSpacing.md),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: accentColor.withOpacity(0.10),
+                borderRadius: BorderRadius.circular(AppRadius.chip),
+              ),
+              child: Icon(iconData, size: 18, color: accentColor),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(alert.title,
+                            style: AppText.body.copyWith(
+                                fontWeight: FontWeight.w600)),
+                      ),
+                      if (category != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.sm,
+                              vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.primarySubtle,
+                            borderRadius:
+                                BorderRadius.circular(AppRadius.chip),
+                          ),
+                          child: Text(
+                            category!.name as String,
+                            style: AppText.secondary
+                                .copyWith(fontSize: 11),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(alert.description, style: AppText.secondary),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Widget assinatura ──────────────────────────────────────────────────────
 
 class _SubscriptionTile extends StatelessWidget {
   const _SubscriptionTile({
@@ -606,11 +738,22 @@ class _SubscriptionTile extends StatelessWidget {
   });
 
   final SubscriptionSummary subscription;
-  final dynamic category; // CategoryEntity?
+  final dynamic category;
 
   static const _monthAbbr = [
-    '', 'jan', 'fev', 'mar', 'abr', 'mai', 'jun',
-    'jul', 'ago', 'set', 'out', 'nov', 'dez',
+    '',
+    'jan',
+    'fev',
+    'mar',
+    'abr',
+    'mai',
+    'jun',
+    'jul',
+    'ago',
+    'set',
+    'out',
+    'nov',
+    'dez',
   ];
 
   @override
@@ -628,7 +771,6 @@ class _SubscriptionTile extends StatelessWidget {
             horizontal: AppSpacing.lg, vertical: AppSpacing.md),
         child: Row(
           children: [
-            // Ícone
             Container(
               width: 36,
               height: 36,
@@ -640,7 +782,6 @@ class _SubscriptionTile extends StatelessWidget {
                   size: 18, color: AppColors.primary),
             ),
             const SizedBox(width: AppSpacing.md),
-            // Descrição + meta
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -661,7 +802,6 @@ class _SubscriptionTile extends StatelessWidget {
               ),
             ),
             const SizedBox(width: AppSpacing.md),
-            // Valores
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
@@ -706,7 +846,8 @@ class _InsightsEmptyState extends StatelessWidget {
           children: [
             Icon(icon, size: 36, color: AppColors.textSecondary),
             const SizedBox(height: AppSpacing.sm),
-            Text(message,
+            Text(
+                message,
                 style: AppText.body.copyWith(
                     color: AppColors.textPrimary,
                     fontWeight: FontWeight.w600)),
@@ -784,8 +925,7 @@ class _TotalChip extends StatelessWidget {
             const SizedBox(height: AppSpacing.xs),
             Text(
               'R\$ ${value.toStringAsFixed(2)}',
-              style:
-                  AppText.amount.copyWith(color: color, fontSize: 13),
+              style: AppText.amount.copyWith(color: color, fontSize: 13),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),

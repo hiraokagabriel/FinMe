@@ -1,28 +1,30 @@
-/// Alerta de desvio de gastos em relação à média histórica.
+/// Tipos de alerta gerados pelo [SpendingAnalyzer].
+enum SpendingAlertType {
+  /// Uma categoria ultrapassou [thresholdPct]% do total de despesas no período.
+  categoryDominant,
+
+  /// Gasto total do mês atual excedeu a média dos meses anteriores em [thresholdPct]%.
+  monthlySpike,
+
+  /// Uma categoria cresceu mais de [thresholdPct]% em relação ao mês anterior.
+  categorySpike,
+}
+
+/// Resultado imutável de um alerta de gasto.
 class SpendingAlert {
   const SpendingAlert({
-    required this.categoryId,
-    required this.categoryName,
-    required this.historicalAvg,
-    required this.currentSpend,
-    required this.deviationPct,
-    required this.severity,
+    required this.type,
+    required this.title,
+    required this.description,
+    this.categoryId,
+    required this.severity, // 1 = info, 2 = warning, 3 = critical
   });
 
-  final String categoryId;
-  final String categoryName;
+  final SpendingAlertType type;
+  final String title;
+  final String description;
+  final String? categoryId;
 
-  /// Média dos 3 meses anteriores (R$).
-  final double historicalAvg;
-
-  /// Gasto no mês atual (R$).
-  final double currentSpend;
-
-  /// Desvio percentual: (current - avg) / avg * 100.
-  final double deviationPct;
-
-  /// 'warning' (> 30%) ou 'critical' (> 80%).
-  final String severity;
-
-  bool get isCritical => severity == 'critical';
+  /// 1 = informativo · 2 = atenção · 3 = crítico
+  final int severity;
 }
