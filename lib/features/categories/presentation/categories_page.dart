@@ -5,6 +5,7 @@ import '../domain/category_entity.dart';
 import '../domain/category_kind.dart';
 import '../../../core/services/repository_locator.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/app_empty_state.dart';
 
 // Paleta de ícones disponíveis para seleção
 const List<IconData> _kIconOptions = [
@@ -131,20 +132,13 @@ class _CategoriesPageState extends State<CategoriesPage> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _categories.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.label_off_outlined,
-                          size: 48, color: AppColors.textSecondary),
-                      const SizedBox(height: AppSpacing.md),
-                      Text('Nenhuma categoria cadastrada',
-                          style: AppText.sectionLabel),
-                      const SizedBox(height: AppSpacing.sm),
-                      Text('Toque em "Nova categoria" para começar.',
-                          style: AppText.secondary),
-                    ],
-                  ),
+              ? AppEmptyState(
+                  icon: Icons.label_off_outlined,
+                  title: 'Nenhuma categoria cadastrada',
+                  message:
+                      'Crie categorias para organizar suas transações por tipo de gasto ou receita.',
+                  actionLabel: 'Nova categoria',
+                  onAction: () => _openForm(),
                 )
               : ListView(
                   padding: const EdgeInsets.only(bottom: 88),
@@ -341,7 +335,7 @@ class _CategoryFormDialogState extends State<_CategoryFormDialog> {
               ),
               const SizedBox(height: AppSpacing.lg),
 
-              // Tipo
+              // Ícone
               Text('Ícone',
                   style: AppText.secondary
                       .copyWith(fontWeight: FontWeight.w500)),

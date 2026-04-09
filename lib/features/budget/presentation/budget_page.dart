@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/services/repository_locator.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/app_empty_state.dart';
 import '../../categories/domain/category_entity.dart';
 import '../../transactions/domain/transaction_entity.dart';
 import '../../transactions/domain/transaction_type.dart';
@@ -169,7 +170,14 @@ class _BudgetPageState extends State<BudgetPage> {
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : _budgets.isEmpty
-                    ? _EmptyState(onAdd: () => _openForm())
+                    ? AppEmptyState(
+                        icon: Icons.account_balance_wallet_outlined,
+                        title: 'Nenhum orçamento para este mês',
+                        message:
+                            'Defina limites por categoria para controlar seus gastos mês a mês.',
+                        actionLabel: 'Criar orçamento',
+                        onAction: () => _openForm(),
+                      )
                     : ListView.separated(
                         padding: const EdgeInsets.fromLTRB(
                             AppSpacing.lg,
@@ -422,44 +430,6 @@ class _BudgetCard extends StatelessWidget {
   }
 }
 
-// ─── Empty State ──────────────────────────────────────────────────────────────
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.onAdd});
-  final VoidCallback onAdd;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.xl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.account_balance_wallet_outlined,
-                size: 48, color: AppColors.textSecondary),
-            const SizedBox(height: AppSpacing.md),
-            Text('Nenhum orçamento para este mês',
-                style: AppText.sectionLabel),
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              'Defina limites por categoria para controlar\nseus gastos mês a mês.',
-              textAlign: TextAlign.center,
-              style: AppText.secondary,
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            OutlinedButton.icon(
-              onPressed: onAdd,
-              icon: const Icon(Icons.add),
-              label: const Text('Criar orçamento'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 // ─── Badge ────────────────────────────────────────────────────────────────────
 
 class _Badge extends StatelessWidget {
@@ -516,9 +486,8 @@ class _BudgetFormDialogState extends State<_BudgetFormDialog> {
   @override
   void initState() {
     super.initState();
-    // Categorias de despesa; em edição inclui a própria
     _availableCategories = widget.categories.where((c) {
-      if (c.kind.index != 0) return false; // só expense
+      if (c.kind.index != 0) return false;
       if (widget.existingCategoryIds.contains(c.id)) return false;
       return true;
     }).toList();
