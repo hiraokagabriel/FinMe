@@ -20,14 +20,16 @@ class DemoSeedService {
 
   Future<void> populate() async {
     final pid = ProfileService.profileDemo;
-    final txBox  = Hive.box<TransactionModel>(ProfileService.boxName(HiveInit.transactionsBoxName, pid));
-    final catBox = Hive.box<CategoryModel>(ProfileService.boxName(HiveInit.categoriesBoxName, pid));
-    final cdBox  = Hive.box<CardModel>(ProfileService.boxName(HiveInit.cardsBoxName, pid));
-    final acBox  = Hive.box<AccountModel>(ProfileService.boxName(HiveInit.accountsBoxName, pid));
+
+    // openBox é idempotente — abre se não estiver aberto, retorna instancia se já estiver
+    final txBox  = await Hive.openBox<TransactionModel>(ProfileService.boxName(HiveInit.transactionsBoxName, pid));
+    final catBox = await Hive.openBox<CategoryModel>(ProfileService.boxName(HiveInit.categoriesBoxName, pid));
+    final cdBox  = await Hive.openBox<CardModel>(ProfileService.boxName(HiveInit.cardsBoxName, pid));
+    final acBox  = await Hive.openBox<AccountModel>(ProfileService.boxName(HiveInit.accountsBoxName, pid));
 
     if (txBox.isNotEmpty) return;
 
-    // ── Categorias ──────────────────────────────────────────────────────────
+    // ── Categorias ─────────────────────────────────────────────────────────────
     final cats = [
       CategoryModel(id: 'dcat_food',    name: 'Alimentação',   kindIndex: 0, colorValue: 0xFFF44336, iconCodePoint: Icons.restaurant_outlined.codePoint),
       CategoryModel(id: 'dcat_trans',   name: 'Transporte',    kindIndex: 0, colorValue: 0xFF2196F3, iconCodePoint: Icons.directions_car_outlined.codePoint),
@@ -41,21 +43,21 @@ class DemoSeedService {
     ];
     await catBox.putAll({for (final c in cats) c.id: c});
 
-    // ── Cartões ─────────────────────────────────────────────────────────────
+    // ── Cartões ───────────────────────────────────────────────────────────────
     final cards = [
       CardModel(id: 'dcard_1', name: 'Nubank',   bankName: 'Nubank',  typeIndex: 0, dueDay: 10, limit: 8000),
       CardModel(id: 'dcard_2', name: 'Inter',    bankName: 'Inter',   typeIndex: 0, dueDay: 20, limit: 5000),
     ];
     await cdBox.putAll({for (final c in cards) c.id: c});
 
-    // ── Contas ──────────────────────────────────────────────────────────────
+    // ── Contas ───────────────────────────────────────────────────────────────
     final accounts = [
       AccountModel(id: 'dacc_1', name: 'Conta Corrente', typeIndex: AccountType.checking.index, initialBalance: 2500.0, colorValue: 0xFF01696F, isDefault: true),
       AccountModel(id: 'dacc_2', name: 'Poupança',       typeIndex: AccountType.savings.index,  initialBalance: 8000.0, colorValue: 0xFF43A047, isDefault: false),
     ];
     await acBox.putAll({for (final a in accounts) a.id: a});
 
-    // ── Transações — 12 meses ────────────────────────────────────────────────
+    // ── Transações — 12 meses ───────────────────────────────────────────────────
     final txs = <TransactionModel>[];
     final now = DateTime.now();
     int idx = 0;
@@ -64,7 +66,7 @@ class DemoSeedService {
     for (int m = 11; m >= 0; m--) {
       final month = DateTime(now.year, now.month - m, 1);
 
-      // Salário (dia 5) — pix
+      // Salário (dia 5)
       txs.add(TransactionModel(
         id: tid(), amount: 7500.0, currency: 'BRL',
         date: DateTime(month.year, month.month, 5),
@@ -88,7 +90,7 @@ class DemoSeedService {
         ));
       }
 
-      // Aluguel (dia 10) — boleto
+      // Aluguel (dia 10)
       txs.add(TransactionModel(
         id: tid(), amount: 1800.0, currency: 'BRL',
         date: DateTime(month.year, month.month, 10),
@@ -96,7 +98,7 @@ class DemoSeedService {
         paymentMethodIndex: PaymentMethod.boleto.index,
         description: 'Aluguel', categoryId: 'dcat_home',
         cardId: null, isBoleto: true, isProvisioned: false,
-        recurrenceRuleIndex: RecurrenceRule.monthly.index,
+        recurrenceRuleIndex: RecurrenceRule.none.index,
       ));
 
       // Netflix (dia 15)
@@ -107,7 +109,7 @@ class DemoSeedService {
         paymentMethodIndex: PaymentMethod.creditCard.index,
         description: 'Netflix', categoryId: 'dcat_subs',
         cardId: 'dcard_1', isBoleto: false, isProvisioned: false,
-        recurrenceRuleIndex: RecurrenceRule.monthly.index,
+        recurrenceRuleIndex: RecurrenceRule.none.index,
       ));
 
       // Spotify (dia 16)
@@ -118,10 +120,10 @@ class DemoSeedService {
         paymentMethodIndex: PaymentMethod.creditCard.index,
         description: 'Spotify', categoryId: 'dcat_subs',
         cardId: 'dcard_1', isBoleto: false, isProvisioned: false,
-        recurrenceRuleIndex: RecurrenceRule.monthly.index,
+        recurrenceRuleIndex: RecurrenceRule.none.index,
       ));
 
-      // Academia (dia 3) — débito
+      // Academia (dia 3)
       txs.add(TransactionModel(
         id: tid(), amount: 99.90, currency: 'BRL',
         date: DateTime(month.year, month.month, 3),
@@ -129,10 +131,10 @@ class DemoSeedService {
         paymentMethodIndex: PaymentMethod.debitCard.index,
         description: 'Academia', categoryId: 'dcat_health',
         cardId: null, isBoleto: false, isProvisioned: false,
-        recurrenceRuleIndex: RecurrenceRule.monthly.index,
+        recurrenceRuleIndex: RecurrenceRule.none.index,
       ));
 
-      // Internet (dia 8) — boleto
+      // Internet (dia 8)
       txs.add(TransactionModel(
         id: tid(), amount: 119.90, currency: 'BRL',
         date: DateTime(month.year, month.month, 8),
@@ -140,10 +142,10 @@ class DemoSeedService {
         paymentMethodIndex: PaymentMethod.boleto.index,
         description: 'Internet', categoryId: 'dcat_home',
         cardId: null, isBoleto: true, isProvisioned: false,
-        recurrenceRuleIndex: RecurrenceRule.monthly.index,
+        recurrenceRuleIndex: RecurrenceRule.none.index,
       ));
 
-      // Alimentação — 4 compras por mês
+      // Alimentação — 4 compras
       final foodAmounts = [85.40, 120.80, 67.30, 145.20];
       for (int i = 0; i < 4; i++) {
         txs.add(TransactionModel(
@@ -157,7 +159,7 @@ class DemoSeedService {
         ));
       }
 
-      // Restaurante — 3x por mês
+      // Restaurante — 3x
       final restAmounts = [52.0, 78.5, 44.0];
       final restNames = ['iFood', 'Restaurante', 'Lanchonete'];
       for (int i = 0; i < 3; i++) {
@@ -172,7 +174,7 @@ class DemoSeedService {
         ));
       }
 
-      // Uber — crédito
+      // Uber
       txs.add(TransactionModel(
         id: tid(), amount: 35.0 + (m * 3), currency: 'BRL',
         date: DateTime(month.year, month.month, 9),
@@ -183,7 +185,7 @@ class DemoSeedService {
         recurrenceRuleIndex: RecurrenceRule.none.index,
       ));
 
-      // Combustível — débito
+      // Combustível
       txs.add(TransactionModel(
         id: tid(), amount: 180.0, currency: 'BRL',
         date: DateTime(month.year, month.month, 18),
@@ -194,21 +196,20 @@ class DemoSeedService {
         recurrenceRuleIndex: RecurrenceRule.none.index,
       ));
 
-      // Lazer — 2x por mês
+      // Lazer
       final leisureNames = ['Cinema', 'Steam', 'Shows', 'Museu'];
       final leisureAmounts = [45.0, 89.90, 120.0, 30.0];
-      final li = m % 4;
       txs.add(TransactionModel(
-        id: tid(), amount: leisureAmounts[li], currency: 'BRL',
+        id: tid(), amount: leisureAmounts[m % 4], currency: 'BRL',
         date: DateTime(month.year, month.month, 20),
         typeIndex: TransactionType.expense.index,
         paymentMethodIndex: PaymentMethod.creditCard.index,
-        description: leisureNames[li], categoryId: 'dcat_leisure',
+        description: leisureNames[m % 4], categoryId: 'dcat_leisure',
         cardId: 'dcard_2', isBoleto: false, isProvisioned: false,
         recurrenceRuleIndex: RecurrenceRule.none.index,
       ));
 
-      // Saúde — consulta (bimestral)
+      // Saúde — bimestral
       if (m % 2 == 1) {
         txs.add(TransactionModel(
           id: tid(), amount: 250.0, currency: 'BRL',
@@ -221,7 +222,7 @@ class DemoSeedService {
         ));
       }
 
-      // Educação — curso online (trimestral)
+      // Educação — trimestral
       if (m % 3 == 0) {
         txs.add(TransactionModel(
           id: tid(), amount: 199.90, currency: 'BRL',
@@ -234,8 +235,7 @@ class DemoSeedService {
         ));
       }
 
-      // Transferência para poupança (dia 6) — type=transfer, cardId=null, toAccountId via notes
-      // TransactionModel não expõe accountId como campo separado; transfer usa cardId=null + toAccountId
+      // Transferência para poupança (dia 6)
       txs.add(TransactionModel(
         id: '${tid()}_out', amount: 500.0, currency: 'BRL',
         date: DateTime(month.year, month.month, 6),
