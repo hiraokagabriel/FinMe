@@ -105,6 +105,12 @@ class _DashboardPageState extends State<DashboardPage> {
             title: const Text('FinMe'),
             actions: [
               IconButton(
+                tooltip: 'Orçamento',
+                icon: const Icon(Icons.account_balance_wallet_outlined),
+                onPressed: () =>
+                    Navigator.of(context).pushNamed(AppRouter.budget),
+              ),
+              IconButton(
                 tooltip: 'Configurações',
                 icon: const Icon(Icons.settings_outlined),
                 onPressed: () =>
@@ -353,6 +359,12 @@ class _DashboardPageState extends State<DashboardPage> {
             ),
             OutlinedButton.icon(
               onPressed: () =>
+                  Navigator.of(context).pushNamed(AppRouter.budget),
+              icon: const Icon(Icons.account_balance_wallet_outlined),
+              label: const Text('Orçamento'),
+            ),
+            OutlinedButton.icon(
+              onPressed: () =>
                   Navigator.of(context).pushNamed(AppRouter.reports),
               icon: const Icon(Icons.bar_chart_outlined),
               label: const Text('Relatórios'),
@@ -399,9 +411,7 @@ class _RecentTransactionRow extends StatelessWidget {
         isIncome ? AppColors.limitLow : AppColors.danger;
     final amountPrefix = isIncome ? '+ R\$' : '- R\$';
 
-    // Usa description com fallback para string vazia se nulo
     final descriptionText = transaction.description ?? '';
-    // Usa categoryId com fallback para string vazia se nulo
     final categoryText = transaction.categoryId ?? '';
 
     return Column(
@@ -411,7 +421,6 @@ class _RecentTransactionRow extends StatelessWidget {
               const EdgeInsets.symmetric(vertical: AppSpacing.sm),
           child: Row(
             children: [
-              // Ícone de tipo
               Container(
                 width: 28,
                 height: 28,
@@ -429,7 +438,6 @@ class _RecentTransactionRow extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: AppSpacing.md),
-              // Descrição + categoryId como fallback visual
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -453,7 +461,6 @@ class _RecentTransactionRow extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: AppSpacing.md),
-              // Data + valor
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
