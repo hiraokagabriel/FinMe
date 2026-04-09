@@ -18,11 +18,13 @@ class DefaultSeedService {
   static final DefaultSeedService instance = DefaultSeedService._();
 
   Future<void> seedIfEmpty() async {
-    final pid    = ProfileService.profileDefault;
-    final catBox = Hive.box<CategoryModel>(ProfileService.boxName(HiveInit.categoriesBoxName, pid));
-    final cdBox  = Hive.box<CardModel>(ProfileService.boxName(HiveInit.cardsBoxName, pid));
-    final acBox  = Hive.box<AccountModel>(ProfileService.boxName(HiveInit.accountsBoxName, pid));
-    final txBox  = Hive.box<TransactionModel>(ProfileService.boxName(HiveInit.transactionsBoxName, pid));
+    final pid = ProfileService.profileDefault;
+
+    // openBox é idempotente: retorna o box aberto se já existir.
+    final catBox = await Hive.openBox<CategoryModel>(ProfileService.boxName(HiveInit.categoriesBoxName, pid));
+    final cdBox  = await Hive.openBox<CardModel>(ProfileService.boxName(HiveInit.cardsBoxName, pid));
+    final acBox  = await Hive.openBox<AccountModel>(ProfileService.boxName(HiveInit.accountsBoxName, pid));
+    final txBox  = await Hive.openBox<TransactionModel>(ProfileService.boxName(HiveInit.transactionsBoxName, pid));
 
     if (catBox.isEmpty) {
       final seedCategories = [
