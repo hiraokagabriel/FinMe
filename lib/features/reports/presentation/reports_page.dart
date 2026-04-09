@@ -4,6 +4,7 @@ import 'package:csv/csv.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/services/preferences_service.dart';
 import '../../../core/services/repository_locator.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../categories/domain/category_entity.dart';
@@ -33,7 +34,13 @@ class _ReportsPageState extends State<ReportsPage> {
   @override
   void initState() {
     super.initState();
-    _applyPreset(_FilterPreset.thisMonth);
+    // Restaura preset persistido
+    final saved = PreferencesService.instance.reportsPeriod;
+    final restoredPreset = _FilterPreset.values.firstWhere(
+      (e) => e.name == saved,
+      orElse: () => _FilterPreset.thisMonth,
+    );
+    _applyPreset(restoredPreset);
     _load();
   }
 
@@ -51,7 +58,7 @@ class _ReportsPageState extends State<ReportsPage> {
     });
   }
 
-  // Aplica preset de período
+  // Aplica preset de período e persiste
   void _applyPreset(_FilterPreset preset) {
     final now = DateTime.now();
     setState(() {
@@ -70,10 +77,13 @@ class _ReportsPageState extends State<ReportsPage> {
           _from = DateTime(now.year, 1, 1);
           _to = DateTime(now.year, 12, 31);
         case _FilterPreset.custom:
-          // Mantém datas existentes
           break;
       }
     });
+    // Não persiste 'custom' — preset personalizado não é reproduzível só com o nome
+    if (preset != _FilterPreset.custom) {
+      PreferencesService.instance.setReportsPeriod(preset.name);
+    }
   }
 
   Future<void> _pickDate({required bool isFrom}) async {
@@ -172,7 +182,6 @@ class _ReportsPageState extends State<ReportsPage> {
       final fileName =
           'finme_relatorio_${DateTime.now().millisecondsSinceEpoch}.csv';
 
-      // Usa file_selector para o usuário escolher onde salvar (funciona em Windows/macOS/Linux)
       final FileSaveLocation? result = await getSaveLocation(
         suggestedName: fileName,
         acceptedTypeGroups: [
@@ -180,7 +189,7 @@ class _ReportsPageState extends State<ReportsPage> {
         ],
       );
 
-      if (result == null) return; // cancelou
+      if (result == null) return;
 
       final file = File(result.path);
       await file.writeAsString(csvContent);

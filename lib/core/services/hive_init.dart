@@ -14,6 +14,7 @@ class HiveInit {
   static const String goalsBoxName        = 'goals';
   static const String settingsBoxName     = 'settings';
   static const String accountsBoxName     = 'accounts';
+  static const String preferencesBoxName  = 'preferences';
 
   static const String _onboardingDoneKey  = 'onboardingDone';
 
@@ -52,6 +53,7 @@ class HiveInit {
     }
 
     await Hive.openBox<String>(settingsBoxName);
+    await Hive.openBox<String>(preferencesBoxName);
 
     final transactionsBox =
         await Hive.openBox<TransactionModel>(transactionsBoxName);

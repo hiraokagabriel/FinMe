@@ -8,11 +8,19 @@ import '../../categories/domain/category_entity.dart';
 import '../../cards/domain/card_entity.dart';
 import '../../../core/models/app_mode.dart';
 import '../../../core/services/app_mode_controller.dart';
+import '../../../core/services/preferences_service.dart';
 import '../../../core/services/repository_locator.dart';
 import '../../../core/theme/app_theme.dart';
 import 'new_transaction_page.dart';
 
 enum _PeriodFilter { thisMonth, lastMonth, thisWeek, all }
+
+extension _PeriodFilterPersistence on _PeriodFilter {
+  String get key => name;
+  static _PeriodFilter fromKey(String key) =>
+      _PeriodFilter.values.firstWhere((e) => e.name == key,
+          orElse: () => _PeriodFilter.thisMonth);
+}
 
 String _periodLabel(_PeriodFilter f) {
   switch (f) {
@@ -63,7 +71,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
   Map<String, CardEntity>     _cardsById      = const {};
   bool _isLoading = true;
 
-  _PeriodFilter _period = _PeriodFilter.thisMonth;
+  late _PeriodFilter _period;
   String? _filterCategoryId;
 
   double _totalExpenses = 0;
@@ -73,6 +81,10 @@ class _TransactionsPageState extends State<TransactionsPage> {
   void initState() {
     super.initState();
     _transactionsRepository = RepositoryLocator.instance.transactions;
+    // Restaura filtros persistidos
+    final prefs = PreferencesService.instance;
+    _period = _PeriodFilterPersistence.fromKey(prefs.transactionsPeriod);
+    _filterCategoryId = prefs.transactionsCategoryId;
     _loadData();
   }
 
@@ -128,6 +140,18 @@ class _TransactionsPageState extends State<TransactionsPage> {
     });
   }
 
+  void _setPeriod(_PeriodFilter f) {
+    setState(() => _period = f);
+    PreferencesService.instance.setTransactionsPeriod(f.key);
+    _applyFilters();
+  }
+
+  void _setCategoryFilter(String? categoryId) {
+    setState(() => _filterCategoryId = categoryId);
+    PreferencesService.instance.setTransactionsCategoryId(categoryId);
+    _applyFilters();
+  }
+
   Future<void> _openForm({TransactionEntity? initial}) async {
     final ok = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
@@ -181,10 +205,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
                     : AppColors.textSecondary,
                 fontSize: 13,
               ),
-              onSelected: (_) {
-                setState(() => _period = f);
-                _applyFilters();
-              },
+              onSelected: (_) => _setPeriod(f),
             ),
           );
         }).toList(),
@@ -214,10 +235,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
                       : AppColors.textSecondary,
                   fontSize: 13,
                 ),
-                onSelected: (_) {
-                  setState(() => _period = f);
-                  _applyFilters();
-                },
+                onSelected: (_) => _setPeriod(f),
               ),
             );
           }),
@@ -240,10 +258,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
                     : AppColors.textSecondary,
                 fontSize: 13,
               ),
-              onSelected: (_) {
-                setState(() => _filterCategoryId = null);
-                _applyFilters();
-              },
+              onSelected: (_) => _setCategoryFilter(null),
             ),
           ),
           ..._categoriesById.values.map((cat) {
@@ -271,11 +286,8 @@ class _TransactionsPageState extends State<TransactionsPage> {
                       : AppColors.textSecondary,
                   fontSize: 13,
                 ),
-                onSelected: (_) {
-                  setState(() =>
-                      _filterCategoryId = selected ? null : cat.id);
-                  _applyFilters();
-                },
+                onSelected: (_) =>
+                    _setCategoryFilter(selected ? null : cat.id),
               ),
             );
           }),
