@@ -25,7 +25,6 @@ class DemoSeedService {
     final cdBox  = Hive.box<CardModel>(ProfileService.boxName(HiveInit.cardsBoxName, pid));
     final acBox  = Hive.box<AccountModel>(ProfileService.boxName(HiveInit.accountsBoxName, pid));
 
-    // Idempotente
     if (txBox.isNotEmpty) return;
 
     // ── Categorias ──────────────────────────────────────────────────────────
@@ -51,8 +50,8 @@ class DemoSeedService {
 
     // ── Contas ──────────────────────────────────────────────────────────────
     final accounts = [
-      AccountModel(id: 'dacc_1', name: 'Conta Corrente', typeIndex: AccountType.checking.index,   initialBalance: 2500.0, colorValue: 0xFF01696F, isDefault: true),
-      AccountModel(id: 'dacc_2', name: 'Poupança',       typeIndex: AccountType.savings.index,    initialBalance: 8000.0, colorValue: 0xFF43A047, isDefault: false),
+      AccountModel(id: 'dacc_1', name: 'Conta Corrente', typeIndex: AccountType.checking.index, initialBalance: 2500.0, colorValue: 0xFF01696F, isDefault: true),
+      AccountModel(id: 'dacc_2', name: 'Poupança',       typeIndex: AccountType.savings.index,  initialBalance: 8000.0, colorValue: 0xFF43A047, isDefault: false),
     ];
     await acBox.putAll({for (final a in accounts) a.id: a});
 
@@ -60,21 +59,19 @@ class DemoSeedService {
     final txs = <TransactionModel>[];
     final now = DateTime.now();
     int idx = 0;
-
     String tid() => 'dtx_${idx++}';
 
-    // Padrão mensal: salário + despesas recorrentes + variáveis
     for (int m = 11; m >= 0; m--) {
       final month = DateTime(now.year, now.month - m, 1);
 
-      // Salário (dia 5)
+      // Salário (dia 5) — pix
       txs.add(TransactionModel(
         id: tid(), amount: 7500.0, currency: 'BRL',
         date: DateTime(month.year, month.month, 5),
         typeIndex: TransactionType.income.index,
-        paymentMethodIndex: PaymentMethod.transfer.index,
+        paymentMethodIndex: PaymentMethod.pix.index,
         description: 'Salário', categoryId: 'dcat_salary',
-        accountId: 'dacc_1', isBoleto: false, isProvisioned: false,
+        cardId: null, isBoleto: false, isProvisioned: false,
         recurrenceRuleIndex: RecurrenceRule.none.index,
       ));
 
@@ -84,21 +81,21 @@ class DemoSeedService {
           id: tid(), amount: 800.0 + (m * 50), currency: 'BRL',
           date: DateTime(month.year, month.month, 12),
           typeIndex: TransactionType.income.index,
-          paymentMethodIndex: PaymentMethod.transfer.index,
+          paymentMethodIndex: PaymentMethod.pix.index,
           description: 'Freelance', categoryId: 'dcat_extra',
-          accountId: 'dacc_1', isBoleto: false, isProvisioned: false,
+          cardId: null, isBoleto: false, isProvisioned: false,
           recurrenceRuleIndex: RecurrenceRule.none.index,
         ));
       }
 
-      // Aluguel (dia 10)
+      // Aluguel (dia 10) — boleto
       txs.add(TransactionModel(
         id: tid(), amount: 1800.0, currency: 'BRL',
         date: DateTime(month.year, month.month, 10),
         typeIndex: TransactionType.expense.index,
-        paymentMethodIndex: PaymentMethod.transfer.index,
+        paymentMethodIndex: PaymentMethod.boleto.index,
         description: 'Aluguel', categoryId: 'dcat_home',
-        accountId: 'dacc_1', isBoleto: true, isProvisioned: false,
+        cardId: null, isBoleto: true, isProvisioned: false,
         recurrenceRuleIndex: RecurrenceRule.monthly.index,
       ));
 
@@ -124,25 +121,25 @@ class DemoSeedService {
         recurrenceRuleIndex: RecurrenceRule.monthly.index,
       ));
 
-      // Academia (dia 3)
+      // Academia (dia 3) — débito
       txs.add(TransactionModel(
         id: tid(), amount: 99.90, currency: 'BRL',
         date: DateTime(month.year, month.month, 3),
         typeIndex: TransactionType.expense.index,
-        paymentMethodIndex: PaymentMethod.debit.index,
+        paymentMethodIndex: PaymentMethod.debitCard.index,
         description: 'Academia', categoryId: 'dcat_health',
-        accountId: 'dacc_1', isBoleto: false, isProvisioned: false,
+        cardId: null, isBoleto: false, isProvisioned: false,
         recurrenceRuleIndex: RecurrenceRule.monthly.index,
       ));
 
-      // Internet (dia 8)
+      // Internet (dia 8) — boleto
       txs.add(TransactionModel(
         id: tid(), amount: 119.90, currency: 'BRL',
         date: DateTime(month.year, month.month, 8),
         typeIndex: TransactionType.expense.index,
-        paymentMethodIndex: PaymentMethod.debit.index,
+        paymentMethodIndex: PaymentMethod.boleto.index,
         description: 'Internet', categoryId: 'dcat_home',
-        accountId: 'dacc_1', isBoleto: true, isProvisioned: false,
+        cardId: null, isBoleto: true, isProvisioned: false,
         recurrenceRuleIndex: RecurrenceRule.monthly.index,
       ));
 
@@ -150,17 +147,12 @@ class DemoSeedService {
       final foodAmounts = [85.40, 120.80, 67.30, 145.20];
       for (int i = 0; i < 4; i++) {
         txs.add(TransactionModel(
-          id: tid(),
-          amount: foodAmounts[i] + (m * 2.5),
-          currency: 'BRL',
+          id: tid(), amount: foodAmounts[i] + (m * 2.5), currency: 'BRL',
           date: DateTime(month.year, month.month, 4 + (i * 6)),
           typeIndex: TransactionType.expense.index,
           paymentMethodIndex: PaymentMethod.creditCard.index,
-          description: 'Supermercado',
-          categoryId: 'dcat_food',
-          cardId: 'dcard_1',
-          isBoleto: false,
-          isProvisioned: false,
+          description: 'Supermercado', categoryId: 'dcat_food',
+          cardId: 'dcard_1', isBoleto: false, isProvisioned: false,
           recurrenceRuleIndex: RecurrenceRule.none.index,
         ));
       }
@@ -170,22 +162,17 @@ class DemoSeedService {
       final restNames = ['iFood', 'Restaurante', 'Lanchonete'];
       for (int i = 0; i < 3; i++) {
         txs.add(TransactionModel(
-          id: tid(),
-          amount: restAmounts[i],
-          currency: 'BRL',
+          id: tid(), amount: restAmounts[i], currency: 'BRL',
           date: DateTime(month.year, month.month, 7 + (i * 8)),
           typeIndex: TransactionType.expense.index,
           paymentMethodIndex: PaymentMethod.creditCard.index,
-          description: restNames[i],
-          categoryId: 'dcat_food',
-          cardId: 'dcard_2',
-          isBoleto: false,
-          isProvisioned: false,
+          description: restNames[i], categoryId: 'dcat_food',
+          cardId: 'dcard_2', isBoleto: false, isProvisioned: false,
           recurrenceRuleIndex: RecurrenceRule.none.index,
         ));
       }
 
-      // Transporte — Uber + combustível
+      // Uber — crédito
       txs.add(TransactionModel(
         id: tid(), amount: 35.0 + (m * 3), currency: 'BRL',
         date: DateTime(month.year, month.month, 9),
@@ -195,13 +182,15 @@ class DemoSeedService {
         cardId: 'dcard_1', isBoleto: false, isProvisioned: false,
         recurrenceRuleIndex: RecurrenceRule.none.index,
       ));
+
+      // Combustível — débito
       txs.add(TransactionModel(
         id: tid(), amount: 180.0, currency: 'BRL',
         date: DateTime(month.year, month.month, 18),
         typeIndex: TransactionType.expense.index,
-        paymentMethodIndex: PaymentMethod.debit.index,
+        paymentMethodIndex: PaymentMethod.debitCard.index,
         description: 'Combustível', categoryId: 'dcat_trans',
-        accountId: 'dacc_1', isBoleto: false, isProvisioned: false,
+        cardId: null, isBoleto: false, isProvisioned: false,
         recurrenceRuleIndex: RecurrenceRule.none.index,
       ));
 
@@ -245,17 +234,18 @@ class DemoSeedService {
         ));
       }
 
-      // Transferência poupança (dia 6)
+      // Transferência para poupança (dia 6) — type=transfer, cardId=null, toAccountId via notes
+      // TransactionModel não expõe accountId como campo separado; transfer usa cardId=null + toAccountId
       txs.add(TransactionModel(
-        id: '${tid()}_out',
-        amount: 500.0, currency: 'BRL',
+        id: '${tid()}_out', amount: 500.0, currency: 'BRL',
         date: DateTime(month.year, month.month, 6),
         typeIndex: TransactionType.transfer.index,
-        paymentMethodIndex: PaymentMethod.transfer.index,
-        description: 'Reserva mensal',
-        accountId: 'dacc_1', toAccountId: 'dacc_2',
-        isBoleto: false, isProvisioned: false,
+        paymentMethodIndex: PaymentMethod.pix.index,
+        description: 'Reserva mensal', categoryId: 'dcat_salary',
+        cardId: null, isBoleto: false, isProvisioned: false,
         recurrenceRuleIndex: RecurrenceRule.none.index,
+        toAccountId: 'dacc_2',
+        notes: 'dacc_1',
       ));
     }
 

@@ -44,9 +44,9 @@ class DefaultSeedService {
 
     if (acBox.isEmpty) {
       final seedAccounts = [
-        AccountModel(id: 'acc_checking', name: 'Conta Corrente', typeIndex: AccountType.checking.index,  initialBalance: 0.0,  colorValue: 0xFF01696F, isDefault: true),
-        AccountModel(id: 'acc_savings',  name: 'Poupança',       typeIndex: AccountType.savings.index,   initialBalance: 0.0,  colorValue: 0xFF43A047, isDefault: false),
-        AccountModel(id: 'acc_cash',     name: 'Dinheiro',       typeIndex: AccountType.cash.index,      initialBalance: 0.0,  colorValue: 0xFFD19900, isDefault: false),
+        AccountModel(id: 'acc_checking', name: 'Conta Corrente', typeIndex: AccountType.checking.index, initialBalance: 0.0, colorValue: 0xFF01696F, isDefault: true),
+        AccountModel(id: 'acc_savings',  name: 'Poupança',       typeIndex: AccountType.savings.index,  initialBalance: 0.0, colorValue: 0xFF43A047, isDefault: false),
+        AccountModel(id: 'acc_cash',     name: 'Dinheiro',       typeIndex: AccountType.cash.index,     initialBalance: 0.0, colorValue: 0xFFD19900, isDefault: false),
       ];
       await acBox.putAll({for (final a in seedAccounts) a.id: a});
     }
@@ -54,10 +54,42 @@ class DefaultSeedService {
     if (txBox.isEmpty) {
       final now = DateTime.now();
       final seedTxs = [
-        TransactionModel(id: 'tx_1', amount: 120.50, currency: 'BRL', date: now.subtract(const Duration(days: 1)),  typeIndex: TransactionType.expense.index, paymentMethodIndex: PaymentMethod.creditCard.index, description: 'Supermercado', categoryId: 'cat_food',          cardId: 'card_1', isBoleto: false, isProvisioned: false, recurrenceRuleIndex: RecurrenceRule.none.index),
-        TransactionModel(id: 'tx_2', amount: 45.00,  currency: 'BRL', date: now.subtract(const Duration(days: 2)),  typeIndex: TransactionType.expense.index, paymentMethodIndex: PaymentMethod.creditCard.index, description: 'Uber',          categoryId: 'cat_transport',    cardId: 'card_2', isBoleto: false, isProvisioned: false, recurrenceRuleIndex: RecurrenceRule.none.index),
-        TransactionModel(id: 'tx_3', amount: 29.90,  currency: 'BRL', date: now.subtract(const Duration(days: 5)),  typeIndex: TransactionType.expense.index, paymentMethodIndex: PaymentMethod.creditCard.index, description: 'Streaming',     categoryId: 'cat_subscriptions',cardId: 'card_1', isBoleto: false, isProvisioned: false, recurrenceRuleIndex: RecurrenceRule.none.index),
-        TransactionModel(id: 'tx_4', amount: 5000.0, currency: 'BRL', date: now.subtract(const Duration(days: 10)), typeIndex: TransactionType.income.index,  paymentMethodIndex: PaymentMethod.transfer.index,    description: 'Salário',       categoryId: 'cat_salary',       accountId: 'acc_checking', isBoleto: false, isProvisioned: false, recurrenceRuleIndex: RecurrenceRule.none.index),
+        TransactionModel(
+          id: 'tx_1', amount: 120.50, currency: 'BRL',
+          date: now.subtract(const Duration(days: 1)),
+          typeIndex: TransactionType.expense.index,
+          paymentMethodIndex: PaymentMethod.creditCard.index,
+          description: 'Supermercado', categoryId: 'cat_food',
+          cardId: 'card_1', isBoleto: false, isProvisioned: false,
+          recurrenceRuleIndex: RecurrenceRule.none.index,
+        ),
+        TransactionModel(
+          id: 'tx_2', amount: 45.00, currency: 'BRL',
+          date: now.subtract(const Duration(days: 2)),
+          typeIndex: TransactionType.expense.index,
+          paymentMethodIndex: PaymentMethod.creditCard.index,
+          description: 'Uber', categoryId: 'cat_transport',
+          cardId: 'card_2', isBoleto: false, isProvisioned: false,
+          recurrenceRuleIndex: RecurrenceRule.none.index,
+        ),
+        TransactionModel(
+          id: 'tx_3', amount: 29.90, currency: 'BRL',
+          date: now.subtract(const Duration(days: 5)),
+          typeIndex: TransactionType.expense.index,
+          paymentMethodIndex: PaymentMethod.creditCard.index,
+          description: 'Streaming', categoryId: 'cat_subscriptions',
+          cardId: 'card_1', isBoleto: false, isProvisioned: false,
+          recurrenceRuleIndex: RecurrenceRule.none.index,
+        ),
+        TransactionModel(
+          id: 'tx_4', amount: 5000.0, currency: 'BRL',
+          date: now.subtract(const Duration(days: 10)),
+          typeIndex: TransactionType.income.index,
+          paymentMethodIndex: PaymentMethod.pix.index,
+          description: 'Salário', categoryId: 'cat_salary',
+          cardId: null, isBoleto: false, isProvisioned: false,
+          recurrenceRuleIndex: RecurrenceRule.none.index,
+        ),
       ];
       await txBox.putAll({for (final t in seedTxs) t.id: t});
     }
