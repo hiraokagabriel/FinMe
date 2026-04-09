@@ -17,6 +17,7 @@ class HiveInit {
   static const String budgetsBoxName      = 'budgets';
 
   static const String _onboardingDoneKey  = 'onboardingDone';
+  static const String _profileMigratedKey = 'profileMigrationDone';
 
   static bool isOnboardingDone() {
     final box = Hive.box<String>(settingsBoxName);
@@ -29,7 +30,8 @@ class HiveInit {
   }
 
   /// Registra adapters e abre apenas os boxes globais (settings, preferences).
-  /// Os boxes de dados são abertos por ProfileService com sufixo de perfil.
+  /// Na primeira execução após a migração para o sistema de perfis,
+  /// deleta os boxes antigos sem sufixo para evitar conflitos de tipo no Hive.
   static Future<void> init() async {
     await Hive.initFlutter();
 
@@ -41,6 +43,39 @@ class HiveInit {
     await Hive.openBox<String>(settingsBoxName);
     await Hive.openBox<String>(preferencesBoxName);
 
-    // Seed padrão removido — feito pelo ProfileService no primeiro boot do perfil 'default'
+    await _migrateIfNeeded();
+  }
+
+  /// Executa uma única vez: deleta boxes legados (sem sufixo de perfil) do disco.
+  /// Isso evita que o Hive tente reabrri-los com tipo errado e cause
+  /// `HiveError: Box not found` ou conflitos de adapter.
+  static Future<void> _migrateIfNeeded() async {
+    final settings = Hive.box<String>(settingsBoxName);
+    if (settings.get(_profileMigratedKey) == 'true') return;
+
+    // Boxes legados sem sufixo — existiam antes do sistema de perfis.
+    // Se estiverem abertos, fecha e deleta do disco.
+    final legacyBoxes = [
+      transactionsBoxName,
+      categoriesBoxName,
+      cardsBoxName,
+      goalsBoxName,
+      accountsBoxName,
+      budgetsBoxName,
+    ];
+
+    for (final name in legacyBoxes) {
+      try {
+        // Abre sem tipo para garantir acesso mesmo se estava fechado
+        if (!Hive.isBoxOpen(name)) {
+          await Hive.openBox(name);
+        }
+        await Hive.box(name).deleteFromDisk();
+      } catch (_) {
+        // Box não existia — tudo bem
+      }
+    }
+
+    await settings.put(_profileMigratedKey, 'true');
   }
 }
