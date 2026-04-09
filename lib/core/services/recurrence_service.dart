@@ -1,19 +1,19 @@
 import '../../features/transactions/data/transaction_model.dart';
 import '../../features/transactions/domain/recurrence_rule.dart';
+import '../../features/transactions/domain/transaction_entity.dart';
 import 'repository_locator.dart';
 
 /// Gera automaticamente as transações recorrentes pendentes.
 /// Deve ser chamado após ProfileService.loadFromStorage() e DefaultSeedService.
 class RecurrenceService {
-  /// Ponto de entrada — chame em main() após o perfil estar carregado.
   static Future<void> generatePending() async {
-    final repo = RepositoryLocator.instance.transactions;
-    final all  = await repo.getAll();
-    final now  = DateTime.now();
+    final repo  = RepositoryLocator.instance.transactions;
+    final all   = await repo.getAll();
+    final now   = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
 
-    final existing = (await repo.getAll()).map((t) => t.id).toSet();
-    final toAdd = <TransactionModel>[];
+    final existingIds = all.map((t) => t.id).toSet();
+    final toAdd = <TransactionEntity>[];
 
     for (final tx in all) {
       final rule = tx.recurrenceRule;
@@ -29,7 +29,7 @@ class RecurrenceService {
         safety++;
         final occurrenceId = '${tx.id}_rec_${cursor.millisecondsSinceEpoch}';
 
-        if (!existing.contains(occurrenceId)) {
+        if (!existingIds.contains(occurrenceId)) {
           toAdd.add(TransactionModel(
             id: occurrenceId,
             amount: tx.amount.amount,
@@ -44,19 +44,15 @@ class RecurrenceService {
             isProvisioned: false,
             recurrenceRuleIndex: 0,
             recurrenceSourceId: tx.id,
-          ));
-          existing.add(occurrenceId);
+          ).toEntity());
+          existingIds.add(occurrenceId);
         }
         cursor = rule.next(cursor);
       }
     }
 
-    if (toAdd.isNotEmpty) {
-      for (final model in toAdd) {
-        await repo.save(TransactionModel.fromEntity(
-          model.toEntity(),
-        ));
-      }
+    for (final entity in toAdd) {
+      await repo.add(entity);
     }
   }
 }
