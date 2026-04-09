@@ -75,6 +75,12 @@ class _TransactionsPageState extends State<TransactionsPage> {
   late _PeriodFilter _period;
   String? _filterCategoryId;
 
+  // ── Busca ──────────────────────────────────────────────────────────────
+  bool _searchActive = false;
+  String _searchQuery = '';
+  final _searchController = TextEditingController();
+  final _searchFocus = FocusNode();
+
   double _totalExpenses = 0;
   double _totalIncome   = 0;
 
@@ -86,6 +92,13 @@ class _TransactionsPageState extends State<TransactionsPage> {
     _period = _PeriodFilterPersistence.fromKey(prefs.transactionsPeriod);
     _filterCategoryId = prefs.transactionsCategoryId;
     _loadData();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _searchFocus.dispose();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -105,6 +118,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
 
   void _applyFilters() {
     final (start, end) = _periodRange(_period);
+    final query = _searchQuery.toLowerCase().trim();
 
     final provisioned = _allTransactions
         .where((tx) => tx.isProvisioned)
@@ -117,9 +131,11 @@ class _TransactionsPageState extends State<TransactionsPage> {
 
     final result = _allTransactions.where((tx) {
       if (tx.isProvisioned) return false;
-      return !tx.date.isBefore(start) &&
-          !tx.date.isAfter(end) &&
-          (_filterCategoryId == null || tx.categoryId == _filterCategoryId);
+      final inPeriod = !tx.date.isBefore(start) && !tx.date.isAfter(end);
+      final inCategory = _filterCategoryId == null || tx.categoryId == _filterCategoryId;
+      final inSearch = query.isEmpty ||
+          (tx.description?.toLowerCase().contains(query) ?? false);
+      return inPeriod && inCategory && inSearch;
     }).toList()
       ..sort((a, b) => b.date.compareTo(a.date));
 
@@ -152,6 +168,29 @@ class _TransactionsPageState extends State<TransactionsPage> {
     _applyFilters();
   }
 
+  void _toggleSearch() {
+    setState(() {
+      _searchActive = !_searchActive;
+      if (!_searchActive) {
+        _searchQuery = '';
+        _searchController.clear();
+        _applyFilters();
+      } else {
+        SchedulerBinding.instance.addPostFrameCallback(
+            (_) => _searchFocus.requestFocus());
+      }
+    });
+  }
+
+  /// Número de filtros ativos (não-padrão) para o badge.
+  int get _activeFilterCount {
+    int count = 0;
+    if (_period != _PeriodFilter.thisMonth) count++;
+    if (_filterCategoryId != null) count++;
+    if (_searchQuery.trim().isNotEmpty) count++;
+    return count;
+  }
+
   Future<void> _openForm({TransactionEntity? initial}) async {
     final ok = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
@@ -179,6 +218,61 @@ class _TransactionsPageState extends State<TransactionsPage> {
           ),
         ],
       ),
+    );
+  }
+
+  // ── AppBar ────────────────────────────────────────────────────────────────
+
+  PreferredSizeWidget _buildAppBar() {
+    if (_searchActive) {
+      return AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: _toggleSearch,
+        ),
+        title: TextField(
+          controller: _searchController,
+          focusNode: _searchFocus,
+          decoration: const InputDecoration(
+            hintText: 'Buscar transação...',
+            border: InputBorder.none,
+          ),
+          onChanged: (v) {
+            setState(() => _searchQuery = v);
+            _applyFilters();
+          },
+        ),
+        actions: [
+          if (_searchQuery.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.clear),
+              onPressed: () {
+                _searchController.clear();
+                setState(() => _searchQuery = '');
+                _applyFilters();
+              },
+            ),
+        ],
+      );
+    }
+
+    return AppBar(
+      title: const Text('Transações'),
+      actions: [
+        IconButton(
+          tooltip: 'Buscar',
+          icon: const Icon(Icons.search_outlined),
+          onPressed: _toggleSearch,
+        ),
+        _FilterBadge(
+          count: _activeFilterCount,
+          child: IconButton(
+            tooltip: 'Filtros ativos',
+            icon: const Icon(Icons.filter_list_outlined),
+            onPressed: () {},
+          ),
+        ),
+      ],
     );
   }
 
@@ -698,7 +792,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
         final isUltra  = mode == AppMode.ultra;
 
         return Scaffold(
-          appBar: AppBar(title: const Text('Transações')),
+          appBar: _buildAppBar(),
           floatingActionButton: FloatingActionButton.extended(
             onPressed: () => _openForm(),
             icon: const Icon(Icons.add),
@@ -742,6 +836,46 @@ class _TransactionsPageState extends State<TransactionsPage> {
 }
 
 // ── Widgets auxiliares ──────────────────────────────────────────────────────
+
+/// Badge numérico sobreposto a qualquer widget filho.
+class _FilterBadge extends StatelessWidget {
+  const _FilterBadge({required this.count, required this.child});
+  final int count;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (count == 0) return child;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        child,
+        Positioned(
+          right: 6,
+          top: 6,
+          child: Container(
+            width: 16,
+            height: 16,
+            decoration: BoxDecoration(
+              color: AppColors.primary,
+              shape: BoxShape.circle,
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              '$count',
+              style: const TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+                height: 1,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
 
 class _CategoryDot extends StatelessWidget {
   const _CategoryDot({this.category});
