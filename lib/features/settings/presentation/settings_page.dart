@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../../core/models/app_mode.dart';
 import '../../../core/services/app_mode_controller.dart';
+import '../../../core/services/demo_seed_service.dart';
 import '../../../core/services/preferences_service.dart';
+import '../../../core/services/profile_service.dart';
 import '../../../core/services/theme_controller.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../categories/presentation/categories_page.dart';
@@ -17,8 +19,9 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   late String _currency;
   late String _dateFormat;
+  bool _switchingProfile = false;
 
-  static const _currencies = ['BRL', 'USD', 'EUR', 'GBP', 'JPY'];
+  static const _currencies  = ['BRL', 'USD', 'EUR', 'GBP', 'JPY'];
   static const _dateFormats = ['dd/MM/yyyy', 'MM/dd/yyyy', 'yyyy-MM-dd'];
 
   @override
@@ -39,47 +42,108 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() => _dateFormat = value);
   }
 
+  Future<void> _toggleDemo(bool enable) async {
+    if (_switchingProfile) return;
+
+    if (enable) {
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Ativar Modo Demo?'),
+          content: const Text(
+            'Seus dados reais serão preservados. O app será recarregado com dados de exemplo cobrindo 12 meses.\n\nDesative o Modo Demo a qualquer momento para voltar aos seus dados.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Ativar'),
+            ),
+          ],
+        ),
+      );
+      if (confirm != true || !mounted) return;
+    } else {
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Desativar Modo Demo?'),
+          content: const Text(
+            'O app voltará para os seus dados reais. Os dados demo permanecem salvos e podem ser reativados.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Desativar'),
+            ),
+          ],
+        ),
+      );
+      if (confirm != true || !mounted) return;
+    }
+
+    setState(() => _switchingProfile = true);
+
+    try {
+      final target = enable
+          ? ProfileService.profileDemo
+          : ProfileService.profileDefault;
+
+      await ProfileService.instance.switchTo(target);
+
+      // Popula dados demo se ainda não foram gerados
+      if (enable) await DemoSeedService.instance.populate();
+
+      if (!mounted) return;
+
+      // Reinicia a navegação para o dashboard com os novos dados
+      Navigator.of(context).pushNamedAndRemoveUntil('/', (_) => false);
+    } finally {
+      if (mounted) setState(() => _switchingProfile = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final modeController  = AppModeController.instance;
     final themeController = ThemeController.instance;
+    final profileService  = ProfileService.instance;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Configurações')),
       body: AnimatedBuilder(
-        animation: Listenable.merge([modeController, themeController]),
+        animation: Listenable.merge([modeController, themeController, profileService]),
         builder: (context, _) {
-          final isUltra = modeController.mode == AppMode.ultra;
-          final isDark  = themeController.isDark;
+          final isUltra  = modeController.mode == AppMode.ultra;
+          final isDark   = themeController.isDark;
+          final isDemo   = profileService.isDemoActive;
 
           return ListView(
             children: [
-              // ── Aparência ───────────────────────────────────────────────────
+              // ── Aparência ────────────────────────────────────────────────
               Padding(
-                padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.lg, AppSpacing.lg,
-                    AppSpacing.lg, AppSpacing.xs),
+                padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.xs),
                 child: Text('Aparência', style: AppText.sectionLabel),
               ),
               SwitchListTile(
-                secondary: Icon(
-                  isDark
-                      ? Icons.dark_mode_outlined
-                      : Icons.light_mode_outlined,
-                ),
+                secondary: Icon(isDark ? Icons.dark_mode_outlined : Icons.light_mode_outlined),
                 title: const Text('Tema escuro'),
-                subtitle: Text(
-                  isDark ? 'Interface escura ativa' : 'Interface clara ativa',
-                ),
+                subtitle: Text(isDark ? 'Interface escura ativa' : 'Interface clara ativa'),
                 value: isDark,
                 onChanged: themeController.setDark,
               ),
               const Divider(height: AppSpacing.h),
 
-              // ── Preferências regionais ─────────────────────────────────────
+              // ── Regional ─────────────────────────────────────────────────
               Padding(
-                padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xs),
+                padding: const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xs),
                 child: Text('Regional', style: AppText.sectionLabel),
               ),
               ListTile(
@@ -90,15 +154,8 @@ class _SettingsPageState extends State<SettingsPage> {
                   child: DropdownButton<String>(
                     value: _currency,
                     isDense: true,
-                    items: _currencies
-                        .map((c) => DropdownMenuItem(
-                              value: c,
-                              child: Text(c, style: AppText.body),
-                            ))
-                        .toList(),
-                    onChanged: (v) {
-                      if (v != null) _setCurrency(v);
-                    },
+                    items: _currencies.map((c) => DropdownMenuItem(value: c, child: Text(c, style: AppText.body))).toList(),
+                    onChanged: (v) { if (v != null) _setCurrency(v); },
                   ),
                 ),
               ),
@@ -110,92 +167,89 @@ class _SettingsPageState extends State<SettingsPage> {
                   child: DropdownButton<String>(
                     value: _dateFormat,
                     isDense: true,
-                    items: _dateFormats
-                        .map((f) => DropdownMenuItem(
-                              value: f,
-                              child: Text(f, style: AppText.body),
-                            ))
-                        .toList(),
-                    onChanged: (v) {
-                      if (v != null) _setDateFormat(v);
-                    },
+                    items: _dateFormats.map((f) => DropdownMenuItem(value: f, child: Text(f, style: AppText.body))).toList(),
+                    onChanged: (v) { if (v != null) _setDateFormat(v); },
                   ),
                 ),
               ),
               const Divider(height: AppSpacing.h),
 
-              // ── Modo de uso ────────────────────────────────────────────────
+              // ── Modo de uso ───────────────────────────────────────────────
               Padding(
-                padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xs),
+                padding: const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xs),
                 child: Text('Modo de uso', style: AppText.sectionLabel),
               ),
               RadioListTile<AppMode>(
                 value: AppMode.simple,
                 groupValue: modeController.mode,
                 activeColor: AppColors.primary,
-                onChanged: (v) {
-                  if (v != null) modeController.setMode(v);
-                },
+                onChanged: (v) { if (v != null) modeController.setMode(v); },
                 title: const Text('Modo Simples'),
-                subtitle: const Text(
-                  'Interface enxuta, foco em resumo rápido. Sem detalhes de cartão ou gráficos avançados.',
-                ),
+                subtitle: const Text('Interface enxuta, foco em resumo rápido.'),
               ),
               RadioListTile<AppMode>(
                 value: AppMode.ultra,
                 groupValue: modeController.mode,
                 activeColor: AppColors.primary,
-                onChanged: (v) {
-                  if (v != null) modeController.setMode(v);
-                },
+                onChanged: (v) { if (v != null) modeController.setMode(v); },
                 title: const Text('Modo Ultra'),
-                subtitle: const Text(
-                  'Visão completa com gráficos por categoria e cartão, limite de crédito, campos avançados e provisionamento.',
-                ),
+                subtitle: const Text('Visão completa com gráficos, limite de crédito e campos avançados.'),
               ),
               AnimatedSwitcher(
                 duration: const Duration(milliseconds: 250),
                 child: isUltra
-                    ? _ModeBanner(
-                        key: const ValueKey('ultra'),
-                        icon: Icons.bolt,
-                        accentColor: AppColors.primary,
-                        title: 'Modo Ultra ativo',
-                        message:
-                            'Você está vendo informações completas: gráficos por categoria e cartão, limite de crédito e campos avançados nas transações.',
-                      )
-                    : _ModeBanner(
-                        key: const ValueKey('simple'),
-                        icon: Icons.spa_outlined,
-                        accentColor: AppColors.limitLow,
-                        title: 'Modo Simples ativo',
-                        message:
-                            'Interface enxuta: apenas data na lista de transações. Campos de cartão e gráficos ficam ocultos.',
-                      ),
+                    ? _ModeBanner(key: const ValueKey('ultra'), icon: Icons.bolt, accentColor: AppColors.primary, title: 'Modo Ultra ativo', message: 'Gráficos por categoria e cartão, limite de crédito e campos avançados nas transações.')
+                    : _ModeBanner(key: const ValueKey('simple'), icon: Icons.spa_outlined, accentColor: AppColors.limitLow, title: 'Modo Simples ativo', message: 'Interface enxuta: apenas data na lista de transações.'),
               ),
               const Divider(height: AppSpacing.h),
 
-              // ── Dados ──────────────────────────────────────────────────────
+              // ── Dados ─────────────────────────────────────────────────────
               Padding(
-                padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xs),
+                padding: const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xs),
                 child: Text('Dados', style: AppText.sectionLabel),
               ),
               ListTile(
                 leading: const Icon(Icons.label_outline),
                 title: const Text('Categorias'),
-                subtitle: const Text(
-                    'Gerenciar categorias de despesa e receita'),
-                trailing: const Icon(
-                    Icons.chevron_right,
-                    color: AppColors.textSecondary),
+                subtitle: const Text('Gerenciar categorias de despesa e receita'),
+                trailing: const Icon(Icons.chevron_right, color: AppColors.textSecondary),
                 onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (context) => const CategoriesPage(),
-                  ),
+                  MaterialPageRoute(builder: (_) => const CategoriesPage()),
                 ),
               ),
+              const Divider(height: AppSpacing.h),
+
+              // ── Modo Demo ─────────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xs),
+                child: Text('Benchmark', style: AppText.sectionLabel),
+              ),
+              SwitchListTile(
+                secondary: Icon(
+                  Icons.science_outlined,
+                  color: isDemo ? AppColors.warning : null,
+                ),
+                title: const Text('Modo Demo'),
+                subtitle: const Text(
+                  'Preenche o app com dados de exemplo de 12 meses. Seus dados reais são preservados.',
+                ),
+                value: isDemo,
+                onChanged: _switchingProfile ? null : _toggleDemo,
+                activeColor: AppColors.warning,
+              ),
+              if (isDemo)
+                _ModeBanner(
+                  icon: Icons.science_outlined,
+                  accentColor: AppColors.warning,
+                  title: 'Modo Demo ativo',
+                  message: 'Você está visualizando dados fictícios. Todas as funções do app estão disponíveis. Desative para voltar aos seus dados reais.',
+                ),
+              if (_switchingProfile)
+                const Padding(
+                  padding: EdgeInsets.all(AppSpacing.lg),
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+              const SizedBox(height: AppSpacing.lg),
             ],
           );
         },
@@ -221,9 +275,7 @@ class _ModeBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.fromLTRB(
-          AppSpacing.lg, AppSpacing.sm,
-          AppSpacing.lg, AppSpacing.xs),
+      margin: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.xs),
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
         color: accentColor.withOpacity(0.08),
@@ -239,10 +291,7 @@ class _ModeBanner extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  title,
-                  style: AppText.sectionLabel.copyWith(color: accentColor),
-                ),
+                Text(title, style: AppText.sectionLabel.copyWith(color: accentColor)),
                 const SizedBox(height: 3),
                 Text(message, style: AppText.secondary),
               ],

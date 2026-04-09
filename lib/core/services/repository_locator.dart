@@ -15,34 +15,50 @@ import '../../features/accounts/data/hive_accounts_repository.dart';
 import '../../features/accounts/data/accounts_repository.dart';
 import '../../features/budget/data/budget_repository.dart';
 import 'hive_init.dart';
+import 'profile_service.dart';
 
 class RepositoryLocator {
   RepositoryLocator._();
 
   static final RepositoryLocator instance = RepositoryLocator._();
 
-  late final TransactionsRepository transactions =
-      HiveTransactionsRepository(
-    Hive.box<TransactionModel>(HiveInit.transactionsBoxName),
-  );
+  TransactionsRepository? _transactions;
+  CategoriesRepository?   _categories;
+  CardsRepository?        _cards;
+  GoalsRepository?        _goals;
+  AccountsRepository?     _accounts;
+  BudgetRepository?       _budgets;
 
-  late final CategoriesRepository categories = HiveCategoriesRepository(
-    Hive.box<CategoryModel>(HiveInit.categoriesBoxName),
-  );
+  TransactionsRepository get transactions => _transactions!;
+  CategoriesRepository   get categories   => _categories!;
+  CardsRepository        get cards        => _cards!;
+  GoalsRepository        get goals        => _goals!;
+  AccountsRepository     get accounts     => _accounts!;
+  BudgetRepository       get budgets      => _budgets!;
 
-  late final CardsRepository cards = HiveCardsRepository(
-    Hive.box<CardModel>(HiveInit.cardsBoxName),
-  );
-
-  late final GoalsRepository goals = GoalsRepository(
-    Hive.box(HiveInit.goalsBoxName),
-  );
-
-  late final AccountsRepository accounts = HiveAccountsRepository(
-    Hive.box<AccountModel>(HiveInit.accountsBoxName),
-  );
-
-  late final BudgetRepository budgets = BudgetRepository(
-    Hive.box(HiveInit.budgetsBoxName),
-  );
+  /// Chamado pelo ProfileService após abrir os boxes do perfil ativo.
+  void reinit(String profileId) {
+    _transactions = HiveTransactionsRepository(
+      Hive.box<TransactionModel>(
+          ProfileService.boxName(HiveInit.transactionsBoxName, profileId)),
+    );
+    _categories = HiveCategoriesRepository(
+      Hive.box<CategoryModel>(
+          ProfileService.boxName(HiveInit.categoriesBoxName, profileId)),
+    );
+    _cards = HiveCardsRepository(
+      Hive.box<CardModel>(
+          ProfileService.boxName(HiveInit.cardsBoxName, profileId)),
+    );
+    _goals = GoalsRepository(
+      Hive.box(ProfileService.boxName(HiveInit.goalsBoxName, profileId)),
+    );
+    _accounts = HiveAccountsRepository(
+      Hive.box<AccountModel>(
+          ProfileService.boxName(HiveInit.accountsBoxName, profileId)),
+    );
+    _budgets = BudgetRepository(
+      Hive.box(ProfileService.boxName(HiveInit.budgetsBoxName, profileId)),
+    );
+  }
 }
