@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../domain/account_entity.dart';
 import '../data/accounts_repository.dart';
 import '../../../core/services/repository_locator.dart';
+import '../../../core/widgets/app_empty_state.dart';
 import '../../transactions/domain/transaction_entity.dart';
 
 class AccountsPage extends StatefulWidget {
@@ -94,23 +95,12 @@ class _AccountsPageState extends State<AccountsPage> {
         ],
       ),
       body: _accounts.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.account_balance_wallet_outlined,
-                      size: 48, color: cs.onSurface.withOpacity(0.3)),
-                  const SizedBox(height: 12),
-                  Text('Nenhuma conta cadastrada',
-                      style: theme.textTheme.bodyMedium
-                          ?.copyWith(color: cs.onSurface.withOpacity(0.5))),
-                  const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: () => _openForm(),
-                    child: const Text('Criar primeira conta'),
-                  ),
-                ],
-              ),
+          ? AppEmptyState(
+              icon: Icons.account_balance_wallet_outlined,
+              title: 'Nenhuma conta cadastrada',
+              message: 'Crie sua primeira conta para começar a registrar transações.',
+              actionLabel: 'Criar conta',
+              onAction: () => _openForm(),
             )
           : ListView.separated(
               padding: const EdgeInsets.all(16),

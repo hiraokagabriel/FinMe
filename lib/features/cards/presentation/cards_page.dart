@@ -8,6 +8,7 @@ import '../../../core/models/app_mode.dart';
 import '../../../core/services/app_mode_controller.dart';
 import '../../../core/services/repository_locator.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/app_empty_state.dart';
 import '../../../features/transactions/domain/transaction_entity.dart';
 import '../../../features/transactions/domain/transaction_type.dart';
 import 'new_card_page.dart';
@@ -223,27 +224,12 @@ class _CardsPageState extends State<CardsPage> {
                       ),
                     Expanded(
                       child: _cards.isEmpty
-                          ? Center(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.credit_card_off_outlined,
-                                    size: 48,
-                                    color: AppColors.textSecondary,
-                                  ),
-                                  const SizedBox(height: AppSpacing.md),
-                                  Text(
-                                    'Nenhum cartão cadastrado',
-                                    style: AppText.sectionLabel,
-                                  ),
-                                  const SizedBox(height: AppSpacing.sm),
-                                  Text(
-                                    'Toque em "Novo cartão" para começar.',
-                                    style: AppText.secondary,
-                                  ),
-                                ],
-                              ),
+                          ? AppEmptyState(
+                              icon: Icons.credit_card_off_outlined,
+                              title: 'Nenhum cartão cadastrado',
+                              message: 'Toque em "Novo cartão" para começar.',
+                              actionLabel: 'Novo cartão',
+                              onAction: () => _openCardForm(),
                             )
                           : ListView.separated(
                               padding: const EdgeInsets.only(

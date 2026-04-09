@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/services/repository_locator.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/app_empty_state.dart';
 import '../../categories/domain/category_entity.dart';
 import '../../transactions/domain/transaction_entity.dart';
 import '../../transactions/domain/transaction_type.dart';
@@ -51,8 +52,6 @@ class _GoalsPageState extends State<GoalsPage>
     });
   }
 
-  // ── Helpers ──────────────────────────────────────────────────────────────
-
   List<GoalEntity> get _savingsGoals =>
       _goals.where((g) => g.type == GoalType.savingsGoal).toList();
 
@@ -70,8 +69,6 @@ class _GoalsPageState extends State<GoalsPage>
             tx.date.month == now.month)
         .fold(0.0, (acc, tx) => acc + tx.amount.amount);
   }
-
-  // ── Form ─────────────────────────────────────────────────────────────────
 
   Future<void> _openForm({GoalEntity? initial, GoalType? forceType}) async {
     await showDialog(
@@ -125,8 +122,6 @@ class _GoalsPageState extends State<GoalsPage>
     }
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -164,6 +159,7 @@ class _GoalsPageState extends State<GoalsPage>
               children: [
                 _SavingsTab(
                   goals: _savingsGoals,
+                  onAdd: () => _openForm(forceType: GoalType.savingsGoal),
                   onEdit: (g) => _openForm(initial: g),
                   onDelete: _confirmDelete,
                 ),
@@ -171,6 +167,7 @@ class _GoalsPageState extends State<GoalsPage>
                   goals: _ceilings,
                   categories: _categories,
                   spentFor: _spentForCategory,
+                  onAdd: () => _openForm(forceType: GoalType.spendingCeiling),
                   onEdit: (g) => _openForm(initial: g),
                   onDelete: _confirmDelete,
                 ),
@@ -187,22 +184,25 @@ class _GoalsPageState extends State<GoalsPage>
 class _SavingsTab extends StatelessWidget {
   const _SavingsTab({
     required this.goals,
+    required this.onAdd,
     required this.onEdit,
     required this.onDelete,
   });
 
   final List<GoalEntity> goals;
+  final VoidCallback onAdd;
   final void Function(GoalEntity) onEdit;
   final void Function(GoalEntity) onDelete;
 
   @override
   Widget build(BuildContext context) {
     if (goals.isEmpty) {
-      return _EmptyState(
+      return AppEmptyState(
         icon: Icons.savings_outlined,
         title: 'Nenhuma meta cadastrada',
-        subtitle:
-            'Crie metas de economia para acompanhar\nseu progresso rumo a um objetivo.',
+        message: 'Crie metas de economia para acompanhar seu progresso rumo a um objetivo.',
+        actionLabel: 'Nova meta',
+        onAction: onAdd,
       );
     }
     return ListView.separated(
@@ -252,7 +252,6 @@ class _SavingsCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header
             Row(
               children: [
                 CircleAvatar(
@@ -268,12 +267,10 @@ class _SavingsCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis),
                 ),
                 if (isDone)
-                  _Badge(
-                      label: '🎉 Concluída', color: AppColors.success)
+                  _Badge(label: '🎉 Concluída', color: AppColors.success)
                 else if (isNear)
                   _Badge(
-                      label:
-                          '${(ratio * 100).toStringAsFixed(0)}%',
+                      label: '${(ratio * 100).toStringAsFixed(0)}%',
                       color: AppColors.primary),
                 const SizedBox(width: AppSpacing.xs),
                 IconButton(
@@ -291,7 +288,6 @@ class _SavingsCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: AppSpacing.md),
-            // Barra de progresso
             ClipRRect(
               borderRadius: BorderRadius.circular(AppRadius.chip),
               child: LinearProgressIndicator(
@@ -302,7 +298,6 @@ class _SavingsCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: AppSpacing.xs + 2),
-            // Valores
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -333,6 +328,7 @@ class _CeilingTab extends StatelessWidget {
     required this.goals,
     required this.categories,
     required this.spentFor,
+    required this.onAdd,
     required this.onEdit,
     required this.onDelete,
   });
@@ -340,17 +336,19 @@ class _CeilingTab extends StatelessWidget {
   final List<GoalEntity> goals;
   final List<CategoryEntity> categories;
   final double Function(String) spentFor;
+  final VoidCallback onAdd;
   final void Function(GoalEntity) onEdit;
   final void Function(GoalEntity) onDelete;
 
   @override
   Widget build(BuildContext context) {
     if (goals.isEmpty) {
-      return _EmptyState(
+      return AppEmptyState(
         icon: Icons.price_check_outlined,
         title: 'Nenhum teto cadastrado',
-        subtitle:
-            'Defina limites de gasto por categoria\ne receba alertas quando se aproximar do limite.',
+        message: 'Defina limites de gasto por categoria e receba alertas quando se aproximar do limite.',
+        actionLabel: 'Novo teto',
+        onAction: onAdd,
       );
     }
     return ListView.separated(
@@ -454,8 +452,7 @@ class _CeilingCard extends StatelessWidget {
                   _Badge(label: 'Estourado', color: AppColors.danger)
                 else if (isNear)
                   _Badge(
-                      label:
-                          '${(ratio * 100).toStringAsFixed(0)}%',
+                      label: '${(ratio * 100).toStringAsFixed(0)}%',
                       color: AppColors.warning),
                 const SizedBox(width: AppSpacing.xs),
                 IconButton(
@@ -526,41 +523,6 @@ class _Badge extends StatelessWidget {
         label,
         style: AppText.badge
             .copyWith(color: color, fontWeight: FontWeight.w700),
-      ),
-    );
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-  });
-
-  final IconData icon;
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.xl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 48, color: AppColors.textSecondary),
-            const SizedBox(height: AppSpacing.md),
-            Text(title, style: AppText.sectionLabel),
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              subtitle,
-              textAlign: TextAlign.center,
-              style: AppText.secondary,
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -723,7 +685,6 @@ class _GoalFormDialogState extends State<_GoalFormDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Seletor de tipo (apenas para criação sem forceType)
               if (isNew && widget.forceType == null) ...[
                 SegmentedButton<GoalType>(
                   segments: const [
@@ -745,7 +706,6 @@ class _GoalFormDialogState extends State<_GoalFormDialog> {
                 const SizedBox(height: AppSpacing.md),
               ],
 
-              // ── Campos de Meta de Economia ──────────────────────────────
               if (_type == GoalType.savingsGoal) ...[
                 TextFormField(
                   controller: _titleController,
@@ -778,7 +738,6 @@ class _GoalFormDialogState extends State<_GoalFormDialog> {
                 ),
               ],
 
-              // ── Campos de Teto de Gastos ──────────────────────────────
               if (_type == GoalType.spendingCeiling) ...[
                 if (_expenseCategories.isEmpty)
                   const Text(
