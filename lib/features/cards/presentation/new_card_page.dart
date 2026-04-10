@@ -21,6 +21,7 @@ class _NewCardPageState extends State<NewCardPage> {
   final _limitController = TextEditingController();
   CardType _selectedType = CardType.credit;
   int _dueDay = 10;
+  int? _closingDay;  // null = usar fallback dueDay - 7
   bool _isSaving = false;
 
   bool get _isEdit => widget.initialCard != null;
@@ -34,6 +35,7 @@ class _NewCardPageState extends State<NewCardPage> {
       _bankController.text = initial.bankName;
       _selectedType = initial.type;
       _dueDay = initial.dueDay;
+      _closingDay = initial.closingDay;
       if (initial.limit != null) {
         _limitController.text = initial.limit!.toStringAsFixed(2);
       }
@@ -68,6 +70,7 @@ class _NewCardPageState extends State<NewCardPage> {
       type: _selectedType,
       dueDay: _dueDay,
       limit: limit,
+      closingDay: _closingDay,
     );
 
     if (_isEdit) {
@@ -81,8 +84,26 @@ class _NewCardPageState extends State<NewCardPage> {
     Navigator.of(context).pop(true);
   }
 
+  /// Preview exibido abaixo dos campos de dia quando ambos estão definidos.
+  Widget _buildClosingPreview() {
+    final closing = _closingDay;
+    if (_selectedType != CardType.credit) return const SizedBox.shrink();
+    final closingLabel = closing != null
+        ? 'dia $closing'
+        : 'dia ${((_dueDay - 7) % 28).clamp(1, 28)} (automático)';
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.sm),
+      child: Text(
+        'Fatura fecha no $closingLabel e vence no dia $_dueDay de cada mês',
+        style: AppText.secondary,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final showBillingFields = _selectedType == CardType.credit;
+
     return Scaffold(
       appBar: AppBar(
         title: Text(_isEdit ? 'Editar cartão' : 'Novo cartão'),
@@ -127,7 +148,13 @@ class _NewCardPageState extends State<NewCardPage> {
                   ),
                 ],
                 onChanged: (v) {
-                  if (v != null) setState(() => _selectedType = v);
+                  if (v != null) {
+                    setState(() {
+                      _selectedType = v;
+                      // limpa closingDay se não for crédito
+                      if (v != CardType.credit) _closingDay = null;
+                    });
+                  }
                 },
               ),
               const SizedBox(height: AppSpacing.md),
@@ -165,6 +192,38 @@ class _NewCardPageState extends State<NewCardPage> {
                   ),
                 ],
               ),
+              // Campo de fechamento — apenas para cartões de crédito
+              if (showBillingFields) ...[
+                const SizedBox(height: AppSpacing.md),
+                DropdownButtonFormField<int?>(
+                  value: _closingDay,
+                  decoration: const InputDecoration(
+                    labelText: 'Fechamento (opcional)',
+                    hintText: 'Automático (venc. − 7 dias)',
+                  ),
+                  validator: (v) {
+                    if (v != null && v == _dueDay) {
+                      return 'Fechamento não pode ser igual ao vencimento';
+                    }
+                    return null;
+                  },
+                  items: [
+                    const DropdownMenuItem<int?>(
+                      value: null,
+                      child: Text('Automático (venc. − 7 dias)'),
+                    ),
+                    ...List.generate(
+                      28,
+                      (i) => DropdownMenuItem<int?>(
+                        value: i + 1,
+                        child: Text('Dia ${i + 1}'),
+                      ),
+                    ),
+                  ],
+                  onChanged: (v) => setState(() => _closingDay = v),
+                ),
+                _buildClosingPreview(),
+              ],
               const SizedBox(height: AppSpacing.xxl),
               SizedBox(
                 width: double.infinity,
