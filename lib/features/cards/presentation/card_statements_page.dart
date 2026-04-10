@@ -22,9 +22,10 @@ String _fmtDayMonth(DateTime d) =>
 String _fmtDayMonthNum(DateTime d) =>
     '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}';
 
-String _fmtMonthYear(DateTime d) =>
-    '${_months[d.month - 1].substring(0, 1).toUpperCase()}'
-    '${_months[d.month - 1].substring(1)} ${d.year}';
+String _fmtMonthYear(DateTime d) {
+  final m = _months[d.month - 1];
+  return '${m[0].toUpperCase()}${m.substring(1)} ${d.year}';
+}
 
 String _fmtMonthYearShort(DateTime d) =>
     '${_months[d.month - 1]}/${d.year}';
@@ -42,10 +43,11 @@ class CardStatementsPage extends StatefulWidget {
 class _CardStatementsPageState extends State<CardStatementsPage> {
   final _service = StatementService.instance;
 
-  List<StatementCycle> _cycles = [];
+  List<StatementCycle> _cycles     = [];
   List<CategoryEntity> _categories = [];
-  int _selectedIndex = 0;
-  bool _isLoading = true;
+  int  _selectedIndex = 0;
+  bool _isLoading     = true;
+  String? _error;
 
   @override
   void initState() {
@@ -54,52 +56,62 @@ class _CardStatementsPageState extends State<CardStatementsPage> {
   }
 
   Future<void> _loadData() async {
-    final locator = RepositoryLocator.instance;
-    final transactions = await locator.transactions.getAll();
-    final categories = await locator.categories.getAll();
-    final cycles = await _service.cyclesForCard(
-      widget.card,
-      transactions,
-      count: 6,
-    );
-    setState(() {
-      _cycles = cycles;
-      _categories = categories;
-      _selectedIndex = 0;
-      _isLoading = false;
-    });
+    setState(() { _isLoading = true; _error = null; });
+    try {
+      final locator      = RepositoryLocator.instance;
+      final transactions = await locator.transactions.getAll();
+      final categories   = await locator.categories.getAll();
+      final cycles       = await _service.cyclesForCard(
+        widget.card,
+        transactions,
+        count: 6,
+      );
+      if (!mounted) return;
+      setState(() {
+        _cycles         = cycles;
+        _categories     = categories;
+        _selectedIndex  = 0;
+        _isLoading      = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _error     = e.toString();
+      });
+    }
   }
 
   StatementCycle get _current => _cycles[_selectedIndex];
 
   Future<void> _togglePaid() async {
-    final cycle = _current;
-    final newPaid = !cycle.isPaid;
-    await _service.markPaid(
-      widget.card.id,
-      cycle.cycleEnd.year,
-      cycle.cycleEnd.month,
-      paid: newPaid,
-    );
-    final locator = RepositoryLocator.instance;
-    final transactions = await locator.transactions.getAll();
-    final updated = await _service.cyclesForCard(
-      widget.card,
-      transactions,
-      count: 6,
-    );
-    setState(() => _cycles = updated);
-    if (!mounted) return;
-    final label = _fmtMonthYearShort(cycle.cycleEnd);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          newPaid
-              ? 'Fatura de $label marcada como paga'
-              : 'Fatura de $label desmarcada',
+    try {
+      final cycle  = _current;
+      final newPaid = !cycle.isPaid;
+      await _service.markPaid(
+        widget.card.id,
+        cycle.cycleEnd.year,
+        cycle.cycleEnd.month,
+        paid: newPaid,
+      );
+      await _loadData();
+      if (!mounted) return;
+      final label = _fmtMonthYearShort(cycle.cycleEnd);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            newPaid
+                ? 'Fatura de $label marcada como paga'
+                : 'Fatura de $label desmarcada',
+          ),
         ),
-      ),
-    );
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao salvar: $e')),
+      );
+    }
   }
 
   CategoryEntity? _categoryOf(TransactionEntity tx) {
@@ -113,6 +125,32 @@ class _CardStatementsPageState extends State<CardStatementsPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_error != null) {
+      return Scaffold(
+        appBar: AppBar(title: Text('${widget.card.name} — Faturas')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.error_outline, size: 48, color: AppColors.danger),
+                const SizedBox(height: AppSpacing.md),
+                Text('Erro ao carregar faturas', style: AppText.sectionLabel),
+                const SizedBox(height: AppSpacing.xs),
+                Text(_error!, style: AppText.secondary, textAlign: TextAlign.center),
+                const SizedBox(height: AppSpacing.md),
+                ElevatedButton(
+                  onPressed: _loadData,
+                  child: const Text('Tentar novamente'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: Text('${widget.card.name} — Faturas'),
@@ -123,14 +161,15 @@ class _CardStatementsPageState extends State<CardStatementsPage> {
               ? const AppEmptyState(
                   icon: Icons.receipt_long_outlined,
                   title: 'Sem faturas',
-                  message: 'Ainda não há ciclos de fatura para este cartão.',
+                  message:
+                      'Ainda não há ciclos de fatura para este cartão.',
                 )
               : Column(
                   children: [
                     _CyclePicker(
-                      cycles: _cycles,
+                      cycles:        _cycles,
                       selectedIndex: _selectedIndex,
-                      onChanged: (i) => setState(() => _selectedIndex = i),
+                      onChanged:     (i) => setState(() => _selectedIndex = i),
                     ),
                     const Divider(height: 1),
                     _CycleHeader(cycle: _current),
@@ -151,14 +190,14 @@ class _CardStatementsPageState extends State<CardStatementsPage> {
                               itemBuilder: (context, i) {
                                 final tx = _current.transactions[i];
                                 return _TransactionTile(
-                                  tx: tx,
+                                  tx:       tx,
                                   category: _categoryOf(tx),
                                 );
                               },
                             ),
                     ),
                     _CycleFooter(
-                      cycle: _current,
+                      cycle:        _current,
                       onTogglePaid: _togglePaid,
                     ),
                   ],
@@ -182,8 +221,8 @@ class _CyclePicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = _fmtMonthYear(cycles[selectedIndex].cycleEnd);
-    final canGoBack = selectedIndex < cycles.length - 1;
+    final label      = _fmtMonthYear(cycles[selectedIndex].cycleEnd);
+    final canGoBack  = selectedIndex < cycles.length - 1;
     final canGoForward = selectedIndex > 0;
 
     return Padding(
@@ -221,18 +260,18 @@ class _CycleHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final dueDay = DateTime(
+    final now     = DateTime.now();
+    final today   = DateTime(now.year, now.month, now.day);
+    final dueDay  = DateTime(
         cycle.dueDate.year, cycle.dueDate.month, cycle.dueDate.day);
     final isOverdue = !cycle.isPaid && dueDay.isBefore(today);
 
     final (badgeLabel, badgeColor) = switch (true) {
-      _ when cycle.isPaid         => ('Paga', AppColors.limitLow),
-      _ when isOverdue            => ('Vencida', AppColors.danger),
-      _ when cycle.isClosingToday => ('Fecha hoje', AppColors.warning),
-      _ when cycle.isOpen         => ('Aberta', AppColors.primary),
-      _                           => ('Pendente', AppColors.warning),
+      _ when cycle.isPaid         => ('Paga',        AppColors.limitLow),
+      _ when isOverdue            => ('Vencida',     AppColors.danger),
+      _ when cycle.isClosingToday => ('Fecha hoje',  AppColors.warning),
+      _ when cycle.isOpen         => ('Aberta',      AppColors.primary),
+      _                           => ('Pendente',    AppColors.warning),
     };
 
     return Padding(
@@ -283,14 +322,15 @@ class _CycleHeader extends StatelessWidget {
 class _TransactionTile extends StatelessWidget {
   const _TransactionTile({required this.tx, this.category});
   final TransactionEntity tx;
-  final CategoryEntity? category;
+  final CategoryEntity?   category;
 
   @override
   Widget build(BuildContext context) {
     final isProvisioned = tx.isProvisioned;
-    final cp = category?.iconCodePoint;
-    final iconWidget = cp != null
-        ? Text(String.fromCharCode(cp), style: const TextStyle(fontSize: 20))
+    final cp            = category?.iconCodePoint;
+    final iconWidget    = cp != null
+        ? Text(String.fromCharCode(cp),
+            style: const TextStyle(fontSize: 20))
         : const Icon(Icons.label_outline, size: 20);
 
     return Padding(
@@ -316,7 +356,9 @@ class _TransactionTile extends StatelessWidget {
                 Text(
                   _fmtDayMonthNum(tx.date),
                   style: AppText.secondary.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurfaceVariant,
                   ),
                 ),
               ],
@@ -354,13 +396,13 @@ class _CycleFooter extends StatelessWidget {
   });
 
   final StatementCycle cycle;
-  final VoidCallback onTogglePaid;
+  final VoidCallback   onTogglePaid;
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final endDay = DateTime(
+    final now     = DateTime.now();
+    final today   = DateTime(now.year, now.month, now.day);
+    final endDay  = DateTime(
         cycle.cycleEnd.year, cycle.cycleEnd.month, cycle.cycleEnd.day);
     final isPartial = !endDay.isBefore(today);
     final cs = Theme.of(context).colorScheme;
@@ -407,7 +449,8 @@ class _CycleFooter extends StatelessWidget {
                       backgroundColor: AppColors.limitLow,
                       foregroundColor: Colors.white,
                     ),
-                    icon: const Icon(Icons.check_circle_outline, size: 16),
+                    icon:
+                        const Icon(Icons.check_circle_outline, size: 16),
                     label: const Text('Marcar como paga'),
                   ),
           ),
