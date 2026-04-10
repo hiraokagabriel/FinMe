@@ -10,6 +10,8 @@ import '../../../core/services/auth_service.dart';
 import '../../../core/services/profile_service.dart';
 import '../../../core/services/repository_locator.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../payment_hub/domain/payment_hub_service.dart';
+import '../../payment_hub/domain/payment_item.dart';
 import '../../transactions/domain/transaction_entity.dart';
 import '../../transactions/domain/transaction_type.dart';
 
@@ -25,6 +27,7 @@ class DashboardPage extends StatefulWidget {
 class _DashboardPageState extends State<DashboardPage> {
   List<TransactionEntity> _transactions = const [];
   List<SubscriptionSummary> _subscriptions = const [];
+  List<PaymentItem> _upcomingPayments = const [];
   bool _isLoading = true;
   _ChartSeriesFilter _chartFilter = _ChartSeriesFilter.both;
 
@@ -44,18 +47,25 @@ class _DashboardPageState extends State<DashboardPage> {
   void _onProfileChanged() {
     setState(() {
       _transactions = const [];
+      _upcomingPayments = const [];
       _isLoading = true;
     });
     _load();
   }
 
   Future<void> _load() async {
-    final txs = await RepositoryLocator.instance.transactions.getAll();
+    final results = await Future.wait([
+      RepositoryLocator.instance.transactions.getAll(),
+      PaymentHubService.instance.load(),
+    ]);
     if (!mounted) return;
+    final txs = results[0] as List<TransactionEntity>;
+    final payments = results[1] as List<PaymentItem>;
     final subs = detectSubscriptions(txs);
     setState(() {
       _transactions = txs;
       _subscriptions = subs;
+      _upcomingPayments = payments;
       _isLoading = false;
     });
   }
@@ -193,6 +203,10 @@ class _DashboardPageState extends State<DashboardPage> {
                       const SizedBox(height: AppSpacing.lg),
                       _buildLineChartCard(),
                       const SizedBox(height: AppSpacing.lg),
+                      if (_upcomingPayments.isNotEmpty) ...[
+                        _buildPaymentHubCard(context),
+                        const SizedBox(height: AppSpacing.lg),
+                      ],
                       if (isUltra && _subscriptions.isNotEmpty) ...[
                         _buildSubscriptionsCard(context),
                         const SizedBox(height: AppSpacing.lg),
@@ -359,6 +373,94 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  // ── Card de Pagamentos Próximos (M7-E) ─────────────────────────────────────
+
+  Widget _buildPaymentHubCard(BuildContext context) {
+    final items = _upcomingPayments;
+    final total = items.fold(0.0, (s, i) => s + i.amount);
+    final windowDays = PaymentHubService.instance.windowDays;
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final hasUrgent = items.any((i) {
+      final ref = i.closingDate ?? i.dueDate;
+      return !ref.isBefore(today) &&
+          ref.isBefore(today.add(const Duration(days: 3)));
+    });
+
+    return Card(
+      child: InkWell(
+        onTap: () => Navigator.of(context).pushNamed(AppRouter.paymentHub),
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: hasUrgent
+                      ? AppColors.warning.withOpacity(0.15)
+                      : AppColors.primarySubtle,
+                  borderRadius: BorderRadius.circular(AppRadius.chip),
+                ),
+                child: Icon(
+                  Icons.payment_outlined,
+                  size: 18,
+                  color: hasUrgent ? AppColors.warning : AppColors.primary,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Pagamentos próximos', style: AppText.sectionLabel),
+                    Text(
+                      '${items.length} item${items.length != 1 ? 's' : ''} nos próximos $windowDays dias',
+                      style: AppText.secondary,
+                    ),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    'R\$ ${total.toStringAsFixed(2).replaceAll('.', ',')}',
+                    style: AppText.amount.copyWith(
+                      color: AppColors.danger,
+                      fontSize: 14,
+                    ),
+                  ),
+                  if (hasUrgent)
+                    Container(
+                      margin: const EdgeInsets.only(top: 2),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.warning.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(AppRadius.chip),
+                      ),
+                      child: Text(
+                        'Urgente',
+                        style: AppText.badge
+                            .copyWith(color: AppColors.warning),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Icon(Icons.chevron_right,
+                  size: 18, color: AppColors.textSecondary),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildSubscriptionsCard(BuildContext context) {
     final totalMonthly = _subscriptions
         .fold<double>(0, (sum, s) => sum + s.monthlyAmount);
@@ -517,6 +619,12 @@ class _DashboardPageState extends State<DashboardPage> {
                   Navigator.of(context).pushNamed(AppRouter.reports),
               icon: const Icon(Icons.bar_chart_outlined),
               label: const Text('Relatórios'),
+            ),
+            OutlinedButton.icon(
+              onPressed: () =>
+                  Navigator.of(context).pushNamed(AppRouter.paymentHub),
+              icon: const Icon(Icons.payment_outlined),
+              label: const Text('Pagamentos'),
             ),
             if (isUltra)
               OutlinedButton.icon(
