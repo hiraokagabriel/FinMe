@@ -17,6 +17,8 @@ import 'new_transaction_page.dart';
 
 enum _PeriodFilter { thisMonth, lastMonth, thisWeek, all }
 
+enum _TypeFilter { all, income, expense, transfer }
+
 extension _PeriodFilterPersistence on _PeriodFilter {
   String get key => name;
   static _PeriodFilter fromKey(String key) =>
@@ -75,6 +77,10 @@ class _TransactionsPageState extends State<TransactionsPage> {
 
   late _PeriodFilter _period;
   String? _filterCategoryId;
+  TransactionType? _filterType;
+  double? _minAmountFilter;
+  double? _maxAmountFilter;
+  double _maxAmountInData = 0;
 
   // ── Busca ──────────────────────────────────────────────────────────────
   bool _searchActive = false;
@@ -108,10 +114,18 @@ class _TransactionsPageState extends State<TransactionsPage> {
     final categoriesList = await locator.categories.getAll();
     final cardsList      = await locator.cards.getAll();
 
+    double maxAmount = 0;
+    for (final tx in transactions) {
+      if (tx.isProvisioned) continue;
+      final v = tx.amount.amount.abs();
+      if (v > maxAmount) maxAmount = v;
+    }
+
     setState(() {
       _allTransactions = transactions;
       _categoriesById  = {for (final c in categoriesList) c.id: c};
       _cardsById       = {for (final c in cardsList) c.id: c};
+      _maxAmountInData = maxAmount;
       _isLoading       = false;
     });
     _applyFilters();
@@ -133,10 +147,17 @@ class _TransactionsPageState extends State<TransactionsPage> {
     final result = _allTransactions.where((tx) {
       if (tx.isProvisioned) return false;
       final inPeriod = !tx.date.isBefore(start) && !tx.date.isAfter(end);
-      final inCategory = _filterCategoryId == null || tx.categoryId == _filterCategoryId;
+      final inCategory =
+          _filterCategoryId == null || tx.categoryId == _filterCategoryId;
       final inSearch = query.isEmpty ||
           (tx.description?.toLowerCase().contains(query) ?? false);
-      return inPeriod && inCategory && inSearch;
+      final inType = _filterType == null || tx.type == _filterType;
+
+      final amountAbs = tx.amount.amount.abs();
+      final inMin = _minAmountFilter == null || amountAbs >= _minAmountFilter!;
+      final inMax = _maxAmountFilter == null || amountAbs <= _maxAmountFilter!;
+
+      return inPeriod && inCategory && inSearch && inType && inMin && inMax;
     }).toList()
       ..sort((a, b) => b.date.compareTo(a.date));
 
@@ -144,7 +165,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
     for (final tx in result) {
       if (tx.type == TransactionType.expense) {
         expenses += tx.amount.amount;
-      } else {
+      } else if (tx.type == TransactionType.income) {
         income += tx.amount.amount;
       }
     }
@@ -169,6 +190,26 @@ class _TransactionsPageState extends State<TransactionsPage> {
     _applyFilters();
   }
 
+  void _setTypeFilter(_TypeFilter filter) {
+    setState(() {
+      switch (filter) {
+        case _TypeFilter.all:
+          _filterType = null;
+          break;
+        case _TypeFilter.income:
+          _filterType = TransactionType.income;
+          break;
+        case _TypeFilter.expense:
+          _filterType = TransactionType.expense;
+          break;
+        case _TypeFilter.transfer:
+          _filterType = TransactionType.transfer;
+          break;
+      }
+    });
+    _applyFilters();
+  }
+
   void _toggleSearch() {
     setState(() {
       _searchActive = !_searchActive;
@@ -177,8 +218,8 @@ class _TransactionsPageState extends State<TransactionsPage> {
         _searchController.clear();
         _applyFilters();
       } else {
-        SchedulerBinding.instance.addPostFrameCallback(
-            (_) => _searchFocus.requestFocus());
+        SchedulerBinding.instance
+            .addPostFrameCallback((_) => _searchFocus.requestFocus());
       }
     });
   }
@@ -188,6 +229,8 @@ class _TransactionsPageState extends State<TransactionsPage> {
     int count = 0;
     if (_period != _PeriodFilter.thisMonth) count++;
     if (_filterCategoryId != null) count++;
+    if (_filterType != null) count++;
+    if (_minAmountFilter != null || _maxAmountFilter != null) count++;
     if (_searchQuery.trim().isNotEmpty) count++;
     return count;
   }
@@ -206,7 +249,8 @@ class _TransactionsPageState extends State<TransactionsPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Excluir transação'),
-        content: Text('Deseja excluir "${tx.description ?? 'Sem descrição'}"?'),
+        content:
+            Text('Deseja excluir "${tx.description ?? 'Sem descrição'}"?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -268,12 +312,217 @@ class _TransactionsPageState extends State<TransactionsPage> {
         _FilterBadge(
           count: _activeFilterCount,
           child: IconButton(
-            tooltip: 'Filtros ativos',
+            tooltip: 'Filtros',
             icon: const Icon(Icons.filter_list_outlined),
-            onPressed: () {},
+            onPressed: _openFiltersBottomSheet,
           ),
         ),
       ],
+    );
+  }
+
+  void _openFiltersBottomSheet() {
+    final initialPeriod = _period;
+    final initialType = _filterType;
+    final initialMin = _minAmountFilter ?? 0;
+    final initialMax = _maxAmountFilter ?? _maxAmountInData;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) {
+        _PeriodFilter modalPeriod = initialPeriod;
+        TransactionType? modalType = initialType;
+        double modalMin = initialMin;
+        double modalMax = initialMax;
+
+        _TypeFilter typeFromTx(TransactionType? txType) {
+          if (txType == null) return _TypeFilter.all;
+          switch (txType) {
+            case TransactionType.income:
+              return _TypeFilter.income;
+            case TransactionType.expense:
+              return _TypeFilter.expense;
+            case TransactionType.transfer:
+              return _TypeFilter.transfer;
+          }
+        }
+
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final selectedType = typeFromTx(modalType);
+            final hasAmountRange = _maxAmountInData > 0;
+
+            return Padding(
+              padding: EdgeInsets.only(
+                left: AppSpacing.lg,
+                right: AppSpacing.lg,
+                top: AppSpacing.lg,
+                bottom:
+                    MediaQuery.of(context).viewInsets.bottom + AppSpacing.lg,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('Filtros', style: AppText.screenTitle),
+                    const SizedBox(height: AppSpacing.lg),
+                    Text('Período', style: AppText.sectionLabel),
+                    const SizedBox(height: AppSpacing.sm),
+                    Wrap(
+                      spacing: AppSpacing.xs,
+                      runSpacing: AppSpacing.xs,
+                      children: _PeriodFilter.values.map((f) {
+                        final selected = f == modalPeriod;
+                        return ChoiceChip(
+                          label: Text(_periodLabel(f)),
+                          selected: selected,
+                          selectedColor: AppColors.primarySubtle,
+                          labelStyle: TextStyle(
+                            color: selected
+                                ? AppColors.primary
+                                : AppColors.textSecondary,
+                            fontSize: 13,
+                          ),
+                          onSelected: (_) {
+                            setModalState(() => modalPeriod = f);
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                    Text('Tipo', style: AppText.sectionLabel),
+                    const SizedBox(height: AppSpacing.sm),
+                    Wrap(
+                      spacing: AppSpacing.xs,
+                      children: _TypeFilter.values.map((t) {
+                        final selected = t == selectedType;
+                        final label = switch (t) {
+                          _TypeFilter.all => 'Todos',
+                          _TypeFilter.income => 'Receitas',
+                          _TypeFilter.expense => 'Despesas',
+                          _TypeFilter.transfer => 'Transferências',
+                        };
+                        return ChoiceChip(
+                          label: Text(label),
+                          selected: selected,
+                          selectedColor: AppColors.primarySubtle,
+                          labelStyle: TextStyle(
+                            color: selected
+                                ? AppColors.primary
+                                : AppColors.textSecondary,
+                            fontSize: 13,
+                          ),
+                          onSelected: (_) {
+                            setModalState(() {
+                              switch (t) {
+                                case _TypeFilter.all:
+                                  modalType = null;
+                                  break;
+                                case _TypeFilter.income:
+                                  modalType = TransactionType.income;
+                                  break;
+                                case _TypeFilter.expense:
+                                  modalType = TransactionType.expense;
+                                  break;
+                                case _TypeFilter.transfer:
+                                  modalType = TransactionType.transfer;
+                                  break;
+                              }
+                            });
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                    Text('Valor (R\$)', style: AppText.sectionLabel),
+                    const SizedBox(height: AppSpacing.sm),
+                    if (!hasAmountRange)
+                      Text(
+                        'Sem dados suficientes para limitar por valor.',
+                        style: AppText.secondary,
+                      )
+                    else ...[
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Mín: R\$ ${modalMin.toStringAsFixed(0)}',
+                            style: AppText.secondary,
+                          ),
+                          Text(
+                            'Máx: R\$ ${modalMax.toStringAsFixed(0)}',
+                            style: AppText.secondary,
+                          ),
+                        ],
+                      ),
+                      RangeSlider(
+                        values: RangeValues(modalMin, modalMax),
+                        min: 0,
+                        max: _maxAmountInData,
+                        divisions: 20,
+                        labels: RangeLabels(
+                          'R\$ ${modalMin.toStringAsFixed(0)}',
+                          'R\$ ${modalMax.toStringAsFixed(0)}',
+                        ),
+                        onChanged: (values) {
+                          setModalState(() {
+                            modalMin = values.start;
+                            modalMax = values.end;
+                          });
+                        },
+                      ),
+                    ],
+                    const SizedBox(height: AppSpacing.lg),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        TextButton(
+                          onPressed: () {
+                            setState(() {
+                              _period = _PeriodFilter.thisMonth;
+                              _filterType = null;
+                              _filterCategoryId = null;
+                              _minAmountFilter = null;
+                              _maxAmountFilter = null;
+                            });
+                            _applyFilters();
+                            Navigator.of(context).pop();
+                          },
+                          child: const Text('Limpar tudo'),
+                        ),
+                        ElevatedButton(
+                          onPressed: () {
+                            setState(() {
+                              _period = modalPeriod;
+                              _filterType = modalType;
+                              if (hasAmountRange) {
+                                _minAmountFilter =
+                                    modalMin <= 0 ? null : modalMin;
+                                _maxAmountFilter =
+                                    modalMax >= _maxAmountInData
+                                        ? null
+                                        : modalMax;
+                              }
+                            });
+                            PreferencesService.instance
+                                .setTransactionsPeriod(_period.key);
+                            _applyFilters();
+                            Navigator.of(context).pop();
+                          },
+                          child: const Text('Aplicar filtros'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -696,6 +945,50 @@ class _TransactionsPageState extends State<TransactionsPage> {
 
   // ── Lista ─────────────────────────────────────────────────────────────────
 
+  List<_TransactionDayGroup> _groupTransactionsByDay(
+      List<TransactionEntity> source) {
+    if (source.isEmpty) return const [];
+    final sorted = [...source]
+      ..sort((a, b) => b.date.compareTo(a.date));
+
+    final groups = <_TransactionDayGroup>[];
+    DateTime? currentDate;
+    List<TransactionEntity> bucket = [];
+
+    for (final tx in sorted) {
+      final d = DateTime(tx.date.year, tx.date.month, tx.date.day);
+      if (currentDate == null || d != currentDate) {
+        if (currentDate != null) {
+          groups.add(_TransactionDayGroup(date: currentDate, items: bucket));
+        }
+        currentDate = d;
+        bucket = [tx];
+      } else {
+        bucket.add(tx);
+      }
+    }
+
+    if (currentDate != null) {
+      groups.add(_TransactionDayGroup(date: currentDate, items: bucket));
+    }
+
+    return groups;
+  }
+
+  String _groupHeaderLabel(DateTime date) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(date.year, date.month, date.day);
+    final diff = target.difference(today).inDays;
+
+    if (diff == 0) return 'Hoje';
+    if (diff == -1) return 'Ontem';
+
+    return '${date.day.toString().padLeft(2, '0')}'
+        '/${date.month.toString().padLeft(2, '0')}'
+        '/${date.year}';
+  }
+
   Widget _buildTransactionList(bool isSimple) {
     if (_filtered.isEmpty) {
       return SliverFillRemaining(
@@ -709,75 +1002,98 @@ class _TransactionsPageState extends State<TransactionsPage> {
       );
     }
 
-    return SliverList(
-      delegate: SliverChildBuilderDelegate(
-        (context, index) {
-          final tx       = _filtered[index];
-          final category = _categoriesById[tx.categoryId];
-          final card =
-              tx.cardId != null ? _cardsById[tx.cardId!] : null;
+    final groups = _groupTransactionsByDay(_filtered);
+    final children = <Widget>[];
+    int animationIndex = 0;
 
-          final isExpense = tx.type == TransactionType.expense;
-          final amountText =
-              '${isExpense ? '-' : '+'} R\$ ${tx.amount.amount.toStringAsFixed(2)}';
+    for (final group in groups) {
+      children.add(
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            AppSpacing.md,
+            AppSpacing.lg,
+            AppSpacing.xs,
+          ),
+          child: Text(
+            _groupHeaderLabel(group.date),
+            style: AppText.sectionLabel,
+          ),
+        ),
+      );
 
-          final dateText =
-              '${tx.date.day.toString().padLeft(2, '0')}'
-              '/${tx.date.month.toString().padLeft(2, '0')}'
-              '/${tx.date.year}';
+      for (final tx in group.items) {
+        final category = _categoriesById[tx.categoryId];
+        final card = tx.cardId != null ? _cardsById[tx.cardId!] : null;
 
-          final subtitleText = isSimple
-              ? dateText
-              : '${category?.name ?? 'Sem categoria'}'
-                ' · ${card != null ? card.name : 'Sem cartão'}'
-                ' · $dateText'
-                '${tx.installmentCount != null ? ' · ${tx.installmentCount}x' : ''}';
+        final isExpense = tx.type == TransactionType.expense;
+        final amountText =
+            '${isExpense ? '-' : '+'} R\$ ${tx.amount.amount.toStringAsFixed(2)}';
 
-          return Column(
-            children: [
-              Dismissible(
-                key: ValueKey(tx.id),
-                direction: DismissDirection.endToStart,
-                confirmDismiss: (_) => _confirmDelete(tx),
-                onDismissed: (_) async {
-                  await _transactionsRepository.remove(tx.id);
-                  await _loadData();
-                  if (!mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text('Transação excluída')),
-                  );
-                },
-                background: Container(
-                  color: AppColors.danger,
-                  alignment: Alignment.centerRight,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.lg),
-                  child: const Icon(Icons.delete_outline,
-                      color: Colors.white),
-                ),
-                child: ListTile(
-                  onTap: () => _openForm(initial: tx),
-                  leading: _CategoryDot(category: category),
-                  title: Text(tx.description ?? 'Sem descrição'),
-                  subtitle: Text(subtitleText),
-                  trailing: Text(
-                    amountText,
-                    style: AppText.body.copyWith(
-                      color: isExpense
-                          ? AppColors.danger
-                          : AppColors.limitLow,
-                      fontWeight: FontWeight.w600,
+        final dateText =
+            '${tx.date.day.toString().padLeft(2, '0')}'
+            '/${tx.date.month.toString().padLeft(2, '0')}'
+            '/${tx.date.year}';
+
+        final subtitleText = isSimple
+            ? dateText
+            : '${category?.name ?? 'Sem categoria'}'
+              ' · ${card != null ? card.name : 'Sem cartão'}'
+              ' · $dateText'
+              '${tx.installmentCount != null ? ' · ${tx.installmentCount}x' : ''}';
+
+        children.add(
+          _StaggeredItem(
+            index: animationIndex++,
+            child: Column(
+              children: [
+                Dismissible(
+                  key: ValueKey(tx.id),
+                  direction: DismissDirection.endToStart,
+                  confirmDismiss: (_) => _confirmDelete(tx),
+                  onDismissed: (_) async {
+                    await _transactionsRepository.remove(tx.id);
+                    await _loadData();
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                          content: Text('Transação excluída')),
+                    );
+                  },
+                  background: Container(
+                    color: AppColors.danger,
+                    alignment: Alignment.centerRight,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.lg),
+                    child: const Icon(Icons.delete_outline,
+                        color: Colors.white),
+                  ),
+                  child: ListTile(
+                    onTap: () => _openForm(initial: tx),
+                    leading: _CategoryDot(category: category),
+                    title: Text(tx.description ?? 'Sem descrição'),
+                    subtitle: Text(subtitleText),
+                    trailing: Text(
+                      amountText,
+                      style: AppText.body.copyWith(
+                        color: isExpense
+                            ? AppColors.danger
+                            : AppColors.limitLow,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ),
-              ),
-              const Divider(height: 1),
-            ],
-          );
-        },
-        childCount: _filtered.length,
-      ),
+                const Divider(height: 1),
+              ],
+            ),
+          ),
+        );
+      }
+    }
+
+    return SliverList(
+      delegate: SliverChildListDelegate(children),
     );
   }
 
@@ -928,6 +1244,61 @@ class _SummaryChip extends StatelessWidget {
               AppText.body.copyWith(fontWeight: FontWeight.w700, color: color),
         ),
       ],
+    );
+  }
+}
+
+class _TransactionDayGroup {
+  const _TransactionDayGroup({
+    required this.date,
+    required this.items,
+  });
+
+  final DateTime date;
+  final List<TransactionEntity> items;
+}
+
+class _StaggeredItem extends StatefulWidget {
+  const _StaggeredItem({
+    required this.index,
+    required this.child,
+  });
+
+  final int index;
+  final Widget child;
+
+  @override
+  State<_StaggeredItem> createState() => _StaggeredItemState();
+}
+
+class _StaggeredItemState extends State<_StaggeredItem> {
+  double _opacity = 0;
+  Offset _offset = const Offset(0, 0.12);
+
+  @override
+  void initState() {
+    super.initState();
+    Future.delayed(Duration(milliseconds: 40 * widget.index), () {
+      if (!mounted) return;
+      setState(() {
+        _opacity = 1;
+        _offset = Offset.zero;
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSlide(
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+      offset: _offset,
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+        opacity: _opacity,
+        child: widget.child,
+      ),
     );
   }
 }

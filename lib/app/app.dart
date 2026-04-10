@@ -23,7 +23,7 @@ class FinMeApp extends StatelessWidget {
           themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
           initialRoute:
               showOnboarding ? AppRouter.onboarding : AppRouter.dashboard,
-          routes: AppRouter.routes,
+          onGenerateRoute: AppRouter.onGenerateRoute,
         );
       },
     );
