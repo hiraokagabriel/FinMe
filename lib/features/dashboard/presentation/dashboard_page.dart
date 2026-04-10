@@ -6,6 +6,7 @@ import '../../../core/analysis/subscription_detector.dart';
 import '../../../core/analysis/subscription_summary.dart';
 import '../../../core/models/app_mode.dart';
 import '../../../core/services/app_mode_controller.dart';
+import '../../../core/services/auth_service.dart';
 import '../../../core/services/profile_service.dart';
 import '../../../core/services/repository_locator.dart';
 import '../../../core/theme/app_theme.dart';
@@ -145,6 +146,7 @@ class _DashboardPageState extends State<DashboardPage> {
       animation: Listenable.merge([
         AppModeController.instance,
         ProfileService.instance,
+        AuthService.instance,
       ]),
       builder: (context, _) {
         final isUltra = AppModeController.instance.mode == AppMode.ultra;
@@ -163,6 +165,7 @@ class _DashboardPageState extends State<DashboardPage> {
               ],
             ),
             actions: [
+              _ProfileAvatarButton(),
               IconButton(
                 tooltip: 'Orçamento',
                 icon: const Icon(Icons.account_balance_wallet_outlined),
@@ -257,7 +260,7 @@ class _DashboardPageState extends State<DashboardPage> {
         icon: Icons.arrow_downward_rounded,
         color: AppColors.danger,
         prefix: '- R\$',
-        invertDelta: true, // despesa menor = positivo
+        invertDelta: true,
         series: expenseSeries,
       ),
       _SummaryCardData(
@@ -272,7 +275,7 @@ class _DashboardPageState extends State<DashboardPage> {
       _SummaryCardData(
         label: 'A vencer',
         value: provisioned,
-        prevValue: null, // sem comparativo para provisionados
+        prevValue: null,
         icon: Icons.schedule_outlined,
         color: AppColors.warning,
         prefix: 'R\$',
@@ -525,6 +528,64 @@ class _DashboardPageState extends State<DashboardPage> {
           ],
         ),
       ],
+    );
+  }
+}
+
+// ── Avatar de perfil no AppBar ─────────────────────────────────────────────
+
+class _ProfileAvatarButton extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final auth = AuthService.instance;
+    final profiles = auth.profilesForActiveLogin;
+    final active = profiles
+        .where((p) => p.id == auth.activeProfileId)
+        .firstOrNull;
+
+    final emoji = active?.avatarEmoji ?? '👤';
+    final name  = active?.name ?? auth.activeUsername ?? '';
+
+    return Tooltip(
+      message: name.isNotEmpty ? name : 'Perfil',
+      child: InkWell(
+        onTap: () => Navigator.of(context).pushNamed(AppRouter.profilePick),
+        borderRadius: BorderRadius.circular(AppRadius.full),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: AppSpacing.xs,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: AppColors.primarySubtle,
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  emoji,
+                  style: const TextStyle(fontSize: 14),
+                ),
+              ),
+              if (name.isNotEmpty) ...[
+                const SizedBox(width: AppSpacing.xs),
+                Text(
+                  name,
+                  style: AppText.secondary.copyWith(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -839,7 +900,6 @@ class _SummaryCardData {
   final Color color;
   final String prefix;
   final List<double> series;
-  /// Se true, delta negativo (queda) é verde — usado em Despesas.
   final bool invertDelta;
 }
 
@@ -849,7 +909,6 @@ class _SummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Calcula delta absoluto vs mês anterior
     final prev = data.prevValue;
     final hasDelta = prev != null && prev != 0;
     final delta = hasDelta ? data.value - prev! : 0.0;
