@@ -5,8 +5,9 @@ class CardEntity {
   final String name;
   final String bankName;
   final CardType type;
-  final int dueDay; // dia de vencimento da fatura
+  final int dueDay;       // dia de vencimento da fatura
   final double? limit;
+  final int? closingDay;  // dia de fechamento da fatura (null → dueDay - 7 dias corridos)
 
   const CardEntity({
     required this.id,
@@ -15,5 +16,6 @@ class CardEntity {
     required this.type,
     required this.dueDay,
     this.limit,
+    this.closingDay,
   });
 }

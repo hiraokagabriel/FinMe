@@ -10,6 +10,7 @@ class CardModel {
   final int typeIndex;
   final int dueDay;
   final double? limit;
+  final int? closingDay; // campo 6 — nullable, retrocompatível
 
   CardModel({
     required this.id,
@@ -18,6 +19,7 @@ class CardModel {
     required this.typeIndex,
     required this.dueDay,
     required this.limit,
+    this.closingDay,
   });
 
   CardEntity toEntity() {
@@ -28,6 +30,7 @@ class CardModel {
       type: CardType.values[typeIndex],
       dueDay: dueDay,
       limit: limit,
+      closingDay: closingDay,
     );
   }
 
@@ -39,6 +42,7 @@ class CardModel {
       typeIndex: entity.type.index,
       dueDay: entity.dueDay,
       limit: entity.limit,
+      closingDay: entity.closingDay,
     );
   }
 }
@@ -54,19 +58,20 @@ class CardModelAdapter extends TypeAdapter<CardModel> {
       for (int i = 0; i < numOfFields; i++) reader.readByte(): reader.read(),
     };
     return CardModel(
-      id: fields[0] as String,
-      name: fields[1] as String,
-      bankName: fields[2] as String,
-      typeIndex: fields[3] as int,
-      dueDay: fields[4] as int,
-      limit: fields[5] as double?,
+      id:         fields[0] as String,
+      name:       fields[1] as String,
+      bankName:   fields[2] as String,
+      typeIndex:  fields[3] as int,
+      dueDay:     fields[4] as int,
+      limit:      fields[5] as double?,
+      closingDay: fields[6] as int?,  // nullable — registros antigos retornam null
     );
   }
 
   @override
   void write(BinaryWriter writer, CardModel obj) {
     writer
-      ..writeByte(6)
+      ..writeByte(7)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -78,6 +83,8 @@ class CardModelAdapter extends TypeAdapter<CardModel> {
       ..writeByte(4)
       ..write(obj.dueDay)
       ..writeByte(5)
-      ..write(obj.limit);
+      ..write(obj.limit)
+      ..writeByte(6)
+      ..write(obj.closingDay);
   }
 }
