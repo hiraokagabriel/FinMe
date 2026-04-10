@@ -10,21 +10,26 @@ import '../../features/transactions/domain/transaction_type.dart';
 import '../../features/transactions/domain/recurrence_rule.dart';
 import '../../features/transactions/domain/payment_method.dart';
 import 'hive_init.dart';
+import 'auth_service.dart';
 import 'profile_service.dart';
 
-/// Seed mínimo para o perfil 'default' — executado apenas se os boxes estiverem vazios.
+/// Seed mínimo para o perfil ativo — executado apenas se os boxes estiverem vazios.
 class DefaultSeedService {
   DefaultSeedService._();
   static final DefaultSeedService instance = DefaultSeedService._();
 
   Future<void> seedIfEmpty() async {
-    final pid = ProfileService.profileDefault;
+    final loginId   = AuthService.instance.activeLoginId!;
+    final profileId = ProfileService.instance.activeProfileId;
 
-    // openBox é idempotente: retorna o box aberto se já existir.
-    final catBox = await Hive.openBox<CategoryModel>(ProfileService.boxName(HiveInit.categoriesBoxName, pid));
-    final cdBox  = await Hive.openBox<CardModel>(ProfileService.boxName(HiveInit.cardsBoxName, pid));
-    final acBox  = await Hive.openBox<AccountModel>(ProfileService.boxName(HiveInit.accountsBoxName, pid));
-    final txBox  = await Hive.openBox<TransactionModel>(ProfileService.boxName(HiveInit.transactionsBoxName, pid));
+    final catBox = await Hive.openBox<CategoryModel>(
+        ProfileService.boxName(HiveInit.categoriesBoxName, loginId, profileId));
+    final cdBox  = await Hive.openBox<CardModel>(
+        ProfileService.boxName(HiveInit.cardsBoxName, loginId, profileId));
+    final acBox  = await Hive.openBox<AccountModel>(
+        ProfileService.boxName(HiveInit.accountsBoxName, loginId, profileId));
+    final txBox  = await Hive.openBox<TransactionModel>(
+        ProfileService.boxName(HiveInit.transactionsBoxName, loginId, profileId));
 
     if (catBox.isEmpty) {
       final seedCategories = [

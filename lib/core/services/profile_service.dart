@@ -7,12 +7,12 @@ import '../../features/cards/data/card_model.dart';
 import '../../features/accounts/data/account_model.dart';
 import 'hive_init.dart';
 import 'repository_locator.dart';
+import 'auth_service.dart';
 
 class ProfileService extends ChangeNotifier {
   ProfileService._();
   static final ProfileService instance = ProfileService._();
 
-  static const _kActiveProfile = 'activeProfile';
   static const String profileDefault = 'default';
   static const String profileDemo    = 'demo';
 
@@ -20,38 +20,38 @@ class ProfileService extends ChangeNotifier {
   String get activeProfileId => _activeProfileId;
   bool get isDemoActive => _activeProfileId == profileDemo;
 
+  /// Monta o nome do box com namespace loginId + profileId.
+  static String boxName(String base, String loginId, String profileId) =>
+      '${base}_${loginId}_$profileId';
+
+  /// Carregado após AuthService. Abre os boxes do perfil ativo e inicializa repositórios.
   Future<void> loadFromStorage() async {
-    final box = Hive.box<String>(HiveInit.settingsBoxName);
-    _activeProfileId = box.get(_kActiveProfile) ?? profileDefault;
-    await _openBoxesForProfile(_activeProfileId);
-    RepositoryLocator.instance.reinit(_activeProfileId);
+    final loginId = AuthService.instance.activeLoginId!
+        // fallback para usuários migrados sem login real
+        ;
+    final storedProfileId = AuthService.instance.activeProfileId ?? profileDefault;
+    _activeProfileId = storedProfileId;
+    await _openBoxesForProfile(loginId, storedProfileId);
+    RepositoryLocator.instance.reinit(loginId, storedProfileId);
   }
 
-  Future<void> switchTo(String targetProfileId) async {
+  Future<void> switchTo(String loginId, String targetProfileId) async {
     if (_activeProfileId == targetProfileId) return;
 
-    final box = Hive.box<String>(HiveInit.settingsBoxName);
-    await box.put(_kActiveProfile, targetProfileId);
-
-    await _closeProfileBoxes(_activeProfileId);
-
+    await _closeProfileBoxes(loginId, _activeProfileId);
     _activeProfileId = targetProfileId;
-
-    await _openBoxesForProfile(targetProfileId);
-    RepositoryLocator.instance.reinit(targetProfileId);
-
+    await _openBoxesForProfile(loginId, targetProfileId);
+    RepositoryLocator.instance.reinit(loginId, targetProfileId);
     notifyListeners();
   }
 
-  static String boxName(String base, String profileId) => '${base}_$profileId';
-
-  Future<void> _openBoxesForProfile(String profileId) async {
-    final tx = boxName(HiveInit.transactionsBoxName, profileId);
-    final ca = boxName(HiveInit.categoriesBoxName,   profileId);
-    final cd = boxName(HiveInit.cardsBoxName,        profileId);
-    final go = boxName(HiveInit.goalsBoxName,        profileId);
-    final ac = boxName(HiveInit.accountsBoxName,     profileId);
-    final bu = boxName(HiveInit.budgetsBoxName,      profileId);
+  Future<void> _openBoxesForProfile(String loginId, String profileId) async {
+    final tx = boxName(HiveInit.transactionsBoxName, loginId, profileId);
+    final ca = boxName(HiveInit.categoriesBoxName,   loginId, profileId);
+    final cd = boxName(HiveInit.cardsBoxName,        loginId, profileId);
+    final go = boxName(HiveInit.goalsBoxName,        loginId, profileId);
+    final ac = boxName(HiveInit.accountsBoxName,     loginId, profileId);
+    final bu = boxName(HiveInit.budgetsBoxName,      loginId, profileId);
 
     if (!Hive.isBoxOpen(tx)) await Hive.openBox<TransactionModel>(tx);
     if (!Hive.isBoxOpen(ca)) await Hive.openBox<CategoryModel>(ca);
@@ -61,15 +61,13 @@ class ProfileService extends ChangeNotifier {
     if (!Hive.isBoxOpen(bu)) await Hive.openBox(bu);
   }
 
-  Future<void> _closeProfileBoxes(String profileId) async {
-    // Fecha cada box usando o mesmo tipo genérico com que foi aberto.
-    // Hive rejeita acesso sem tipo a boxes tipados.
-    final tx = boxName(HiveInit.transactionsBoxName, profileId);
-    final ca = boxName(HiveInit.categoriesBoxName,   profileId);
-    final cd = boxName(HiveInit.cardsBoxName,        profileId);
-    final go = boxName(HiveInit.goalsBoxName,        profileId);
-    final ac = boxName(HiveInit.accountsBoxName,     profileId);
-    final bu = boxName(HiveInit.budgetsBoxName,      profileId);
+  Future<void> _closeProfileBoxes(String loginId, String profileId) async {
+    final tx = boxName(HiveInit.transactionsBoxName, loginId, profileId);
+    final ca = boxName(HiveInit.categoriesBoxName,   loginId, profileId);
+    final cd = boxName(HiveInit.cardsBoxName,        loginId, profileId);
+    final go = boxName(HiveInit.goalsBoxName,        loginId, profileId);
+    final ac = boxName(HiveInit.accountsBoxName,     loginId, profileId);
+    final bu = boxName(HiveInit.budgetsBoxName,      loginId, profileId);
 
     if (Hive.isBoxOpen(tx)) await Hive.box<TransactionModel>(tx).close();
     if (Hive.isBoxOpen(ca)) await Hive.box<CategoryModel>(ca).close();

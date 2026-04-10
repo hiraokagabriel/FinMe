@@ -19,7 +19,6 @@ import 'profile_service.dart';
 
 class RepositoryLocator {
   RepositoryLocator._();
-
   static final RepositoryLocator instance = RepositoryLocator._();
 
   TransactionsRepository? _transactions;
@@ -37,28 +36,28 @@ class RepositoryLocator {
   BudgetRepository       get budgets      => _budgets!;
 
   /// Chamado pelo ProfileService após abrir os boxes do perfil ativo.
-  void reinit(String profileId) {
+  void reinit(String loginId, String profileId) {
     _transactions = HiveTransactionsRepository(
       Hive.box<TransactionModel>(
-          ProfileService.boxName(HiveInit.transactionsBoxName, profileId)),
+          ProfileService.boxName(HiveInit.transactionsBoxName, loginId, profileId)),
     );
     _categories = HiveCategoriesRepository(
       Hive.box<CategoryModel>(
-          ProfileService.boxName(HiveInit.categoriesBoxName, profileId)),
+          ProfileService.boxName(HiveInit.categoriesBoxName, loginId, profileId)),
     );
     _cards = HiveCardsRepository(
       Hive.box<CardModel>(
-          ProfileService.boxName(HiveInit.cardsBoxName, profileId)),
+          ProfileService.boxName(HiveInit.cardsBoxName, loginId, profileId)),
     );
     _goals = GoalsRepository(
-      Hive.box(ProfileService.boxName(HiveInit.goalsBoxName, profileId)),
+      Hive.box(ProfileService.boxName(HiveInit.goalsBoxName, loginId, profileId)),
     );
     _accounts = HiveAccountsRepository(
       Hive.box<AccountModel>(
-          ProfileService.boxName(HiveInit.accountsBoxName, profileId)),
+          ProfileService.boxName(HiveInit.accountsBoxName, loginId, profileId)),
     );
     _budgets = BudgetRepository(
-      Hive.box(ProfileService.boxName(HiveInit.budgetsBoxName, profileId)),
+      Hive.box(ProfileService.boxName(HiveInit.budgetsBoxName, loginId, profileId)),
     );
   }
 }
