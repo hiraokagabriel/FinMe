@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import '../domain/card_entity.dart';
 import '../domain/statement_cycle.dart';
@@ -9,6 +8,28 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/app_empty_state.dart';
 import '../../transactions/domain/transaction_entity.dart';
 import '../../categories/domain/category_entity.dart';
+
+// ── helpers de formato (sem intl) ───────────────────────────────────────────
+
+const _months = [
+  'jan', 'fev', 'mar', 'abr', 'mai', 'jun',
+  'jul', 'ago', 'set', 'out', 'nov', 'dez',
+];
+
+String _fmtDayMonth(DateTime d) =>
+    '${d.day.toString().padLeft(2, '0')}/${_months[d.month - 1]}';
+
+String _fmtDayMonthNum(DateTime d) =>
+    '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}';
+
+String _fmtMonthYear(DateTime d) =>
+    '${_months[d.month - 1].substring(0, 1).toUpperCase()}'
+    '${_months[d.month - 1].substring(1)} ${d.year}';
+
+String _fmtMonthYearShort(DateTime d) =>
+    '${_months[d.month - 1]}/${d.year}';
+
+// ── Page ────────────────────────────────────────────────────────────────────
 
 class CardStatementsPage extends StatefulWidget {
   const CardStatementsPage({super.key, required this.card});
@@ -67,11 +88,9 @@ class _CardStatementsPageState extends State<CardStatementsPage> {
       transactions,
       count: 6,
     );
-    setState(() {
-      _cycles = updated;
-    });
+    setState(() => _cycles = updated);
     if (!mounted) return;
-    final label = DateFormat('MMM/yyyy', 'pt_BR').format(cycle.cycleEnd);
+    final label = _fmtMonthYearShort(cycle.cycleEnd);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -148,7 +167,7 @@ class _CardStatementsPageState extends State<CardStatementsPage> {
   }
 }
 
-// ── _CyclePicker ──────────────────────────────────────────────────────────
+// ── _CyclePicker ─────────────────────────────────────────────────────────
 
 class _CyclePicker extends StatelessWidget {
   const _CyclePicker({
@@ -163,8 +182,7 @@ class _CyclePicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cycle = cycles[selectedIndex];
-    final label = DateFormat('MMM yyyy', 'pt_BR').format(cycle.cycleEnd);
+    final label = _fmtMonthYear(cycles[selectedIndex].cycleEnd);
     final canGoBack = selectedIndex < cycles.length - 1;
     final canGoForward = selectedIndex > 0;
 
@@ -195,7 +213,7 @@ class _CyclePicker extends StatelessWidget {
   }
 }
 
-// ── _CycleHeader ──────────────────────────────────────────────────────────
+// ── _CycleHeader ─────────────────────────────────────────────────────────
 
 class _CycleHeader extends StatelessWidget {
   const _CycleHeader({required this.cycle});
@@ -203,19 +221,18 @@ class _CycleHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fmt = DateFormat('dd/MMM', 'pt_BR');
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final dueDay =
-        DateTime(cycle.dueDate.year, cycle.dueDate.month, cycle.dueDate.day);
+    final dueDay = DateTime(
+        cycle.dueDate.year, cycle.dueDate.month, cycle.dueDate.day);
     final isOverdue = !cycle.isPaid && dueDay.isBefore(today);
 
     final (badgeLabel, badgeColor) = switch (true) {
-      _ when cycle.isPaid        => ('Paga', AppColors.limitLow),
-      _ when isOverdue           => ('Vencida', AppColors.danger),
+      _ when cycle.isPaid         => ('Paga', AppColors.limitLow),
+      _ when isOverdue            => ('Vencida', AppColors.danger),
       _ when cycle.isClosingToday => ('Fecha hoje', AppColors.warning),
-      _ when cycle.isOpen        => ('Aberta', AppColors.primary),
-      _                          => ('Pendente', AppColors.warning),
+      _ when cycle.isOpen         => ('Aberta', AppColors.primary),
+      _                           => ('Pendente', AppColors.warning),
     };
 
     return Padding(
@@ -228,14 +245,14 @@ class _CycleHeader extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${fmt.format(cycle.cycleStart)} → ${fmt.format(cycle.cycleEnd)}',
+                  '${_fmtDayMonth(cycle.cycleStart)} → ${_fmtDayMonth(cycle.cycleEnd)}',
                   style: AppText.body.copyWith(
                     color: Theme.of(context).colorScheme.onSurface,
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Venc. ${fmt.format(cycle.dueDate)}',
+                  'Venc. ${_fmtDayMonth(cycle.dueDate)}',
                   style: AppText.secondary.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
@@ -261,7 +278,7 @@ class _CycleHeader extends StatelessWidget {
   }
 }
 
-// ── _TransactionTile ───────────────────────────────────────────────────────
+// ── _TransactionTile ──────────────────────────────────────────────────────
 
 class _TransactionTile extends StatelessWidget {
   const _TransactionTile({required this.tx, this.category});
@@ -270,13 +287,10 @@ class _TransactionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fmt = DateFormat('dd/MM', 'pt_BR');
     final isProvisioned = tx.isProvisioned;
-    final iconWidget = category != null
-        ? Text(
-            String.fromCharCode(category!.iconCodePoint),
-            style: const TextStyle(fontSize: 20),
-          )
+    final cp = category?.iconCodePoint;
+    final iconWidget = cp != null
+        ? Text(String.fromCharCode(cp), style: const TextStyle(fontSize: 20))
         : const Icon(Icons.label_outline, size: 20);
 
     return Padding(
@@ -291,7 +305,7 @@ class _TransactionTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  tx.description,
+                  tx.description ?? 'Sem descrição',
                   style: AppText.body.copyWith(
                     color: Theme.of(context).colorScheme.onSurface,
                     fontStyle: isProvisioned
@@ -300,7 +314,7 @@ class _TransactionTile extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  fmt.format(tx.date),
+                  _fmtDayMonthNum(tx.date),
                   style: AppText.secondary.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
@@ -331,7 +345,7 @@ class _TransactionTile extends StatelessWidget {
   }
 }
 
-// ── _CycleFooter ────────────────────────────────────────────────────────
+// ── _CycleFooter ──────────────────────────────────────────────────────────
 
 class _CycleFooter extends StatelessWidget {
   const _CycleFooter({
@@ -348,7 +362,7 @@ class _CycleFooter extends StatelessWidget {
     final today = DateTime(now.year, now.month, now.day);
     final endDay = DateTime(
         cycle.cycleEnd.year, cycle.cycleEnd.month, cycle.cycleEnd.day);
-    final isPartial = endDay.isAfter(today) || endDay == today;
+    final isPartial = !endDay.isBefore(today);
     final cs = Theme.of(context).colorScheme;
 
     return Container(
@@ -358,8 +372,7 @@ class _CycleFooter extends StatelessWidget {
         color: cs.surface,
         border: Border(
           top: BorderSide(
-            color:
-                Theme.of(context).dividerTheme.color ?? AppColors.divider,
+            color: Theme.of(context).dividerTheme.color ?? AppColors.divider,
           ),
         ),
       ),
