@@ -1,5 +1,6 @@
+import 'package:hive/hive.dart';
+
 import '../../../core/models/money.dart';
-import '../../../core/services/preferences_service.dart';
 import '../../../core/services/repository_locator.dart';
 import '../../cards/domain/card_entity.dart';
 import '../../transactions/domain/transaction_entity.dart';
@@ -12,20 +13,19 @@ class PaymentHubService {
   PaymentHubService._();
   static final PaymentHubService instance = PaymentHubService._();
 
+  static const _kBoxName    = 'preferences';
   static const _kWindowDays = 'paymentWindowDays';
 
-  // ─── Janela ───────────────────────────────────────────────────────
+  Box<String> get _box => Hive.box<String>(_kBoxName);
 
-  int get windowDays {
-    final raw = PreferencesService.instance.box.get(_kWindowDays);
-    return int.tryParse(raw ?? '') ?? 7;
-  }
+  // ─── Janela ─────────────────────────────────────────────────
 
-  Future<void> setWindowDays(int days) async {
-    await PreferencesService.instance.box.put(_kWindowDays, days.toString());
-  }
+  int get windowDays => int.tryParse(_box.get(_kWindowDays) ?? '') ?? 7;
 
-  // ─── Cálculo de datas ─────────────────────────────────────────────
+  Future<void> setWindowDays(int days) =>
+      _box.put(_kWindowDays, days.toString());
+
+  // ─── Cálculo de datas ──────────────────────────────────────────
 
   DateTime _nextDueDate(int dueDay) {
     final now   = DateTime.now();
@@ -41,17 +41,15 @@ class PaymentHubService {
     final due = _nextDueDate(card.dueDay);
     if (card.closingDay != null) {
       var closing = DateTime(due.year, due.month, card.closingDay!);
-      // se closingDay > dueDay, o fechamento ocorreu no mês anterior
       if (closing.isAfter(due)) {
         closing = DateTime(due.year, due.month - 1, card.closingDay!);
       }
       return closing;
     }
-    // fallback: 7 dias corridos antes do vencimento
     return due.subtract(const Duration(days: 7));
   }
 
-  // ─── Valor estimado da fatura ─────────────────────────────────────
+  // ─── Valor estimado da fatura ───────────────────────────────────
 
   double _billAmount(
     CardEntity card,
@@ -75,15 +73,12 @@ class PaymentHubService {
         .fold(0.0, (sum, tx) => sum + tx.amount.amount);
   }
 
-  // ─── Carregamento ─────────────────────────────────────────────────
+  // ─── Carregamento ─────────────────────────────────────────────
 
   Future<List<PaymentItem>> load() async {
     final locator = RepositoryLocator.instance;
-    final today   = DateTime(
-      DateTime.now().year,
-      DateTime.now().month,
-      DateTime.now().day,
-    );
+    final now     = DateTime.now();
+    final today   = DateTime(now.year, now.month, now.day);
     final windowEnd = today.add(Duration(days: windowDays - 1));
 
     final allTx    = await locator.transactions.getAll();
@@ -91,28 +86,25 @@ class PaymentHubService {
 
     final items = <PaymentItem>[];
 
-    // — Faturas de cartão de crédito —
+    // Faturas de cartão de crédito (typeIndex == 0)
     for (final card in allCards.where((c) => c.type.index == 0)) {
       final dueDate     = _nextDueDate(card.dueDay);
       final closingDate = _closingDateFor(card);
-
       if (dueDate.isAfter(windowEnd)) continue;
-
-      final amount = _billAmount(card, allTx, closingDate);
 
       items.add(PaymentItem(
         id:          'bill_${card.id}',
         type:        PaymentItemType.cardBill,
         label:       'Fatura ${card.name}',
         cardId:      card.id,
-        amount:      amount,
+        amount:      _billAmount(card, allTx, closingDate),
         dueDate:     dueDate,
         closingDate: closingDate,
         isPaid:      false,
       ));
     }
 
-    // — Transações provisionadas —
+    // Transações provisionadas
     for (final tx in allTx.where((t) => t.isProvisioned)) {
       final due = tx.provisionedDueDate;
       if (due == null) continue;
@@ -133,7 +125,7 @@ class PaymentHubService {
     return items;
   }
 
-  // ─── Marcar como pago ─────────────────────────────────────────────
+  // ─── Marcar como pago ──────────────────────────────────────────
 
   Future<void> markAsPaid(PaymentItem item) async {
     final locator = RepositoryLocator.instance;
@@ -142,62 +134,55 @@ class PaymentHubService {
     if (item.type == PaymentItemType.provisioned) {
       final txId = item.transactionId;
       if (txId == null) return;
+      final allTx  = await locator.transactions.getAll();
+      final source = allTx.where((t) => t.id == txId).firstOrNull;
+      if (source == null) return;
 
-      final allTx = await locator.transactions.getAll();
-      final original = allTx.where((t) => t.id == txId).firstOrNull;
-      if (original == null) return;
-
-      // evita duplicata
       final alreadyPaid = allTx.any(
         (t) =>
             !t.isProvisioned &&
-            t.recurrenceSourceId == original.id &&
-            t.date.year == now.year &&
+            t.recurrenceSourceId == source.id &&
+            t.date.year  == now.year &&
             t.date.month == now.month,
       );
       if (alreadyPaid) return;
 
-      final paid = TransactionEntity(
-        id:               DateTime.now().microsecondsSinceEpoch.toString(),
-        amount:           original.amount,
-        date:             now,
-        type:             original.type,
-        paymentMethod:    original.paymentMethod,
-        description:      original.description,
-        categoryId:       original.categoryId,
-        cardId:           original.cardId,
-        accountId:        original.accountId,
-        toAccountId:      original.toAccountId,
-        isBoleto:         original.isBoleto,
-        isProvisioned:    false,
-        recurrenceRule:   RecurrenceRule.none,
-        recurrenceSourceId: original.id,
-        notes:            original.notes,
-      );
-
-      await locator.transactions.add(paid);
+      await locator.transactions.add(TransactionEntity(
+        id:                DateTime.now().microsecondsSinceEpoch.toString(),
+        amount:            source.amount,
+        date:              now,
+        type:              source.type,
+        paymentMethod:     source.paymentMethod,
+        description:       source.description,
+        categoryId:        source.categoryId,
+        cardId:            source.cardId,
+        accountId:         source.accountId,
+        toAccountId:       source.toAccountId,
+        isBoleto:          source.isBoleto,
+        isProvisioned:     false,
+        recurrenceRule:    RecurrenceRule.none,
+        recurrenceSourceId: source.id,
+        notes:             source.notes,
+      ));
       await locator.transactions.remove(txId);
       return;
     }
 
-    // cardBill — cria transação de despesa
     if (item.type == PaymentItemType.cardBill) {
       final cardId = item.cardId;
       if (cardId == null) return;
-
-      // idempotência: verifica se já existe transação de fatura no mês
       final allTx = await locator.transactions.getAll();
       final alreadyPaid = allTx.any(
         (t) =>
-            t.cardId == cardId &&
+            t.cardId      == cardId &&
             t.description == item.label &&
             !t.isProvisioned &&
-            t.date.year == now.year &&
+            t.date.year  == now.year &&
             t.date.month == now.month,
       );
       if (alreadyPaid) return;
 
-      final bill = TransactionEntity(
+      await locator.transactions.add(TransactionEntity(
         id:            DateTime.now().microsecondsSinceEpoch.toString(),
         amount:        Money(item.amount),
         date:          now,
@@ -208,9 +193,7 @@ class PaymentHubService {
         isBoleto:      false,
         isProvisioned: false,
         recurrenceRule: RecurrenceRule.none,
-      );
-
-      await locator.transactions.add(bill);
+      ));
     }
   }
 }
