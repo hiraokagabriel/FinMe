@@ -12,6 +12,7 @@ import '../features/onboarding/presentation/onboarding_page.dart';
 import '../features/budget/presentation/budget_page.dart';
 import '../features/auth/presentation/login_page.dart';
 import '../features/auth/presentation/profile_picker_page.dart';
+import '../features/payment_hub/presentation/payment_hub_page.dart';
 
 class AppRouter {
   static const String onboarding   = '/onboarding';
@@ -26,6 +27,7 @@ class AppRouter {
   static const String accounts     = '/accounts';
   static const String transfer     = '/transfer';
   static const String budget       = '/budget';
+  static const String paymentHub   = '/payment-hub';
 
   static final Map<String, WidgetBuilder> routes = {
     onboarding:   (context) => const OnboardingPage(),
@@ -40,6 +42,7 @@ class AppRouter {
     accounts:     (context) => const AccountsPage(),
     transfer:     (context) => const TransferPage(),
     budget:       (context) => const BudgetPage(),
+    paymentHub:   (context) => const PaymentHubPage(),
   };
 
   static Route<dynamic> onGenerateRoute(RouteSettings settings) {
