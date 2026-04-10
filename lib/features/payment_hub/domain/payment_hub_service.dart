@@ -18,67 +18,61 @@ class PaymentHubService {
 
   Box<String> get _box => Hive.box<String>(_kBoxName);
 
-  // ─── Janela ─────────────────────────────────────────────────
+  // ─── Janela ──────────────────────────────────────────────────
 
   int get windowDays => int.tryParse(_box.get(_kWindowDays) ?? '') ?? 7;
 
   Future<void> setWindowDays(int days) =>
       _box.put(_kWindowDays, days.toString());
 
-  // ─── Cálculo de datas ──────────────────────────────────────────
+  // ─── Cálculo de datas ────────────────────────────────────────
 
-  DateTime _nextDueDate(int dueDay) {
-    final now   = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    var candidate = DateTime(today.year, today.month, dueDay);
-    if (!candidate.isAfter(today)) {
-      candidate = DateTime(today.year, today.month + 1, dueDay);
-    }
-    return candidate;
+  /// Retorna o próximo vencimento a partir de [from] (inclusive).
+  DateTime _nextDueDateFrom(int dueDay, DateTime from) {
+    final base = DateTime(from.year, from.month, dueDay);
+    if (!base.isBefore(from)) return base;
+    return DateTime(from.year, from.month + 1, dueDay);
   }
 
-  DateTime _closingDateFor(CardEntity card) {
-    final due = _nextDueDate(card.dueDay);
+  /// Fecha dia anterior ao vencimento no mesmo mês (ou mês anterior se
+  /// closingDay > dueDay).
+  DateTime _closingFor(CardEntity card, DateTime dueDate) {
     if (card.closingDay != null) {
-      var closing = DateTime(due.year, due.month, card.closingDay!);
-      if (closing.isAfter(due)) {
-        closing = DateTime(due.year, due.month - 1, card.closingDay!);
+      var closing = DateTime(dueDate.year, dueDate.month, card.closingDay!);
+      if (closing.isAfter(dueDate)) {
+        closing = DateTime(dueDate.year, dueDate.month - 1, card.closingDay!);
       }
       return closing;
     }
-    return due.subtract(const Duration(days: 7));
+    return dueDate.subtract(const Duration(days: 7));
   }
 
-  // ─── Valor estimado da fatura ───────────────────────────────────
+  // ─── Valor estimado da fatura ────────────────────────────────
 
   double _billAmount(
     CardEntity card,
     List<TransactionEntity> allTx,
-    DateTime closingDate,
+    DateTime cycleStart,
+    DateTime cycleEnd,
   ) {
-    final prevClosing = DateTime(
-      closingDate.year,
-      closingDate.month - 1,
-      closingDate.day,
-    );
     return allTx
         .where(
           (tx) =>
               tx.cardId == card.id &&
               tx.type == TransactionType.expense &&
               !tx.isProvisioned &&
-              !tx.date.isBefore(prevClosing) &&
-              tx.date.isBefore(closingDate),
+              !tx.date.isBefore(cycleStart) &&
+              tx.date.isBefore(cycleEnd),
         )
         .fold(0.0, (sum, tx) => sum + tx.amount.amount);
   }
 
-  // ─── Carregamento ─────────────────────────────────────────────
+  // ─── Carregamento ────────────────────────────────────────────
 
   Future<List<PaymentItem>> load() async {
     final locator = RepositoryLocator.instance;
-    final now     = DateTime.now();
-    final today   = DateTime(now.year, now.month, now.day);
+    final now       = DateTime.now();
+    final today     = DateTime(now.year, now.month, now.day);
     final windowEnd = today.add(Duration(days: windowDays - 1));
 
     final allTx    = await locator.transactions.getAll();
@@ -86,25 +80,57 @@ class PaymentHubService {
 
     final items = <PaymentItem>[];
 
-    // Faturas de cartão de crédito (typeIndex == 0)
+    // ── Faturas de cartão de crédito ──────────────────────────
     for (final card in allCards.where((c) => c.type.index == 0)) {
-      final dueDate     = _nextDueDate(card.dueDay);
-      final closingDate = _closingDateFor(card);
-      if (dueDate.isAfter(windowEnd)) continue;
+      // Itera nos próximos dois ciclos para cobrir o caso em que a
+      // closingDate do ciclo corrente já passou mas o dueDate ainda não.
+      DateTime searchFrom = today;
 
-      items.add(PaymentItem(
-        id:          'bill_${card.id}',
-        type:        PaymentItemType.cardBill,
-        label:       'Fatura ${card.name}',
-        cardId:      card.id,
-        amount:      _billAmount(card, allTx, closingDate),
-        dueDate:     dueDate,
-        closingDate: closingDate,
-        isPaid:      false,
-      ));
+      for (int i = 0; i < 2; i++) {
+        final dueDate     = _nextDueDateFrom(card.dueDay, searchFrom);
+        final closingDate = _closingFor(card, dueDate);
+
+        // Ciclo anterior ao closing atual (início do ciclo)
+        final prevClosing = _closingFor(
+          card,
+          _nextDueDateFrom(card.dueDay,
+              DateTime(closingDate.year, closingDate.month - 1, closingDate.day + 1)),
+        );
+
+        // Inclui a fatura se:
+        //  a) o fechamento ainda não ocorreu e cai dentro da janela, OU
+        //  b) o fechamento já passou mas o vencimento cai dentro da janela
+        final closingInWindow =
+            !closingDate.isBefore(today) && !closingDate.isAfter(windowEnd);
+        final dueInWindow =
+            !dueDate.isBefore(today) && !dueDate.isAfter(windowEnd);
+
+        if (!closingInWindow && !dueInWindow) {
+          // Avança para o próximo ciclo
+          searchFrom = dueDate.add(const Duration(days: 1));
+          continue;
+        }
+
+        // Evita duplicatas se ambos os ciclos passarem no filtro
+        final alreadyAdded = items.any((it) => it.id == 'bill_${card.id}_${dueDate.millisecondsSinceEpoch}');
+        if (alreadyAdded) break;
+
+        items.add(PaymentItem(
+          id:          'bill_${card.id}_${dueDate.millisecondsSinceEpoch}',
+          type:        PaymentItemType.cardBill,
+          label:       'Fatura ${card.name}',
+          cardId:      card.id,
+          amount:      _billAmount(card, allTx, prevClosing, closingDate),
+          dueDate:     dueDate,
+          closingDate: closingDate,
+          isPaid:      false,
+        ));
+
+        searchFrom = dueDate.add(const Duration(days: 1));
+      }
     }
 
-    // Transações provisionadas
+    // ── Transações provisionadas ──────────────────────────────
     for (final tx in allTx.where((t) => t.isProvisioned)) {
       final due = tx.provisionedDueDate;
       if (due == null) continue;
@@ -125,7 +151,7 @@ class PaymentHubService {
     return items;
   }
 
-  // ─── Marcar como pago ──────────────────────────────────────────
+  // ─── Marcar como pago ─────────────────────────────────────────
 
   Future<void> markAsPaid(PaymentItem item) async {
     final locator = RepositoryLocator.instance;
@@ -148,21 +174,21 @@ class PaymentHubService {
       if (alreadyPaid) return;
 
       await locator.transactions.add(TransactionEntity(
-        id:                DateTime.now().microsecondsSinceEpoch.toString(),
-        amount:            source.amount,
-        date:              now,
-        type:              source.type,
-        paymentMethod:     source.paymentMethod,
-        description:       source.description,
-        categoryId:        source.categoryId,
-        cardId:            source.cardId,
-        accountId:         source.accountId,
-        toAccountId:       source.toAccountId,
-        isBoleto:          source.isBoleto,
-        isProvisioned:     false,
-        recurrenceRule:    RecurrenceRule.none,
+        id:                 DateTime.now().microsecondsSinceEpoch.toString(),
+        amount:             source.amount,
+        date:               now,
+        type:               source.type,
+        paymentMethod:      source.paymentMethod,
+        description:        source.description,
+        categoryId:         source.categoryId,
+        cardId:             source.cardId,
+        accountId:          source.accountId,
+        toAccountId:        source.toAccountId,
+        isBoleto:           source.isBoleto,
+        isProvisioned:      false,
+        recurrenceRule:     RecurrenceRule.none,
         recurrenceSourceId: source.id,
-        notes:             source.notes,
+        notes:              source.notes,
       ));
       await locator.transactions.remove(txId);
       return;
