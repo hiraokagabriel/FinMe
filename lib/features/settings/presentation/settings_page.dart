@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../app/router.dart';
 import '../../../core/models/app_mode.dart';
 import '../../../core/services/app_mode_controller.dart';
 import '../../../core/services/auth_service.dart';
@@ -83,20 +84,48 @@ class _SettingsPageState extends State<SettingsPage> {
     final modeController  = AppModeController.instance;
     final themeController = ThemeController.instance;
     final profileService  = ProfileService.instance;
+    final auth            = AuthService.instance;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Configurações')),
       body: AnimatedBuilder(
-        animation: Listenable.merge([modeController, themeController, profileService]),
+        animation: Listenable.merge([modeController, themeController, profileService, auth]),
         builder: (context, _) {
           final isUltra = modeController.mode == AppMode.ultra;
           final isDark  = themeController.isDark;
           final isDemo  = profileService.isDemoActive;
 
+          // Perfil ativo para exibir no tile
+          final profiles      = auth.profilesForActiveLogin;
+          final activeProfile = profiles
+              .where((p) => p.id == auth.activeProfileId)
+              .firstOrNull;
+          final profileLabel = activeProfile != null
+              ? '${activeProfile.avatarEmoji}  ${activeProfile.name}'
+              : auth.activeUsername ?? 'Sem perfil';
+          final profileCount = profiles.length;
+
           return ListView(
             children: [
+              // ── Conta / Perfis ──────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.xs),
+                child: Text('Conta', style: AppText.sectionLabel),
+              ),
+              ListTile(
+                leading: const Icon(Icons.manage_accounts_outlined),
+                title: const Text('Gerenciar perfis'),
+                subtitle: Text(
+                  '$profileLabel  ·  $profileCount perfil${profileCount != 1 ? 'is' : ''}',
+                ),
+                trailing: const Icon(Icons.chevron_right, color: AppColors.textSecondary),
+                onTap: () => Navigator.of(context).pushNamed(AppRouter.profilePick),
+              ),
+              const Divider(height: AppSpacing.h),
+
+              // ── Aparência ─────────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xs),
                 child: Text('Aparência', style: AppText.sectionLabel),
               ),
               SwitchListTile(
@@ -108,6 +137,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const Divider(height: AppSpacing.h),
 
+              // ── Regional ───────────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xs),
                 child: Text('Regional', style: AppText.sectionLabel),
@@ -140,6 +170,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const Divider(height: AppSpacing.h),
 
+              // ── Modo de uso ───────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xs),
                 child: Text('Modo de uso', style: AppText.sectionLabel),
@@ -168,6 +199,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const Divider(height: AppSpacing.h),
 
+              // ── Dados ──────────────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xs),
                 child: Text('Dados', style: AppText.sectionLabel),
@@ -183,6 +215,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const Divider(height: AppSpacing.h),
 
+              // ── Benchmark ──────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xs),
                 child: Text('Benchmark', style: AppText.sectionLabel),
