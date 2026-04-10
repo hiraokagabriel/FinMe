@@ -17,5 +17,20 @@ class StatementCycle {
     required this.isPaid,
   });
 
-  bool get isOpen => cycleEnd.isAfter(DateTime.now());
+  static DateTime _dateOnly(DateTime dt) =>
+      DateTime(dt.year, dt.month, dt.day);
+
+  /// true enquanto o dia de fechamento ainda não chegou
+  bool get isOpen {
+    final today = _dateOnly(DateTime.now());
+    final end = _dateOnly(cycleEnd);
+    return end.isAfter(today);
+  }
+
+  /// true apenas no dia exato do fechamento
+  bool get isClosingToday {
+    final today = _dateOnly(DateTime.now());
+    final end = _dateOnly(cycleEnd);
+    return end == today;
+  }
 }

@@ -1,7 +1,7 @@
 import 'package:hive/hive.dart';
 
-import '../domain/card_entity.dart';
-import '../domain/statement_cycle.dart';
+import 'card_entity.dart';
+import 'statement_cycle.dart';
 import '../../transactions/domain/transaction_entity.dart';
 import '../../transactions/domain/transaction_type.dart';
 
@@ -11,15 +11,15 @@ class StatementService {
 
   static const _box = 'settings';
 
-  // ── Cálculo de ciclos ──────────────────────────────────────────────────────
+  // ── helpers ─────────────────────────────────────────────────────────────
 
-  /// Dia de fechamento efetivo: usa o declarado ou dueDay - 7, clampado em [1, 28].
   int _effectiveClosingDay(CardEntity card) {
     if (card.closingDay != null) return card.closingDay!;
     return (card.dueDay - 7).clamp(1, 28);
   }
 
-  /// Retorna o [StatementCycle] para o mês [year/month] de um cartão.
+  // ── cálculo de ciclo ───────────────────────────────────────────────────────
+
   Future<StatementCycle> cycleForMonth(
     CardEntity card,
     List<TransactionEntity> allTransactions,
@@ -28,19 +28,15 @@ class StatementService {
   ) async {
     final closingDay = _effectiveClosingDay(card);
 
-    // cycleEnd = fechamento deste mês (inclusive)
     final cycleEnd = DateTime(year, month, closingDay);
-
-    // cycleStart = dia seguinte ao fechamento do mês anterior
     final prevClosing = DateTime(year, month - 1, closingDay);
     final cycleStart = prevClosing.add(const Duration(days: 1));
 
-    // vencimento: se closingDay >= dueDay, cai no mês seguinte
+    // vencimento no mês seguinte quando closingDay >= dueDay
     final DateTime dueDate = closingDay >= card.dueDay
         ? DateTime(year, month + 1, card.dueDay)
         : DateTime(year, month, card.dueDay);
 
-    // filtra transações do ciclo
     final txs = allTransactions.where((tx) {
       if (tx.cardId != card.id) return false;
       if (tx.type != TransactionType.expense) return false;
@@ -62,16 +58,26 @@ class StatementService {
     );
   }
 
-  /// Retorna os [count] ciclos mais recentes, do mais novo para o mais antigo.
+  /// Retorna os [count] ciclos mais recentes a partir do ciclo correto para hoje.
+  ///
+  /// Se hoje > closingDay, o ciclo aberto é o do próximo mês (a fatura atual
+  /// já fechou). Caso contrário, o ciclo aberto é o do mês corrente.
   Future<List<StatementCycle>> cyclesForCard(
     CardEntity card,
     List<TransactionEntity> allTransactions, {
-    int count = 4,
+    int count = 6,
   }) async {
     final now = DateTime.now();
+    final closingDay = _effectiveClosingDay(card);
+
+    // Mês de referência do ciclo aberto
+    final refMonth = now.day > closingDay
+        ? DateTime(now.year, now.month + 1, 1)
+        : DateTime(now.year, now.month, 1);
+
     final cycles = <StatementCycle>[];
     for (int i = 0; i < count; i++) {
-      final ref = DateTime(now.year, now.month - i, 1);
+      final ref = DateTime(refMonth.year, refMonth.month - i, 1);
       cycles.add(
         await cycleForMonth(card, allTransactions, ref.year, ref.month),
       );
@@ -79,7 +85,7 @@ class StatementService {
     return cycles;
   }
 
-  // ── Persistência do status pago ────────────────────────────────────────────
+  // ── persistência do status pago ────────────────────────────────────────────
 
   String _key(String cardId, int year, int month) {
     final mm = month.toString().padLeft(2, '0');
@@ -91,7 +97,12 @@ class StatementService {
     return box.get(_key(cardId, year, month), defaultValue: false) as bool;
   }
 
-  Future<void> markPaid(String cardId, int year, int month, {required bool paid}) async {
+  Future<void> markPaid(
+    String cardId,
+    int year,
+    int month, {
+    required bool paid,
+  }) async {
     final box = Hive.box(_box);
     await box.put(_key(cardId, year, month), paid);
   }
