@@ -10,9 +10,13 @@ import '../features/accounts/presentation/accounts_page.dart';
 import '../features/transfer/presentation/transfer_page.dart';
 import '../features/onboarding/presentation/onboarding_page.dart';
 import '../features/budget/presentation/budget_page.dart';
+import '../features/auth/presentation/login_page.dart';
+import '../features/auth/presentation/profile_picker_page.dart';
 
 class AppRouter {
   static const String onboarding   = '/onboarding';
+  static const String login        = '/login';
+  static const String profilePick  = '/profile-pick';
   static const String dashboard    = '/';
   static const String transactions = '/transactions';
   static const String cards        = '/cards';
@@ -25,6 +29,8 @@ class AppRouter {
 
   static final Map<String, WidgetBuilder> routes = {
     onboarding:   (context) => const OnboardingPage(),
+    login:        (context) => const LoginPage(),
+    profilePick:  (context) => const ProfilePickerPage(),
     dashboard:    (context) => const DashboardPage(),
     transactions: (context) => const TransactionsPage(),
     cards:        (context) => const CardsPage(),
@@ -36,7 +42,6 @@ class AppRouter {
     budget:       (context) => const BudgetPage(),
   };
 
-  /// Gera rotas com transição horizontal padrão entre páginas principais.
   static Route<dynamic> onGenerateRoute(RouteSettings settings) {
     final builder = routes[settings.name];
 
@@ -58,7 +63,6 @@ class AppRouter {
         final tween = Tween(begin: begin, end: end).chain(
           CurveTween(curve: Curves.easeOutCubic),
         );
-
         return SlideTransition(
           position: animation.drive(tween),
           child: child,
