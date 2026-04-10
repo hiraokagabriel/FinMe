@@ -26,7 +26,10 @@ FinMe é um app de finanças para pessoas que lidam com **alto volume de cartõe
 - Progresso geral atual:
   - **M1: concluído**.
   - **M2: concluído**.
-  - **M3: parcialmente concluído** — 2 itens restantes (M3-D e M3-E).
+  - **M3: concluído**.
+  - **M4: concluído**.
+  - **M5-A: concluído**.
+  - **M5-B: em planejamento**.
 
 ---
 
@@ -99,7 +102,7 @@ FinMe é um app de finanças para pessoas que lidam com **alto volume de cartõe
 
 **Objetivo:** Entregar experiências distintas de uso, respeitando o nível de complexidade desejado.
 
-**Status:** 🟡 **Parcialmente concluído** — 2 itens pendentes (M3-D e M3-E)
+**Status:** ✅ **Concluído**
 
 ### Funcionalidades entregues ✅
 
@@ -117,13 +120,8 @@ FinMe é um app de finanças para pessoas que lidam com **alto volume de cartõe
 | Múltiplas contas/carteiras (`AccountsPage`, seed, rota `/accounts`) | #48 |
 | Transferência entre contas (`TransferPage`, rota `/transfer`) | #49 |
 | Splash + onboarding com seleção de modo (`OnboardingPage`, flag Hive em `HiveInit`, rota `/onboarding`) | #56+ |
-
-### Itens ainda pendentes 🔲
-
-| # | Feature | Descrição |
-|---|---------|----------|
-| M3-D | **Persistência definitiva de preferências avançadas** | Box `preferences` dedicado com `PreferencesService` — moeda padrão, idioma, formato de data, etc. |
-| M3-E | **Orçamento mensal por categoria** | Tela `BudgetPage`, `BudgetEntity/Model` (typeId 6), alerta quando o usuário ultrapassa o teto definido por categoria |
+| Persistência definitiva de preferências avançadas (`PreferencesService`) | concluído |
+| Orçamento mensal por categoria (`BudgetPage`, `BudgetModel` typeId 6) | concluído |
 
 > Detalhes de implementação em `docs/M3_REPORT.md`.
 
@@ -133,24 +131,14 @@ FinMe é um app de finanças para pessoas que lidam com **alto volume de cartõe
 
 **Objetivo:** Ajudar o usuário a identificar desperdícios e oportunidades de economia.
 
-**Status:** ⏳ **Não iniciado**
+**Status:** ✅ **Concluído**
 
-**Funcionalidades planejadas:**
+**Funcionalidades entregues:**
 
-- Identificação de:
-  - Assinaturas recorrentes (streamings, serviços, etc.).
-  - Anuidades e tarifas de cartões.
-- Relatórios como:
-  - “Gastos recorrentes deste mês” vs meses anteriores.
-  - “Top categorias onde você mais gastou neste período”.
-- Visão de volume de gastos no **débito**:
-  - Para onde está indo o dinheiro do dia a dia.
-  - Sumarização por categoria e por estabelecimento (quando houver).
-
-**Não incluso em M4:**
-
-- Conexão automática com extratos bancários (tudo manual/importado pelo usuário por enquanto).
-- Machine learning avançado.
+- Identificação de assinaturas recorrentes e gastos repetitivos.
+- Relatórios comparativos entre períodos.
+- Visões analíticas para gastos por categoria, cartão e recorrência.
+- Consolidação de indicadores para apoiar revisão de despesas.
 
 ---
 
@@ -158,21 +146,32 @@ FinMe é um app de finanças para pessoas que lidam com **alto volume de cartõe
 
 **Objetivo:** Melhorar a experiência de uso e facilitar a adoção.
 
-**Status:** ⏳ **Não iniciado**
+**Status:** 🟡 **Em andamento**
 
-**Funcionalidades planejadas:**
+### M5-A — Refinamento UX/UI e visualizações iniciais ✅
 
-- Refinamento UX/UI:
-  - Melhorias em layout, ícones, cores, responsividade.
-  - Ajustes específicos para Modo Simples vs Modo Ultra.
+**Status:** ✅ **Concluído**
 
-- Visualizações gráficas:
-  - Gráficos simples de categorias.
-  - Linha de tempo de gastos (por dia/semana/mês).
+**Entregas realizadas:**
 
-- Distribuição:
-  - Empacotar e distribuir um **.exe para Windows**.
-  - Preparar base para builds Android (APK/AAB para testes).
+- Transição de rota com slide horizontal entre páginas.
+- Dashboard com KPIs animados (count-up), sparkline inline por card e toggle de séries no gráfico mensal.
+- TransactionsPage com agrupamento por data e stagger de entrada nos itens.
+- Bottom sheet de filtros com período, tipo e faixa de valor.
+- Tipografia global com Inter.
+- Varredura de espaçamentos padronizando os arquivos tocados com tokens (`AppSpacing`).
+
+### M5-B — Próxima etapa 🔲
+
+**Status:** 🔲 **Pendente / em definição**
+
+**Frentes previstas para refinamento via perguntas e respostas:**
+
+- Ajustes adicionais de UX/UI nas telas restantes.
+- Linha de tempo de gastos por dia/semana/mês.
+- Refinos de responsividade entre Modo Simples e Modo Ultra.
+- Empacotamento `.exe` para Windows.
+- Preparação de builds Android (APK/AAB para testes).
 
 **Não incluso em M5:**
 
