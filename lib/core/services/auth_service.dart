@@ -23,6 +23,12 @@ class AuthService extends ChangeNotifier {
   String? get activeProfileId => _activeProfileId;
   bool    get isAuthenticated => _activeLoginId != null;
 
+  /// Username do login ativo (para exibição na UI)
+  String? get activeUsername {
+    if (_activeLoginId == null) return null;
+    return _loginsBox.get(_activeLoginId)?.username;
+  }
+
   Box<LoginModel>   get _loginsBox   => Hive.box<LoginModel>(HiveInit.loginsBoxName);
   Box<ProfileModel> get _profilesBox => Hive.box<ProfileModel>(HiveInit.profilesBoxName);
 
@@ -31,8 +37,8 @@ class AuthService extends ChangeNotifier {
   // ---------------------------------------------------------------------------
 
   Future<void> loadFromStorage() async {
-    final settings     = Hive.box<String>(HiveInit.settingsBoxName);
-    final storedLogin  = settings.get(_kActiveLogin);
+    final settings      = Hive.box<String>(HiveInit.settingsBoxName);
+    final storedLogin   = settings.get(_kActiveLogin);
     final storedProfile = settings.get(_kActiveProfile);
 
     if (storedLogin != null && _loginsBox.containsKey(storedLogin)) {
@@ -61,17 +67,19 @@ class AuthService extends ChangeNotifier {
         createdAt:    DateTime.now(),
       ),
     );
-    await _createProfileInternal(loginId: id, name: 'Principal', avatarEmoji: '\uD83D\uDC64');
+    await _createProfileInternal(
+        loginId: id, name: 'Principal', avatarEmoji: '\uD83D\uDC64');
     return true;
   }
 
   Future<bool> login(String username, String password) async {
-    final login = _loginsBox.values.where(
-      (l) => l.username.toLowerCase() == username.toLowerCase(),
-    ).firstOrNull;
+    final login = _loginsBox.values
+        .where((l) => l.username.toLowerCase() == username.toLowerCase())
+        .firstOrNull;
     if (login == null) return false;
 
-    final valid = login.passwordHash.isEmpty || login.passwordHash == _hash(password);
+    final valid = login.passwordHash.isEmpty ||
+        login.passwordHash == _hash(password);
     if (!valid) return false;
 
     _activeLoginId = login.id;
@@ -101,8 +109,10 @@ class AuthService extends ChangeNotifier {
   // ---------------------------------------------------------------------------
 
   List<ProfileModel> profilesForLogin(String loginId) =>
-      _profilesBox.values.where((p) => p.loginId == loginId).toList()
-        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      _profilesBox.values
+          .where((p) => p.loginId == loginId)
+          .toList()
+            ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
 
   List<ProfileModel> get profilesForActiveLogin =>
       isAuthenticated ? profilesForLogin(_activeLoginId!) : [];
@@ -115,6 +125,33 @@ class AuthService extends ChangeNotifier {
       name:        name,
       avatarEmoji: avatarEmoji,
     );
+  }
+
+  /// Atualiza nome e/ou emoji de um perfil existente.
+  Future<bool> updateProfile(
+    String profileId, {
+    String? name,
+    String? avatarEmoji,
+  }) async {
+    final key = _profilesBox.keys.firstWhere(
+      (k) => _profilesBox.get(k)?.id == profileId,
+      orElse: () => null,
+    );
+    if (key == null) return false;
+
+    final existing = _profilesBox.get(key)!;
+    await _profilesBox.put(
+      key,
+      ProfileModel(
+        id:          existing.id,
+        loginId:     existing.loginId,
+        name:        name        ?? existing.name,
+        avatarEmoji: avatarEmoji ?? existing.avatarEmoji,
+        createdAt:   existing.createdAt,
+      ),
+    );
+    notifyListeners();
+    return true;
   }
 
   Future<void> switchProfile(String profileId) async {
