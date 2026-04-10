@@ -9,8 +9,6 @@ import '../../../core/widgets/app_empty_state.dart';
 import '../../transactions/domain/transaction_entity.dart';
 import '../../categories/domain/category_entity.dart';
 
-// ── helpers de formato (sem intl) ───────────────────────────────────────────
-
 const _months = [
   'jan', 'fev', 'mar', 'abr', 'mai', 'jun',
   'jul', 'ago', 'set', 'out', 'nov', 'dez',
@@ -29,8 +27,6 @@ String _fmtMonthYear(DateTime d) {
 
 String _fmtMonthYearShort(DateTime d) =>
     '${_months[d.month - 1]}/${d.year}';
-
-// ── Page ────────────────────────────────────────────────────────────────────
 
 class CardStatementsPage extends StatefulWidget {
   const CardStatementsPage({super.key, required this.card});
@@ -68,10 +64,10 @@ class _CardStatementsPageState extends State<CardStatementsPage> {
       );
       if (!mounted) return;
       setState(() {
-        _cycles         = cycles;
-        _categories     = categories;
-        _selectedIndex  = 0;
-        _isLoading      = false;
+        _cycles        = cycles;
+        _categories    = categories;
+        _selectedIndex = 0;
+        _isLoading     = false;
       });
     } catch (e) {
       if (!mounted) return;
@@ -86,13 +82,15 @@ class _CardStatementsPageState extends State<CardStatementsPage> {
 
   Future<void> _togglePaid() async {
     try {
-      final cycle  = _current;
+      final cycle   = _current;
       final newPaid = !cycle.isPaid;
       await _service.markPaid(
         widget.card.id,
         cycle.cycleEnd.year,
         cycle.cycleEnd.month,
-        paid: newPaid,
+        paid:     newPaid,
+        amount:   newPaid ? cycle.total : null,
+        cardName: newPaid ? widget.card.name : null,
       );
       await _loadData();
       if (!mounted) return;
@@ -152,17 +150,14 @@ class _CardStatementsPageState extends State<CardStatementsPage> {
     }
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text('${widget.card.name} — Faturas'),
-      ),
+      appBar: AppBar(title: Text('${widget.card.name} — Faturas')),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _cycles.isEmpty
               ? const AppEmptyState(
                   icon: Icons.receipt_long_outlined,
                   title: 'Sem faturas',
-                  message:
-                      'Ainda não há ciclos de fatura para este cartão.',
+                  message: 'Ainda não há ciclos de fatura para este cartão.',
                 )
               : Column(
                   children: [
@@ -206,8 +201,6 @@ class _CardStatementsPageState extends State<CardStatementsPage> {
   }
 }
 
-// ── _CyclePicker ─────────────────────────────────────────────────────────
-
 class _CyclePicker extends StatelessWidget {
   const _CyclePicker({
     required this.cycles,
@@ -221,8 +214,8 @@ class _CyclePicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label      = _fmtMonthYear(cycles[selectedIndex].cycleEnd);
-    final canGoBack  = selectedIndex < cycles.length - 1;
+    final label       = _fmtMonthYear(cycles[selectedIndex].cycleEnd);
+    final canGoBack   = selectedIndex < cycles.length - 1;
     final canGoForward = selectedIndex > 0;
 
     return Padding(
@@ -243,16 +236,13 @@ class _CyclePicker extends StatelessWidget {
           ),
           IconButton(
             icon: const Icon(Icons.chevron_right),
-            onPressed:
-                canGoForward ? () => onChanged(selectedIndex - 1) : null,
+            onPressed: canGoForward ? () => onChanged(selectedIndex - 1) : null,
           ),
         ],
       ),
     );
   }
 }
-
-// ── _CycleHeader ─────────────────────────────────────────────────────────
 
 class _CycleHeader extends StatelessWidget {
   const _CycleHeader({required this.cycle});
@@ -267,11 +257,11 @@ class _CycleHeader extends StatelessWidget {
     final isOverdue = !cycle.isPaid && dueDay.isBefore(today);
 
     final (badgeLabel, badgeColor) = switch (true) {
-      _ when cycle.isPaid         => ('Paga',        AppColors.limitLow),
-      _ when isOverdue            => ('Vencida',     AppColors.danger),
-      _ when cycle.isClosingToday => ('Fecha hoje',  AppColors.warning),
-      _ when cycle.isOpen         => ('Aberta',      AppColors.primary),
-      _                           => ('Pendente',    AppColors.warning),
+      _ when cycle.isPaid         => ('Paga',       AppColors.limitLow),
+      _ when isOverdue            => ('Vencida',    AppColors.danger),
+      _ when cycle.isClosingToday => ('Fecha hoje', AppColors.warning),
+      _ when cycle.isOpen         => ('Aberta',     AppColors.primary),
+      _                           => ('Pendente',   AppColors.warning),
     };
 
     return Padding(
@@ -317,8 +307,6 @@ class _CycleHeader extends StatelessWidget {
   }
 }
 
-// ── _TransactionTile ──────────────────────────────────────────────────────
-
 class _TransactionTile extends StatelessWidget {
   const _TransactionTile({required this.tx, this.category});
   final TransactionEntity tx;
@@ -329,8 +317,7 @@ class _TransactionTile extends StatelessWidget {
     final isProvisioned = tx.isProvisioned;
     final cp            = category?.iconCodePoint;
     final iconWidget    = cp != null
-        ? Text(String.fromCharCode(cp),
-            style: const TextStyle(fontSize: 20))
+        ? Text(String.fromCharCode(cp), style: const TextStyle(fontSize: 20))
         : const Icon(Icons.label_outline, size: 20);
 
     return Padding(
@@ -356,9 +343,7 @@ class _TransactionTile extends StatelessWidget {
                 Text(
                   _fmtDayMonthNum(tx.date),
                   style: AppText.secondary.copyWith(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .onSurfaceVariant,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ),
               ],
@@ -377,8 +362,7 @@ class _TransactionTile extends StatelessWidget {
             'R\$ ${tx.amount.amount.toStringAsFixed(2)}',
             style: AppText.amount.copyWith(
               color: AppColors.danger,
-              fontStyle:
-                  isProvisioned ? FontStyle.italic : FontStyle.normal,
+              fontStyle: isProvisioned ? FontStyle.italic : FontStyle.normal,
             ),
           ),
         ],
@@ -386,8 +370,6 @@ class _TransactionTile extends StatelessWidget {
     );
   }
 }
-
-// ── _CycleFooter ──────────────────────────────────────────────────────────
 
 class _CycleFooter extends StatelessWidget {
   const _CycleFooter({
@@ -400,9 +382,9 @@ class _CycleFooter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final now     = DateTime.now();
-    final today   = DateTime(now.year, now.month, now.day);
-    final endDay  = DateTime(
+    final now      = DateTime.now();
+    final today    = DateTime(now.year, now.month, now.day);
+    final endDay   = DateTime(
         cycle.cycleEnd.year, cycle.cycleEnd.month, cycle.cycleEnd.day);
     final isPartial = !endDay.isBefore(today);
     final cs = Theme.of(context).colorScheme;
@@ -449,8 +431,7 @@ class _CycleFooter extends StatelessWidget {
                       backgroundColor: AppColors.limitLow,
                       foregroundColor: Colors.white,
                     ),
-                    icon:
-                        const Icon(Icons.check_circle_outline, size: 16),
+                    icon: const Icon(Icons.check_circle_outline, size: 16),
                     label: const Text('Marcar como paga'),
                   ),
           ),

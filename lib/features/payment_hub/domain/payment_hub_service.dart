@@ -1,6 +1,5 @@
 import 'package:hive/hive.dart';
 
-import '../../../core/models/money.dart';
 import '../../../core/services/repository_locator.dart';
 import '../../cards/domain/card_entity.dart';
 import '../../cards/domain/statement_service.dart';
@@ -8,6 +7,7 @@ import '../../transactions/domain/transaction_entity.dart';
 import '../../transactions/domain/transaction_type.dart';
 import '../../transactions/domain/payment_method.dart';
 import '../../transactions/domain/recurrence_rule.dart';
+import '../../../core/models/money.dart';
 import 'payment_item.dart';
 
 class PaymentHubService {
@@ -19,12 +19,8 @@ class PaymentHubService {
 
   Box<String> get _box => Hive.box<String>(_kBoxName);
 
-  // ── Janela ─────────────────────────────────────────────────
-
   int get windowDays => int.tryParse(_box.get(_kWindowDays) ?? '') ?? 7;
   Future<void> setWindowDays(int days) => _box.put(_kWindowDays, days.toString());
-
-  // ── Cálculo de datas ─────────────────────────────────────────
 
   DateTime _nextDueDateFrom(int dueDay, DateTime from) {
     final base = DateTime(from.year, from.month, dueDay);
@@ -54,12 +50,11 @@ class PaymentHubService {
             tx.cardId == card.id &&
             tx.type == TransactionType.expense &&
             !tx.isProvisioned &&
+            !tx.isBillPayment &&
             !tx.date.isBefore(cycleStart) &&
             tx.date.isBefore(cycleEnd))
         .fold(0.0, (sum, tx) => sum + tx.amount.amount);
   }
-
-  // ── Carregamento ────────────────────────────────────────────
 
   Future<List<PaymentItem>> load() async {
     final locator   = RepositoryLocator.instance;
@@ -73,7 +68,6 @@ class PaymentHubService {
 
     final items = <PaymentItem>[];
 
-    // ── Faturas de cartão ────────────────────────────────────
     for (final card in allCards.where((c) => c.type.index == 0)) {
       DateTime searchFrom = today;
 
@@ -99,7 +93,6 @@ class PaymentHubService {
         final itemId = 'bill_${card.id}_${dueDate.millisecondsSinceEpoch}';
         if (items.any((it) => it.id == itemId)) break;
 
-        // Verifica se já foi paga via StatementService
         final isPaid = await stmtSvc.isPaid(
             card.id, closingDate.year, closingDate.month);
 
@@ -120,7 +113,6 @@ class PaymentHubService {
       }
     }
 
-    // ── Transações provisionadas ────────────────────────────
     for (final tx in allTx.where((t) => t.isProvisioned)) {
       final due = tx.provisionedDueDate;
       if (due == null) continue;
@@ -140,8 +132,6 @@ class PaymentHubService {
     items.sort((a, b) => a.dueDate.compareTo(b.dueDate));
     return items;
   }
-
-  // ── Marcar como pago ───────────────────────────────────────
 
   Future<void> markAsPaid(PaymentItem item) async {
     final locator = RepositoryLocator.instance;
@@ -189,12 +179,17 @@ class PaymentHubService {
       final closingDate = item.closingDate;
       if (cardId == null || closingDate == null) return;
 
-      // Usa o mesmo StatementService para garantir chave única compartilhada
+      // Busca nome do cartão para descrição
+      final allCards = await locator.cards.getAll();
+      final card     = allCards.where((c) => c.id == cardId).firstOrNull;
+
       await StatementService.instance.markPaid(
         cardId,
         closingDate.year,
         closingDate.month,
-        paid: true,
+        paid:     true,
+        amount:   item.amount,
+        cardName: card?.name,
       );
     }
   }

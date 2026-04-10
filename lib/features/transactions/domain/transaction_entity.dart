@@ -13,8 +13,8 @@ class TransactionEntity {
   final String? description;
   final String? categoryId;
   final String? cardId;
-  final String? accountId;      // conta de origem
-  final String? toAccountId;    // conta de destino (apenas para transfer)
+  final String? accountId;
+  final String? toAccountId;
   final bool isBoleto;
   final bool isProvisioned;
   final int? installmentCount;
@@ -22,6 +22,9 @@ class TransactionEntity {
   final RecurrenceRule recurrenceRule;
   final String? recurrenceSourceId;
   final String? notes;
+  /// true = transação gerada automaticamente ao marcar fatura como paga.
+  /// Removida automaticamente ao desmarcar.
+  final bool isBillPayment;
 
   const TransactionEntity({
     required this.id,
@@ -41,5 +44,6 @@ class TransactionEntity {
     this.recurrenceRule = RecurrenceRule.none,
     this.recurrenceSourceId,
     this.notes,
+    this.isBillPayment = false,
   });
 }

@@ -20,11 +20,11 @@ class HiveInit {
   static const String loginsBoxName       = 'logins';
   static const String profilesBoxName     = 'profiles';
 
-  static const String _onboardingDoneKey    = 'onboardingDone';
-  static const String _profileMigratedKey   = 'profileMigrationDone';
-  static const String _loginMigratedKey     = 'loginMigrationDone';
+  static const String _onboardingDoneKey      = 'onboardingDone';
+  static const String _profileMigratedKey     = 'profileMigrationDone';
+  static const String _loginMigratedKey       = 'loginMigrationDone';
+  static const String _billPaymentCleanedKey  = 'billPaymentOrphansCleaned';
 
-  // Login padrão criado na migração para usuários sem senha
   static const String defaultLoginId = 'local_default';
 
   static bool isOnboardingDone() {
@@ -56,7 +56,33 @@ class HiveInit {
     await _migrateLoginNamespaceIfNeeded();
   }
 
-  // Migração 1 (existente): deleta boxes legados sem sufixo de perfil.
+  /// Deve ser chamado após os boxes de transações do perfil ativo serem abertos.
+  /// Remove transações órfãs criadas pela versão antiga de markAsPaid (cardBill).
+  static Future<void> cleanBillPaymentOrphans(String txBoxName) async {
+    final settings = Hive.box<String>(settingsBoxName);
+    if (settings.get(_billPaymentCleanedKey) == 'true') return;
+
+    if (!Hive.isBoxOpen(txBoxName)) return;
+    final box = Hive.box<TransactionModel>(txBoxName);
+
+    final orphanKeys = box.keys.where((k) {
+      final tx = box.get(k);
+      if (tx == null) return false;
+      // Padrão antigo: expense, cardId não nulo, sem recurrenceSourceId,
+      // descrição começa com 'Fatura ', isBillPayment == false (campo antigo ausente).
+      return tx.cardId != null &&
+          tx.recurrenceSourceId == null &&
+          !tx.isBillPayment &&
+          (tx.description?.startsWith('Fatura ') ?? false);
+    }).toList();
+
+    for (final k in orphanKeys) {
+      await box.delete(k);
+    }
+
+    await settings.put(_billPaymentCleanedKey, 'true');
+  }
+
   static Future<void> _migrateProfilesIfNeeded() async {
     final settings = Hive.box<String>(settingsBoxName);
     if (settings.get(_profileMigratedKey) == 'true') return;
@@ -80,9 +106,6 @@ class HiveInit {
     await settings.put(_profileMigratedKey, 'true');
   }
 
-  // Migração 2: promove boxes {base}_{profileId} → {base}_{loginId}_{profileId}.
-  // Cria o login padrão (sem senha) e os ProfileModel correspondentes
-  // para usuários que tinham dados antes da feature de auth.
   static Future<void> _migrateLoginNamespaceIfNeeded() async {
     final settings = Hive.box<String>(settingsBoxName);
     if (settings.get(_loginMigratedKey) == 'true') return;
@@ -90,20 +113,18 @@ class HiveInit {
     final loginsBox   = Hive.box<LoginModel>(loginsBoxName);
     final profilesBox = Hive.box<ProfileModel>(profilesBoxName);
 
-    // Garante que o login padrão exista
     if (!loginsBox.containsKey(defaultLoginId)) {
       loginsBox.put(
         defaultLoginId,
         LoginModel(
           id:           defaultLoginId,
           username:     'local_default',
-          passwordHash: '', // sem senha
+          passwordHash: '',
           createdAt:    DateTime.now(),
         ),
       );
     }
 
-    // Perfis que existiam no sistema antigo
     const legacyProfiles = ['default', 'demo'];
     final dataBoxBases = [
       transactionsBoxName,
@@ -115,9 +136,6 @@ class HiveInit {
     ];
 
     for (final oldProfileId in legacyProfiles) {
-      final oldNamespace = '${dataBoxBases[0]}_$oldProfileId';
-
-      // Verifica se algum box antigo existe antes de migrar
       bool hasData = false;
       for (final base in dataBoxBases) {
         final oldName = '${base}_$oldProfileId';
@@ -126,13 +144,10 @@ class HiveInit {
           if (Hive.box(oldName).isNotEmpty) { hasData = true; }
         } catch (_) {}
       }
-      // Ignora perfil vazio (ex: demo nunca usado)
       if (!hasData && oldProfileId != 'default') continue;
 
       final newProfileId = oldProfileId;
-      final newNamespace = '${defaultLoginId}_$newProfileId';
 
-      // Cria ProfileModel se ainda não existir
       final existingProfile = profilesBox.values
           .where((p) => p.loginId == defaultLoginId && p.id == newProfileId)
           .isEmpty;
@@ -149,10 +164,9 @@ class HiveInit {
         );
       }
 
-      // Copia dados de {base}_{oldProfileId} → {base}_{newNamespace}
       for (final base in dataBoxBases) {
         final oldName = '${base}_$oldProfileId';
-        final newName = '${base}_$newNamespace';
+        final newName = '${base}_${defaultLoginId}_$newProfileId';
         try {
           if (!Hive.isBoxOpen(oldName)) await Hive.openBox(oldName);
           final oldBox = Hive.box(oldName);
@@ -161,7 +175,6 @@ class HiveInit {
           if (!Hive.isBoxOpen(newName)) await Hive.openBox(newName);
           final newBox = Hive.box(newName);
 
-          // Copia chave a chave para preservar tipos
           for (final key in oldBox.keys) {
             await newBox.put(key, oldBox.get(key));
           }

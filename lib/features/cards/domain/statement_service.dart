@@ -1,15 +1,18 @@
 import 'package:hive/hive.dart';
 
+import '../../../core/models/money.dart';
+import '../../../core/services/repository_locator.dart';
 import 'card_entity.dart';
 import 'statement_cycle.dart';
 import '../../transactions/domain/transaction_entity.dart';
 import '../../transactions/domain/transaction_type.dart';
+import '../../transactions/domain/payment_method.dart';
+import '../../transactions/domain/recurrence_rule.dart';
 
 class StatementService {
   StatementService._();
   static final instance = StatementService._();
 
-  // usa 'preferences' (Box<String>) — aberto globalmente no HiveInit
   static const _box = 'preferences';
 
   // ── helpers ───────────────────────────────────────────────────────
@@ -40,6 +43,7 @@ class StatementService {
     final txs = allTransactions.where((tx) {
       if (tx.cardId != card.id) return false;
       if (tx.type != TransactionType.expense) return false;
+      if (tx.isBillPayment) return false; // não contabiliza pagamento de fatura
       final d = tx.date;
       return !d.isBefore(cycleStart) && !d.isAfter(cycleEnd);
     }).toList()
@@ -88,18 +92,59 @@ class StatementService {
   }
 
   Future<bool> isPaid(String cardId, int year, int month) async {
-    // Box<String> — valor serializado como '1'/'0'
     final box = Hive.box<String>(_box);
     return box.get(_key(cardId, year, month)) == '1';
   }
 
+  /// Marca ou desmarca fatura como paga.
+  /// Ao marcar (paid=true): persiste flag + cria transação isBillPayment.
+  /// Ao desmarcar (paid=false): remove flag + remove transação isBillPayment.
   Future<void> markPaid(
     String cardId,
     int year,
     int month, {
     required bool paid,
+    double? amount,      // necessário apenas quando paid=true
+    String? cardName,   // necessário apenas quando paid=true
   }) async {
-    final box = Hive.box<String>(_box);
-    await box.put(_key(cardId, year, month), paid ? '1' : '0');
+    final box    = Hive.box<String>(_box);
+    final repo   = RepositoryLocator.instance.transactions;
+    final allTx  = await repo.getAll();
+    final txKey  = _billPaymentTxKey(cardId, year, month);
+
+    if (paid) {
+      await box.put(_key(cardId, year, month), '1');
+
+      // Cria transação de pagamento se ainda não existir
+      final alreadyExists = allTx.any((t) => t.id == txKey);
+      if (!alreadyExists && amount != null && amount > 0) {
+        await repo.add(TransactionEntity(
+          id:            txKey,
+          amount:        Money(amount),
+          date:          DateTime(year, month),
+          type:          TransactionType.expense,
+          paymentMethod: PaymentMethod.other,
+          description:   'Fatura ${cardName ?? cardId}',
+          cardId:        cardId,
+          isBoleto:      false,
+          isProvisioned: false,
+          recurrenceRule: RecurrenceRule.none,
+          isBillPayment: true,
+        ));
+      }
+    } else {
+      await box.put(_key(cardId, year, month), '0');
+
+      // Remove transação de pagamento se existir
+      if (allTx.any((t) => t.id == txKey)) {
+        await repo.remove(txKey);
+      }
+    }
+  }
+
+  /// Chave determinística da transação de pagamento de fatura.
+  String _billPaymentTxKey(String cardId, int year, int month) {
+    final mm = month.toString().padLeft(2, '0');
+    return 'bill_payment_${cardId}_$year$mm';
   }
 }
