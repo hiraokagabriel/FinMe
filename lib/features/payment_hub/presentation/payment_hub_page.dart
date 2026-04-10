@@ -135,7 +135,7 @@ class _PaymentHubPageState extends State<PaymentHubPage> {
           horizontal: AppSpacing.lg, vertical: AppSpacing.sm / 2),
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
-        color: AppColors.card,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(AppRadius.card),
         border: Border.all(
           color: isUrgent
@@ -224,7 +224,7 @@ class _PaymentHubPageState extends State<PaymentHubPage> {
           horizontal: AppSpacing.lg, vertical: AppSpacing.sm / 2),
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
-        color: AppColors.card,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(AppRadius.card),
         border: Border.all(color: AppColors.divider),
       ),
@@ -312,7 +312,7 @@ class _PaymentHubPageState extends State<PaymentHubPage> {
                         padding: const EdgeInsets.fromLTRB(
                             AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.xs),
                         child: Text('Faturas de cartão',
-                            style: AppText.sectionHeader),
+                            style: AppText.sectionLabel),
                       ),
                       ...bills.map(_buildCardBillTile),
                     ],
@@ -321,7 +321,7 @@ class _PaymentHubPageState extends State<PaymentHubPage> {
                         padding: const EdgeInsets.fromLTRB(
                             AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.xs),
                         child: Text('A pagar',
-                            style: AppText.sectionHeader),
+                            style: AppText.sectionLabel),
                       ),
                       ...provisioned.map(_buildProvisionedTile),
                     ],
