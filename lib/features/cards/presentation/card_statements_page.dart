@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
+import '../domain/card_entity.dart';
+import '../domain/statement_cycle.dart';
+import '../domain/statement_service.dart';
 import '../../../core/services/repository_locator.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/app_empty_state.dart';
 import '../../transactions/domain/transaction_entity.dart';
-import '../../transactions/domain/transaction_type.dart';
-import '../domain/card_entity.dart';
-import '../domain/statement_cycle.dart';
-import '../domain/statement_service.dart';
+import '../../categories/domain/category_entity.dart';
 
 class CardStatementsPage extends StatefulWidget {
   const CardStatementsPage({super.key, required this.card});
@@ -20,39 +21,35 @@ class CardStatementsPage extends StatefulWidget {
 class _CardStatementsPageState extends State<CardStatementsPage> {
   final _service = StatementService.instance;
 
-  List<StatementCycle> _cycles = const [];
-  int _selectedIndex = 0; // 0 = mais recente
+  List<StatementCycle> _cycles = [];
+  List<CategoryEntity> _categories = [];
+  int _selectedIndex = 0;
   bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _loadData();
   }
 
-  Future<void> _load() async {
-    setState(() => _isLoading = true);
-    final txs = await RepositoryLocator.instance.transactions.getAll();
-    final cycles = await _service.cyclesForCard(widget.card, txs, count: 6);
+  Future<void> _loadData() async {
+    final locator = RepositoryLocator.instance;
+    final transactions = await locator.transactions.getAll();
+    final categories = await locator.categories.getAll();
+    final cycles = await _service.cyclesForCard(
+      widget.card,
+      transactions,
+      count: 6,
+    );
     setState(() {
       _cycles = cycles;
+      _categories = categories;
+      _selectedIndex = 0;
       _isLoading = false;
     });
   }
 
   StatementCycle get _current => _cycles[_selectedIndex];
-
-  void _prev() {
-    if (_selectedIndex < _cycles.length - 1) {
-      setState(() => _selectedIndex++);
-    }
-  }
-
-  void _next() {
-    if (_selectedIndex > 0) {
-      setState(() => _selectedIndex--);
-    }
-  }
 
   Future<void> _togglePaid() async {
     final cycle = _current;
@@ -63,272 +60,36 @@ class _CardStatementsPageState extends State<CardStatementsPage> {
       cycle.cycleEnd.month,
       paid: newPaid,
     );
-    await _load();
+    final locator = RepositoryLocator.instance;
+    final transactions = await locator.transactions.getAll();
+    final updated = await _service.cyclesForCard(
+      widget.card,
+      transactions,
+      count: 6,
+    );
+    setState(() {
+      _cycles = updated;
+    });
     if (!mounted) return;
-    final monthLabel = _monthName(cycle.cycleEnd.month);
-    final year = cycle.cycleEnd.year;
+    final label = DateFormat("MMM/yyyy", "pt_BR").format(cycle.cycleEnd);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           newPaid
-              ? 'Fatura de $monthLabel/$year marcada como paga'
-              : 'Fatura de $monthLabel/$year desmarcada',
+              ? 'Fatura de $label marcada como paga'
+              : 'Fatura de $label desmarcada',
         ),
       ),
     );
   }
 
-  // ── helpers ──────────────────────────────────────────────────────
-
-  static const _monthNames = [
-    '', 'jan', 'fev', 'mar', 'abr', 'mai', 'jun',
-    'jul', 'ago', 'set', 'out', 'nov', 'dez',
-  ];
-  static const _monthNamesFull = [
-    '', 'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
-    'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez',
-  ];
-
-  String _monthName(int m) => _monthNames[m];
-
-  String _fmt(DateTime d) =>
-      '${d.day.toString().padLeft(2, '0')}/${_monthNames[d.month]}';
-
-  String _fmtMoney(double v) =>
-      'R\$ ${v.toStringAsFixed(2).replaceAll('.', ',')}';
-
-  // ── widgets ──────────────────────────────────────────────────────
-
-  Widget _buildPicker() {
-    final cycle = _current;
-    final label =
-        '${_monthNamesFull[cycle.cycleEnd.month]} ${cycle.cycleEnd.year}';
-    final canPrev = _selectedIndex < _cycles.length - 1;
-    final canNext = _selectedIndex > 0;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md, vertical: AppSpacing.sm),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          IconButton(
-            icon: const Icon(Icons.chevron_left),
-            onPressed: canPrev ? _prev : null,
-            color: canPrev ? null : AppColors.textSecondary,
-          ),
-          Text(
-            label,
-            style: AppText.sectionLabel.copyWith(fontSize: 16),
-          ),
-          IconButton(
-            icon: const Icon(Icons.chevron_right),
-            onPressed: canNext ? _next : null,
-            color: canNext ? null : AppColors.textSecondary,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHeader() {
-    final cycle = _current;
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-
-    final Color badgeColor;
-    final String badgeLabel;
-    if (cycle.isPaid) {
-      badgeColor = AppColors.limitLow;
-      badgeLabel = 'Paga';
-    } else if (cycle.cycleEnd.isBefore(today)) {
-      badgeColor = AppColors.danger;
-      badgeLabel = 'Vencida';
-    } else {
-      badgeColor = AppColors.warning;
-      badgeLabel = cycle.isOpen ? 'Aberta' : 'Aberta';
+  CategoryEntity? _categoryOf(TransactionEntity tx) {
+    if (tx.categoryId == null) return null;
+    try {
+      return _categories.firstWhere((c) => c.id == tx.categoryId);
+    } catch (_) {
+      return null;
     }
-
-    return Container(
-      margin: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.lg, vertical: AppSpacing.xs),
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: AppColors.sidebar,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${_fmt(cycle.cycleStart)}  →  ${_fmt(cycle.cycleEnd)}',
-                  style: AppText.body.copyWith(fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'Venc. ${_fmt(cycle.dueDate)}',
-                  style: AppText.secondary,
-                ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: badgeColor.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(AppRadius.chip),
-              border: Border.all(color: badgeColor.withOpacity(0.4)),
-            ),
-            child: Text(
-              badgeLabel,
-              style: AppText.badge.copyWith(color: badgeColor),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTransactionRow(TransactionEntity tx, {required bool showDivider}) {
-    final isProvisioned = tx.isProvisioned;
-    final desc = tx.description?.isNotEmpty == true
-        ? tx.description!
-        : 'Sem descrição';
-    final cat = tx.categoryId ?? '';
-
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
-          child: Row(
-            children: [
-              Container(
-                width: 28,
-                height: 28,
-                decoration: BoxDecoration(
-                  color: AppColors.danger.withOpacity(0.10),
-                  borderRadius: BorderRadius.circular(AppRadius.chip),
-                ),
-                child: Icon(
-                  isProvisioned
-                      ? Icons.schedule_outlined
-                      : Icons.arrow_downward_rounded,
-                  size: 14,
-                  color: AppColors.danger,
-                ),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      desc,
-                      style: AppText.body.copyWith(
-                        fontStyle: isProvisioned
-                            ? FontStyle.italic
-                            : FontStyle.normal,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (cat.isNotEmpty)
-                      Text(
-                        cat,
-                        style: AppText.secondary,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    _fmtMoney(tx.amount.amount),
-                    style: AppText.amount.copyWith(
-                      color: AppColors.danger,
-                      fontSize: 13,
-                    ),
-                  ),
-                  Text(
-                    '${tx.date.day.toString().padLeft(2, '0')}/${_monthNames[tx.date.month]}',
-                    style: AppText.secondary,
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        if (showDivider)
-          Divider(
-            height: 1,
-            thickness: 1,
-            color: AppColors.divider,
-            indent: AppSpacing.lg,
-            endIndent: AppSpacing.lg,
-          ),
-      ],
-    );
-  }
-
-  Widget _buildFooter() {
-    final cycle = _current;
-    final isPartial = cycle.isOpen;
-    final label = isPartial ? 'Total parcial' : 'Total da fatura';
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(
-          AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.lg),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        border: Border(top: BorderSide(color: AppColors.divider)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(label, style: AppText.sectionLabel),
-              Text(
-                _fmtMoney(cycle.total),
-                style: AppText.amount.copyWith(
-                  color: AppColors.danger,
-                  fontSize: 16,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.md),
-          SizedBox(
-            width: double.infinity,
-            child: cycle.isPaid
-                ? OutlinedButton.icon(
-                    onPressed: _togglePaid,
-                    icon: const Icon(Icons.undo, size: 16),
-                    label: const Text('Desmarcar como paga'),
-                  )
-                : ElevatedButton.icon(
-                    onPressed: _togglePaid,
-                    icon: const Icon(Icons.check_circle_outline, size: 16),
-                    label: const Text('Marcar como paga'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.limitLow,
-                      foregroundColor: Colors.white,
-                    ),
-                  ),
-          ),
-        ],
-      ),
-    );
   }
 
   @override
@@ -339,33 +100,311 @@ class _CardStatementsPageState extends State<CardStatementsPage> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                _buildPicker(),
-                _buildHeader(),
-                Expanded(
-                  child: _current.transactions.isEmpty
-                      ? const AppEmptyState(
-                          icon: Icons.receipt_long_outlined,
-                          title: 'Nenhuma transação',
-                          message: 'Nenhuma despesa neste período.',
-                        )
-                      : ListView.builder(
-                          padding: const EdgeInsets.only(
-                              top: AppSpacing.sm, bottom: AppSpacing.sm),
-                          itemCount: _current.transactions.length,
-                          itemBuilder: (context, i) {
-                            final tx = _current.transactions[i];
-                            final isLast =
-                                i == _current.transactions.length - 1;
-                            return _buildTransactionRow(tx,
-                                showDivider: !isLast);
-                          },
-                        ),
+          : _cycles.isEmpty
+              ? const AppEmptyState(
+                  icon: Icons.receipt_long_outlined,
+                  title: 'Sem faturas',
+                  message: 'Ainda não há ciclos de fatura para este cartão.',
+                )
+              : Column(
+                  children: [
+                    _CyclePicker(
+                      cycles: _cycles,
+                      selectedIndex: _selectedIndex,
+                      onChanged: (i) => setState(() => _selectedIndex = i),
+                    ),
+                    const Divider(height: 1),
+                    _CycleHeader(cycle: _current),
+                    const Divider(height: 1),
+                    Expanded(
+                      child: _current.transactions.isEmpty
+                          ? const AppEmptyState(
+                              icon: Icons.receipt_long_outlined,
+                              title: 'Nenhuma transação',
+                              message: 'Nenhuma despesa neste período.',
+                            )
+                          : ListView.separated(
+                              padding: const EdgeInsets.only(
+                                  bottom: 100, top: AppSpacing.xs),
+                              itemCount: _current.transactions.length,
+                              separatorBuilder: (_, __) =>
+                                  const Divider(height: 1),
+                              itemBuilder: (context, i) {
+                                final tx = _current.transactions[i];
+                                final cat = _categoryOf(tx);
+                                return _TransactionTile(
+                                  tx: tx,
+                                  category: cat,
+                                );
+                              },
+                            ),
+                    ),
+                    _CycleFooter(
+                      cycle: _current,
+                      onTogglePaid: _togglePaid,
+                    ),
+                  ],
                 ),
-                _buildFooter(),
+    );
+  }
+}
+
+// ── _CyclePicker ─────────────────────────────────────────────────────────────
+
+class _CyclePicker extends StatelessWidget {
+  const _CyclePicker({
+    required this.cycles,
+    required this.selectedIndex,
+    required this.onChanged,
+  });
+
+  final List<StatementCycle> cycles;
+  final int selectedIndex;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final cycle = cycles[selectedIndex];
+    final label = DateFormat("MMM yyyy", "pt_BR").format(cycle.cycleEnd);
+    final canGoBack = selectedIndex < cycles.length - 1;
+    final canGoForward = selectedIndex > 0;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.chevron_left),
+            onPressed: canGoBack
+                ? () => onChanged(selectedIndex + 1)
+                : null,
+          ),
+          Text(
+            label,
+            style: AppText.sectionLabel.copyWith(
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.chevron_right),
+            onPressed: canGoForward
+                ? () => onChanged(selectedIndex - 1)
+                : null,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── _CycleHeader ─────────────────────────────────────────────────────────────
+
+class _CycleHeader extends StatelessWidget {
+  const _CycleHeader({required this.cycle});
+  final StatementCycle cycle;
+
+  @override
+  Widget build(BuildContext context) {
+    final fmt = DateFormat('dd/MMM', 'pt_BR');
+    final now = DateTime.now();
+    final isOpen = cycle.cycleEnd.isAfter(now);
+    final isOverdue = !cycle.isPaid && cycle.dueDate.isBefore(now);
+
+    final (badgeLabel, badgeColor) = cycle.isPaid
+        ? ('Paga', AppColors.limitLow)
+        : isOverdue
+            ? ('Vencida', AppColors.danger)
+            : isOpen
+                ? ('Aberta', AppColors.warning)
+                : ('Pendente', AppColors.warning);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.lg, vertical: AppSpacing.md),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${fmt.format(cycle.cycleStart)} → ${fmt.format(cycle.cycleEnd)}',
+                  style: AppText.body.copyWith(
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Venc. ${fmt.format(cycle.dueDate)}',
+                  style: AppText.secondary.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
               ],
             ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
+            decoration: BoxDecoration(
+              color: badgeColor.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(AppRadius.chip),
+            ),
+            child: Text(
+              badgeLabel,
+              style: AppText.badge.copyWith(color: badgeColor),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── _TransactionTile ─────────────────────────────────────────────────────────
+
+class _TransactionTile extends StatelessWidget {
+  const _TransactionTile({required this.tx, this.category});
+  final TransactionEntity tx;
+  final CategoryEntity? category;
+
+  @override
+  Widget build(BuildContext context) {
+    final fmt = DateFormat('dd/MM', 'pt_BR');
+    final isProvisioned = tx.isProvisioned;
+    final iconWidget = category != null
+        ? Text(
+            String.fromCharCode(category!.iconCodePoint),
+            style: const TextStyle(fontSize: 20),
+          )
+        : const Icon(Icons.label_outline, size: 20);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
+      child: Row(
+        children: [
+          iconWidget,
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  tx.description,
+                  style: AppText.body.copyWith(
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontStyle: isProvisioned
+                        ? FontStyle.italic
+                        : FontStyle.normal,
+                  ),
+                ),
+                Text(
+                  fmt.format(tx.date),
+                  style: AppText.secondary.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (isProvisioned)
+            Padding(
+              padding:
+                  const EdgeInsets.only(right: AppSpacing.xs),
+              child: Icon(
+                Icons.schedule_outlined,
+                size: 14,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          Text(
+            'R\$ ${tx.amount.amount.toStringAsFixed(2)}',
+            style: AppText.amount.copyWith(
+              color: AppColors.danger,
+              fontStyle: isProvisioned
+                  ? FontStyle.italic
+                  : FontStyle.normal,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── _CycleFooter ─────────────────────────────────────────────────────────────
+
+class _CycleFooter extends StatelessWidget {
+  const _CycleFooter({
+    required this.cycle,
+    required this.onTogglePaid,
+  });
+
+  final StatementCycle cycle;
+  final VoidCallback onTogglePaid;
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final isPartial = cycle.cycleEnd.isAfter(now);
+    final cs = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.lg),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        border: Border(
+          top: BorderSide(
+            color: Theme.of(context).dividerTheme.color ??
+                AppColors.divider,
+          ),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                isPartial ? 'Total parcial' : 'Total da fatura',
+                style: AppText.sectionLabel.copyWith(
+                  color: cs.onSurface,
+                ),
+              ),
+              Text(
+                'R\$ ${cycle.total.toStringAsFixed(2)}',
+                style: AppText.amount.copyWith(
+                  color: AppColors.danger,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          SizedBox(
+            width: double.infinity,
+            child: cycle.isPaid
+                ? OutlinedButton.icon(
+                    onPressed: onTogglePaid,
+                    icon: const Icon(Icons.undo, size: 16),
+                    label: const Text('Desmarcar como paga'),
+                  )
+                : ElevatedButton.icon(
+                    onPressed: onTogglePaid,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.limitLow,
+                      foregroundColor: Colors.white,
+                    ),
+                    icon: const Icon(Icons.check_circle_outline, size: 16),
+                    label: const Text('Marcar como paga'),
+                  ),
+          ),
+        ],
+      ),
     );
   }
 }

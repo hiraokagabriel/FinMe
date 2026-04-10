@@ -11,6 +11,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/app_empty_state.dart';
 import '../../../features/transactions/domain/transaction_entity.dart';
 import '../../../features/transactions/domain/transaction_type.dart';
+import 'card_statements_page.dart';
 import 'new_card_page.dart';
 
 class CardsPage extends StatefulWidget {
@@ -70,6 +71,14 @@ class _CardsPageState extends State<CardsPage> {
     if (result == true) {
       await _loadData();
     }
+  }
+
+  void _openStatements(CardEntity card) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => CardStatementsPage(card: card),
+      ),
+    );
   }
 
   Future<bool?> _confirmDelete(CardEntity card) async {
@@ -240,6 +249,8 @@ class _CardsPageState extends State<CardsPage> {
                                   const Divider(height: 1),
                               itemBuilder: (context, index) {
                                 final card = _cards[index];
+                                final isCreditCard =
+                                    card.type == CardType.credit;
 
                                 return Dismissible(
                                   key: ValueKey(card.id),
@@ -272,8 +283,10 @@ class _CardsPageState extends State<CardsPage> {
                                     ),
                                   ),
                                   child: InkWell(
-                                    onTap: () =>
-                                        _openCardForm(initial: card),
+                                    onTap: isCreditCard
+                                        ? () => _openStatements(card)
+                                        : () =>
+                                            _openCardForm(initial: card),
                                     child: Padding(
                                       padding:
                                           const EdgeInsets.symmetric(
@@ -304,13 +317,23 @@ class _CardsPageState extends State<CardsPage> {
                                                     const SizedBox(
                                                         height: 2),
                                                     Text(
-                                                      '${card.bankName} · ${_cardTypeLabel(card.type)} · Venc. dia ${card.dueDay}',
+                                                      isCreditCard
+                                                          ? '${card.bankName} · ${_cardTypeLabel(card.type)} · Venc. dia ${card.dueDay} · Ver faturas'
+                                                          : '${card.bankName} · ${_cardTypeLabel(card.type)} · Venc. dia ${card.dueDay}',
                                                       style: AppText
                                                           .secondary,
                                                     ),
                                                   ],
                                                 ),
                                               ),
+                                              if (isCreditCard)
+                                                Icon(
+                                                  Icons.chevron_right,
+                                                  size: 18,
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .onSurfaceVariant,
+                                                ),
                                             ],
                                           ),
                                           if (isUltra &&
