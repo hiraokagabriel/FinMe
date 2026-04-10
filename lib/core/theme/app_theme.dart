@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 /// Tokens visuais do FinMe
 /// Fonte da verdade: CLAUDE.md § Padrões visuais
@@ -150,10 +151,21 @@ ThemeData _buildTheme({required bool dark}) {
           onError:          Colors.white,
         );
 
+  final textTheme = TextTheme(
+    titleLarge:  TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: txtPri),
+    titleMedium: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: txtPri),
+    bodyLarge:   TextStyle(fontSize: 14, fontWeight: FontWeight.w400, color: txtPri),
+    bodyMedium:  TextStyle(fontSize: 14, fontWeight: FontWeight.w400, color: txtPri),
+    bodySmall:   TextStyle(fontSize: 12, fontWeight: FontWeight.w400, color: txtSec),
+    labelSmall:  TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: txtPri),
+  );
+
   return ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
     scaffoldBackgroundColor: bg,
+    fontFamily: GoogleFonts.inter().fontFamily,
+    textTheme: GoogleFonts.interTextTheme(textTheme),
 
     appBarTheme: AppBarTheme(
       backgroundColor: surface,
@@ -265,16 +277,6 @@ ThemeData _buildTheme({required bool dark}) {
       ),
       contentPadding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.lg, vertical: AppSpacing.md),
-    ),
-
-    // Todas as cores de texto passam pelos tokens dinâmicos por tema
-    textTheme: TextTheme(
-      titleLarge:  TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: txtPri),
-      titleMedium: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: txtPri),
-      bodyLarge:   TextStyle(fontSize: 14, fontWeight: FontWeight.w400, color: txtPri),
-      bodyMedium:  TextStyle(fontSize: 14, fontWeight: FontWeight.w400, color: txtPri),
-      bodySmall:   TextStyle(fontSize: 12, fontWeight: FontWeight.w400, color: txtSec),
-      labelSmall:  TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: txtPri),
     ),
 
     snackBarTheme: SnackBarThemeData(

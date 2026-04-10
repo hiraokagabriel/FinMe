@@ -12,6 +12,8 @@ import '../../../core/theme/app_theme.dart';
 import '../../transactions/domain/transaction_entity.dart';
 import '../../transactions/domain/transaction_type.dart';
 
+enum _ChartSeriesFilter { both, income, expense }
+
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
 
@@ -23,6 +25,7 @@ class _DashboardPageState extends State<DashboardPage> {
   List<TransactionEntity> _transactions = const [];
   List<SubscriptionSummary> _subscriptions = const [];
   bool _isLoading = true;
+  _ChartSeriesFilter _chartFilter = _ChartSeriesFilter.both;
 
   @override
   void initState() {
@@ -62,8 +65,17 @@ class _DashboardPageState extends State<DashboardPage> {
       final month = DateTime(now.year, now.month - (months - 1 - i), 1);
       double income = 0;
       double expense = 0;
+      double provisioned = 0;
+
       for (final tx in _transactions) {
-        if (tx.isProvisioned) continue;
+        if (tx.isProvisioned) {
+          final due = tx.provisionedDueDate ?? tx.date;
+          if (due.year == month.year && due.month == month.month) {
+            provisioned += tx.amount.amount;
+          }
+          continue;
+        }
+
         if (tx.date.year == month.year && tx.date.month == month.month) {
           if (tx.type == TransactionType.income) {
             income += tx.amount.amount;
@@ -72,7 +84,12 @@ class _DashboardPageState extends State<DashboardPage> {
           }
         }
       }
-      return _MonthSummary(month: month, income: income, expense: expense);
+      return _MonthSummary(
+        month: month,
+        income: income,
+        expense: expense,
+        provisioned: provisioned,
+      );
     });
   }
 
@@ -140,7 +157,7 @@ class _DashboardPageState extends State<DashboardPage> {
               children: [
                 const Text('FinMe'),
                 if (isDemo) ...[
-                  const SizedBox(width: 8),
+                  const SizedBox(width: AppSpacing.sm),
                   _DemoChip(),
                 ],
               ],
@@ -217,6 +234,12 @@ class _DashboardPageState extends State<DashboardPage> {
     final prevBalance = prevIncome - prevExpense;
     final provisioned = _totalProvisioned;
 
+    final summary = _buildMonthlySummary(months: 6);
+    final incomeSeries = summary.map((m) => m.income).toList();
+    final expenseSeries = summary.map((m) => m.expense).toList();
+    final balanceSeries = summary.map((m) => m.income - m.expense).toList();
+    final provisionedSeries = summary.map((m) => m.provisioned).toList();
+
     final cards = [
       _SummaryCardData(
         label: 'Receitas',
@@ -225,6 +248,7 @@ class _DashboardPageState extends State<DashboardPage> {
         icon: Icons.arrow_upward_rounded,
         color: AppColors.limitLow,
         prefix: '+ R\$',
+        series: incomeSeries,
       ),
       _SummaryCardData(
         label: 'Despesas',
@@ -234,6 +258,7 @@ class _DashboardPageState extends State<DashboardPage> {
         color: AppColors.danger,
         prefix: '- R\$',
         invertDelta: true, // despesa menor = positivo
+        series: expenseSeries,
       ),
       _SummaryCardData(
         label: 'Saldo',
@@ -242,6 +267,7 @@ class _DashboardPageState extends State<DashboardPage> {
         icon: Icons.account_balance_wallet_outlined,
         color: balance >= 0 ? AppColors.primary : AppColors.danger,
         prefix: 'R\$',
+        series: balanceSeries,
       ),
       _SummaryCardData(
         label: 'A vencer',
@@ -250,6 +276,7 @@ class _DashboardPageState extends State<DashboardPage> {
         icon: Icons.schedule_outlined,
         color: AppColors.warning,
         prefix: 'R\$',
+        series: provisionedSeries,
       ),
     ];
 
@@ -282,6 +309,17 @@ class _DashboardPageState extends State<DashboardPage> {
               children: [
                 Text('Evolução mensal', style: AppText.sectionLabel),
                 const Spacer(),
+                _ChartFilterToggle(
+                  filter: _chartFilter,
+                  onChanged: (value) {
+                    setState(() => _chartFilter = value);
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Row(
+              children: [
                 _LegendDot(color: AppColors.limitLow, label: 'Receitas'),
                 const SizedBox(width: AppSpacing.md),
                 _LegendDot(color: AppColors.danger, label: 'Despesas'),
@@ -307,7 +345,10 @@ class _DashboardPageState extends State<DashboardPage> {
             else
               SizedBox(
                 height: 180,
-                child: _MonthlyLineChart(summary: summary),
+                child: _MonthlyLineChart(
+                  summary: summary,
+                  filter: _chartFilter,
+                ),
               ),
           ],
         ),
@@ -354,8 +395,9 @@ class _DashboardPageState extends State<DashboardPage> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text(
-                    'R\$ ${totalMonthly.toStringAsFixed(2)}',
+                  _AnimatedAmountText(
+                    value: totalMonthly,
+                    prefix: 'R\$',
                     style: AppText.amount
                         .copyWith(color: AppColors.danger, fontSize: 14),
                   ),
@@ -425,9 +467,12 @@ class _DashboardPageState extends State<DashboardPage> {
               ...recent.asMap().entries.map((e) {
                 final tx = e.value;
                 final isLast = e.key == recent.length - 1;
-                return _RecentTransactionRow(
-                  transaction: tx,
-                  showDivider: !isLast,
+                return _StaggeredItem(
+                  index: e.key,
+                  child: _RecentTransactionRow(
+                    transaction: tx,
+                    showDivider: !isLast,
+                  ),
                 );
               }),
           ],
@@ -584,8 +629,9 @@ class _RecentTransactionRow extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text(
-                    '$amountPrefix ${transaction.amount.amount.toStringAsFixed(2)}',
+                  _AnimatedAmountText(
+                    value: transaction.amount.amount,
+                    prefix: amountPrefix,
                     style: AppText.amount.copyWith(
                       color: amountColor,
                       fontSize: 13,
@@ -607,8 +653,12 @@ class _RecentTransactionRow extends StatelessWidget {
 // ── Gráfico ───────────────────────────────────────────────────────────────
 
 class _MonthlyLineChart extends StatelessWidget {
-  const _MonthlyLineChart({required this.summary});
+  const _MonthlyLineChart({
+    required this.summary,
+    required this.filter,
+  });
   final List<_MonthSummary> summary;
+  final _ChartSeriesFilter filter;
 
   static const _monthAbbr = [
     '', 'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
@@ -630,6 +680,57 @@ class _MonthlyLineChart extends StatelessWidget {
     final expenseSpots = [
       for (int i = 0; i < summary.length; i++) toSpot(i, summary[i].expense)
     ];
+
+    final showIncome =
+        filter == _ChartSeriesFilter.both || filter == _ChartSeriesFilter.income;
+    final showExpense =
+        filter == _ChartSeriesFilter.both || filter == _ChartSeriesFilter.expense;
+
+    final lines = <LineChartBarData>[];
+    if (showIncome) {
+      lines.add(
+        LineChartBarData(
+          spots: incomeSpots,
+          isCurved: true,
+          color: AppColors.limitLow,
+          barWidth: 2.5,
+          dotData: FlDotData(
+            show: true,
+            getDotPainter: (_, __, ___, ____) => FlDotCirclePainter(
+              radius: 3.5,
+              color: AppColors.limitLow,
+              strokeWidth: 0,
+            ),
+          ),
+          belowBarData: BarAreaData(
+            show: true,
+            color: AppColors.limitLow.withOpacity(0.08),
+          ),
+        ),
+      );
+    }
+    if (showExpense) {
+      lines.add(
+        LineChartBarData(
+          spots: expenseSpots,
+          isCurved: true,
+          color: AppColors.danger,
+          barWidth: 2.5,
+          dotData: FlDotData(
+            show: true,
+            getDotPainter: (_, __, ___, ____) => FlDotCirclePainter(
+              radius: 3.5,
+              color: AppColors.danger,
+              strokeWidth: 0,
+            ),
+          ),
+          belowBarData: BarAreaData(
+            show: true,
+            color: AppColors.danger.withOpacity(0.06),
+          ),
+        ),
+      );
+    }
 
     return LineChart(
       LineChartData(
@@ -663,7 +764,9 @@ class _MonthlyLineChart extends StatelessWidget {
               reservedSize: 24,
               getTitlesWidget: (value, _) {
                 final i = value.toInt();
-                if (i < 0 || i >= summary.length) return const SizedBox.shrink();
+                if (i < 0 || i >= summary.length) {
+                  return const SizedBox.shrink();
+                }
                 return Text(
                   _monthAbbr[summary[i].month.month],
                   style: AppText.secondary.copyWith(fontSize: 10),
@@ -676,55 +779,21 @@ class _MonthlyLineChart extends StatelessWidget {
           rightTitles: const AxisTitles(
               sideTitles: SideTitles(showTitles: false)),
         ),
-        lineBarsData: [
-          LineChartBarData(
-            spots: incomeSpots,
-            isCurved: true,
-            color: AppColors.limitLow,
-            barWidth: 2.5,
-            dotData: FlDotData(
-              show: true,
-              getDotPainter: (_, __, ___, ____) => FlDotCirclePainter(
-                radius: 3.5,
-                color: AppColors.limitLow,
-                strokeWidth: 0,
-              ),
-            ),
-            belowBarData: BarAreaData(
-              show: true,
-              color: AppColors.limitLow.withOpacity(0.08),
-            ),
-          ),
-          LineChartBarData(
-            spots: expenseSpots,
-            isCurved: true,
-            color: AppColors.danger,
-            barWidth: 2.5,
-            dotData: FlDotData(
-              show: true,
-              getDotPainter: (_, __, ___, ____) => FlDotCirclePainter(
-                radius: 3.5,
-                color: AppColors.danger,
-                strokeWidth: 0,
-              ),
-            ),
-            belowBarData: BarAreaData(
-              show: true,
-              color: AppColors.danger.withOpacity(0.06),
-            ),
-          ),
-        ],
+        lineBarsData: lines,
         lineTouchData: LineTouchData(
           touchTooltipData: LineTouchTooltipData(
             getTooltipColor: (_) => AppColors.surface,
             tooltipBorder: BorderSide(color: AppColors.divider),
             getTooltipItems: (spots) {
               return spots.map((s) {
-                final isIncome = s.barIndex == 0;
+                final isIncomeSpot = s.barIndex == 0 && showIncome;
+                final color = isIncomeSpot
+                    ? AppColors.limitLow
+                    : AppColors.danger;
                 return LineTooltipItem(
                   'R\$ ${s.y.toStringAsFixed(2)}',
                   AppText.secondary.copyWith(
-                    color: isIncome ? AppColors.limitLow : AppColors.danger,
+                    color: color,
                     fontWeight: FontWeight.w600,
                   ),
                 );
@@ -740,11 +809,16 @@ class _MonthlyLineChart extends StatelessWidget {
 // ── Widgets auxiliares ─────────────────────────────────────────────────────
 
 class _MonthSummary {
-  const _MonthSummary(
-      {required this.month, required this.income, required this.expense});
+  const _MonthSummary({
+    required this.month,
+    required this.income,
+    required this.expense,
+    required this.provisioned,
+  });
   final DateTime month;
   final double income;
   final double expense;
+  final double provisioned;
 }
 
 class _SummaryCardData {
@@ -755,6 +829,7 @@ class _SummaryCardData {
     required this.icon,
     required this.color,
     required this.prefix,
+    required this.series,
     this.invertDelta = false,
   });
   final String label;
@@ -763,6 +838,7 @@ class _SummaryCardData {
   final IconData icon;
   final Color color;
   final String prefix;
+  final List<double> series;
   /// Se true, delta negativo (queda) é verde — usado em Despesas.
   final bool invertDelta;
 }
@@ -804,11 +880,14 @@ class _SummaryCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: AppSpacing.xs),
-            Text(
-              '${data.prefix} ${data.value.toStringAsFixed(2)}',
-              style: AppText.amount.copyWith(color: data.color, fontSize: 13),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            _AnimatedAmountText(
+              key: ValueKey('${data.label}_${data.value}'),
+              value: data.value,
+              prefix: data.prefix,
+              style: AppText.amount.copyWith(
+                color: data.color,
+                fontSize: 13,
+              ),
             ),
             if (deltaLabel != null) ...[
               const SizedBox(height: 2),
@@ -823,6 +902,8 @@ class _SummaryCard extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ],
+            const SizedBox(height: AppSpacing.sm),
+            _Sparkline(values: data.series, color: data.color),
           ],
         ),
       ),
@@ -848,6 +929,193 @@ class _LegendDot extends StatelessWidget {
         const SizedBox(width: AppSpacing.xs),
         Text(label, style: AppText.secondary),
       ],
+    );
+  }
+}
+
+class _Sparkline extends StatelessWidget {
+  const _Sparkline({required this.values, required this.color});
+
+  final List<double> values;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    if (values.isEmpty || values.every((v) => v == 0)) {
+      return const SizedBox.shrink();
+    }
+
+    final spots = <FlSpot>[];
+    for (var i = 0; i < values.length; i++) {
+      spots.add(FlSpot(i.toDouble(), values[i]));
+    }
+
+    final maxY = values.fold<double>(0, (a, b) => a > b ? a : b);
+    final topY = maxY <= 0 ? 1.0 : maxY * 1.2;
+
+    return SizedBox(
+      height: 40,
+      child: LineChart(
+        LineChartData(
+          minY: 0,
+          maxY: topY,
+          gridData: const FlGridData(show: false),
+          borderData: FlBorderData(show: false),
+          titlesData: const FlTitlesData(
+            leftTitles: AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
+            rightTitles: AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
+            topTitles: AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
+          ),
+          lineTouchData: const LineTouchData(enabled: false),
+          lineBarsData: [
+            LineChartBarData(
+              spots: spots,
+              isCurved: true,
+              color: color,
+              barWidth: 2,
+              dotData: const FlDotData(show: false),
+              belowBarData: BarAreaData(
+                show: true,
+                color: color.withOpacity(0.12),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AnimatedAmountText extends StatelessWidget {
+  const _AnimatedAmountText({
+    super.key,
+    required this.value,
+    required this.prefix,
+    required this.style,
+  });
+
+  final double value;
+  final String prefix;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: value),
+      duration: const Duration(milliseconds: 600),
+      curve: Curves.easeOutCubic,
+      builder: (context, animatedValue, child) {
+        return Text(
+          '$prefix ${animatedValue.toStringAsFixed(2)}',
+          style: style,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        );
+      },
+    );
+  }
+}
+
+class _ChartFilterToggle extends StatelessWidget {
+  const _ChartFilterToggle({
+    required this.filter,
+    required this.onChanged,
+  });
+
+  final _ChartSeriesFilter filter;
+  final ValueChanged<_ChartSeriesFilter> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final isBoth = filter == _ChartSeriesFilter.both;
+    final isIncome = filter == _ChartSeriesFilter.income;
+    final isExpense = filter == _ChartSeriesFilter.expense;
+
+    return ToggleButtons(
+      borderRadius: BorderRadius.circular(AppRadius.chip),
+      constraints: const BoxConstraints(minHeight: 32, minWidth: 52),
+      isSelected: [isBoth, isIncome, isExpense],
+      onPressed: (index) {
+        switch (index) {
+          case 0:
+            onChanged(_ChartSeriesFilter.both);
+            break;
+          case 1:
+            onChanged(_ChartSeriesFilter.income);
+            break;
+          case 2:
+            onChanged(_ChartSeriesFilter.expense);
+            break;
+        }
+      },
+      children: const [
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+          child: Text('Ambos', style: TextStyle(fontSize: 11)),
+        ),
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+          child: Text('Rec', style: TextStyle(fontSize: 11)),
+        ),
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+          child: Text('Desp', style: TextStyle(fontSize: 11)),
+        ),
+      ],
+    );
+  }
+}
+
+class _StaggeredItem extends StatefulWidget {
+  const _StaggeredItem({
+    required this.index,
+    required this.child,
+  });
+
+  final int index;
+  final Widget child;
+
+  @override
+  State<_StaggeredItem> createState() => _StaggeredItemState();
+}
+
+class _StaggeredItemState extends State<_StaggeredItem> {
+  double _opacity = 0;
+  Offset _offset = const Offset(0, 0.15);
+
+  @override
+  void initState() {
+    super.initState();
+    Future.delayed(Duration(milliseconds: 40 * widget.index), () {
+      if (!mounted) return;
+      setState(() {
+        _opacity = 1;
+        _offset = Offset.zero;
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSlide(
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+      offset: _offset,
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+        opacity: _opacity,
+        child: widget.child,
+      ),
     );
   }
 }

@@ -35,4 +35,35 @@ class AppRouter {
     transfer:     (context) => const TransferPage(),
     budget:       (context) => const BudgetPage(),
   };
+
+  /// Gera rotas com transição horizontal padrão entre páginas principais.
+  static Route<dynamic> onGenerateRoute(RouteSettings settings) {
+    final builder = routes[settings.name];
+
+    if (builder == null) {
+      return MaterialPageRoute(
+        settings: settings,
+        builder: (_) => const DashboardPage(),
+      );
+    }
+
+    return PageRouteBuilder(
+      settings: settings,
+      pageBuilder: (context, animation, secondaryAnimation) =>
+          builder(context),
+      transitionsBuilder:
+          (context, animation, secondaryAnimation, child) {
+        const begin = Offset(1.0, 0.0);
+        const end = Offset.zero;
+        final tween = Tween(begin: begin, end: end).chain(
+          CurveTween(curve: Curves.easeOutCubic),
+        );
+
+        return SlideTransition(
+          position: animation.drive(tween),
+          child: child,
+        );
+      },
+    );
+  }
 }
