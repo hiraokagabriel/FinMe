@@ -15,12 +15,13 @@ import '../../../features/transactions/domain/transaction_type.dart';
 import 'card_statements_page.dart';
 import 'new_card_page.dart';
 
-// ── modelo interno de dados por cartão ────────────────────────────────
-
 class _CardSummary {
-  final double usedInOpenCycle; // compromete o limite
+  final double usedInOpenCycle;
   final bool currentCyclePaid;
-  _CardSummary({required this.usedInOpenCycle, required this.currentCyclePaid});
+  _CardSummary({
+    required this.usedInOpenCycle,
+    required this.currentCyclePaid,
+  });
 }
 
 class CardsPage extends StatefulWidget {
@@ -32,8 +33,8 @@ class CardsPage extends StatefulWidget {
 
 class _CardsPageState extends State<CardsPage> {
   late final CardsRepository _cardsRepository;
-  List<CardEntity> _cards = const [];
-  Map<String, _CardSummary> _summaries = const {};
+  List<CardEntity>           _cards     = const [];
+  Map<String, _CardSummary>  _summaries = const {};
   bool _isLoading = true;
 
   @override
@@ -43,28 +44,24 @@ class _CardsPageState extends State<CardsPage> {
     _loadData();
   }
 
-  // Retorna o dia de fechamento efetivo do ciclo.
   int _effectiveClosingDay(CardEntity card) {
     if (card.closingDay != null) return card.closingDay!;
     return (card.dueDay - 7).clamp(1, 28);
   }
 
-  // Datas do ciclo aberto (entre o fechamento anterior e o próximo).
+  /// Datas do ciclo aberto (próximo fechamento a partir de hoje).
   (DateTime start, DateTime end) _openCycleDates(CardEntity card) {
     final now        = DateTime.now();
     final today      = DateTime(now.year, now.month, now.day);
     final closingDay = _effectiveClosingDay(card);
 
-    // Se hoje > closingDay, o ciclo aberto é o do mês seguinte
-    final refYear  = now.day > closingDay && now.month == 12
-        ? now.year + 1
-        : now.year;
-    final refMonth = now.day > closingDay
-        ? (now.month % 12) + 1
-        : now.month;
+    // Próximo fechamento
+    DateTime cycleEnd = DateTime(today.year, today.month, closingDay);
+    if (cycleEnd.isBefore(today)) {
+      cycleEnd = DateTime(today.year, today.month + 1, closingDay);
+    }
 
-    final cycleEnd   = DateTime(refYear, refMonth, closingDay);
-    final cycleStart = DateTime(refYear, refMonth - 1, closingDay)
+    final cycleStart = DateTime(cycleEnd.year, cycleEnd.month - 1, closingDay)
         .add(const Duration(days: 1));
 
     return (cycleStart, cycleEnd);
@@ -80,14 +77,13 @@ class _CardsPageState extends State<CardsPage> {
 
     for (final card in cards) {
       if (card.type != CardType.credit) {
-        summaries[card.id] = _CardSummary(
-            usedInOpenCycle: 0, currentCyclePaid: false);
+        summaries[card.id] =
+            _CardSummary(usedInOpenCycle: 0, currentCyclePaid: false);
         continue;
       }
 
       final (start, end) = _openCycleDates(card);
 
-      // Apenas despesas do ciclo aberto comprometem o limite
       final usedInCycle = transactions
           .where((tx) =>
               tx.cardId == card.id &&
@@ -97,17 +93,18 @@ class _CardsPageState extends State<CardsPage> {
               !tx.date.isAfter(end))
           .fold(0.0, (s, tx) => s + tx.amount.amount);
 
-      // Status pago do ciclo corrente
-      final isPaid = await stmtService.isPaid(card.id, end.year, end.month);
+      final isPaid =
+          await stmtService.isPaid(card.id, end.year, end.month);
 
       summaries[card.id] = _CardSummary(
+        // Fatura paga: ciclo anterior foi quitado, ciclo aberto tem saldo real
         usedInOpenCycle: isPaid ? 0.0 : usedInCycle,
         currentCyclePaid: isPaid,
       );
     }
 
     setState(() {
-      _cards    = cards;
+      _cards     = cards;
       _summaries = summaries;
       _isLoading = false;
     });
@@ -123,23 +120,19 @@ class _CardsPageState extends State<CardsPage> {
   Future<void> _openCardForm({CardEntity? initial}) async {
     final result = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
-        builder: (context) => NewCardPage(initialCard: initial),
-      ),
+          builder: (context) => NewCardPage(initialCard: initial)),
     );
     if (result == true) await _loadData();
   }
 
-  void _openStatements(CardEntity card) async {
+  Future<void> _openStatements(CardEntity card) async {
     await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => CardStatementsPage(card: card),
-      ),
+      MaterialPageRoute(builder: (_) => CardStatementsPage(card: card)),
     );
-    // Atualiza lista ao voltar (usuário pode ter marcado como paga)
     await _loadData();
   }
 
-  Future<bool?> _confirmDelete(CardEntity card) async {
+  Future<bool?> _confirmDelete(CardEntity card) {
     return showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -174,8 +167,7 @@ class _CardsPageState extends State<CardsPage> {
     final used    = summary?.usedInOpenCycle ?? 0;
     final paid    = summary?.currentCyclePaid ?? false;
     final ratio   = (used / limit).clamp(0.0, 1.0);
-    final percent = (ratio * 100).toStringAsFixed(1);
-    final color   = paid ? AppColors.limitLow : _limitColor(ratio);
+    final color   = _limitColor(ratio);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -187,7 +179,7 @@ class _CardsPageState extends State<CardsPage> {
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(AppRadius.chip),
                 child: LinearProgressIndicator(
-                  value: paid ? 0.0 : ratio,
+                  value: ratio,
                   minHeight: 8,
                   backgroundColor: AppColors.limitTrack,
                   color: color,
@@ -196,24 +188,36 @@ class _CardsPageState extends State<CardsPage> {
             ),
             const SizedBox(width: AppSpacing.sm),
             Text(
-              paid ? 'Pago' : '$percent%',
+              '${(ratio * 100).toStringAsFixed(1)}%',
               style: AppText.badge.copyWith(
-                fontWeight: FontWeight.bold,
-                color: color,
-              ),
+                  fontWeight: FontWeight.bold, color: color),
             ),
           ],
         ),
         const SizedBox(height: AppSpacing.xs),
-        Text(
-          paid
-              ? 'Fatura paga — limite liberado'
-              : 'R\$ ${used.toStringAsFixed(2)} / R\$ ${limit.toStringAsFixed(2)}',
-          style: AppText.secondary.copyWith(
-            color: paid
-                ? AppColors.limitLow
-                : Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
+        Row(
+          children: [
+            Text(
+              'R\$ ${used.toStringAsFixed(2)} / R\$ ${limit.toStringAsFixed(2)}',
+              style: AppText.secondary,
+            ),
+            if (paid) ...[
+              const SizedBox(width: AppSpacing.sm),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.xs, vertical: 1),
+                decoration: BoxDecoration(
+                  color: AppColors.limitLow.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(AppRadius.chip),
+                ),
+                child: Text(
+                  'Paga',
+                  style: AppText.badge
+                      .copyWith(color: AppColors.limitLow),
+                ),
+              ),
+            ],
+          ],
         ),
       ],
     );
@@ -225,10 +229,9 @@ class _CardsPageState extends State<CardsPage> {
 
     final summary = _summaries[card.id];
     final used    = summary?.usedInOpenCycle ?? 0;
-    final paid    = summary?.currentCyclePaid ?? false;
     final free    = (limit - used).clamp(0.0, limit);
-    final ratio   = paid ? 0.0 : (used / limit).clamp(0.0, 1.0);
-    final color   = paid ? AppColors.limitLow : _limitColor(ratio);
+    final ratio   = (used / limit).clamp(0.0, 1.0);
+    final color   = _limitColor(ratio);
 
     return SizedBox(
       width: 100,
@@ -239,13 +242,13 @@ class _CardsPageState extends State<CardsPage> {
           centerSpaceRadius: 30,
           sections: [
             PieChartSectionData(
-              value: paid ? 0.001 : (used > 0 ? used : 0.001),
+              value: used > 0 ? used : 0.001,
               color: color,
               title: '',
               radius: 18,
             ),
             PieChartSectionData(
-              value: paid ? limit : (free > 0 ? free : 0.001),
+              value: free > 0 ? free : 0.001,
               color: AppColors.limitTrack,
               title: '',
               radius: 18,
@@ -256,7 +259,6 @@ class _CardsPageState extends State<CardsPage> {
     );
   }
 
-  // Badge compacto de fatura paga para modo simples/normal
   Widget _buildPaidBadge() {
     return Container(
       padding: const EdgeInsets.symmetric(
@@ -332,12 +334,11 @@ class _CardsPageState extends State<CardsPage> {
                               separatorBuilder: (_, __) =>
                                   const Divider(height: 1),
                               itemBuilder: (context, index) {
-                                final card         = _cards[index];
-                                final isCreditCard =
+                                final card     = _cards[index];
+                                final isCredit =
                                     card.type == CardType.credit;
-                                final summary =
-                                    _summaries[card.id];
-                                final isPaid =
+                                final summary  = _summaries[card.id];
+                                final isPaid   =
                                     summary?.currentCyclePaid ?? false;
 
                                 return Dismissible(
@@ -362,15 +363,14 @@ class _CardsPageState extends State<CardsPage> {
                                   secondaryBackground: Container(
                                     color: AppColors.danger,
                                     alignment: Alignment.centerRight,
-                                    padding:
-                                        const EdgeInsets.symmetric(
-                                            horizontal: AppSpacing.lg),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: AppSpacing.lg),
                                     child: const Icon(
                                         Icons.delete_outline,
                                         color: Colors.white),
                                   ),
                                   child: InkWell(
-                                    onTap: isCreditCard
+                                    onTap: isCredit
                                         ? () => _openStatements(card)
                                         : () => _openCardForm(
                                             initial: card),
@@ -404,7 +404,7 @@ class _CardsPageState extends State<CardsPage> {
                                                     const SizedBox(
                                                         height: 2),
                                                     Text(
-                                                      isCreditCard
+                                                      isCredit
                                                           ? '${card.bankName} · ${_cardTypeLabel(card.type)} · Venc. dia ${card.dueDay} · Ver faturas'
                                                           : '${card.bankName} · ${_cardTypeLabel(card.type)} · Venc. dia ${card.dueDay}',
                                                       style: AppText
@@ -413,12 +413,11 @@ class _CardsPageState extends State<CardsPage> {
                                                   ],
                                                 ),
                                               ),
-                                              // Badge de fatura paga
-                                              if (isCreditCard && isPaid)
+                                              if (isCredit && isPaid)
                                                 _buildPaidBadge(),
                                               const SizedBox(
                                                   width: AppSpacing.xs),
-                                              if (isCreditCard)
+                                              if (isCredit)
                                                 Icon(
                                                   Icons.chevron_right,
                                                   size: 18,
@@ -439,8 +438,9 @@ class _CardsPageState extends State<CardsPage> {
                                                     width:
                                                         AppSpacing.md),
                                                 Expanded(
-                                                  child: _buildLimitBar(
-                                                      card),
+                                                  child:
+                                                      _buildLimitBar(
+                                                          card),
                                                 ),
                                               ],
                                             ),
