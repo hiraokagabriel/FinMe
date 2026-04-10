@@ -16,11 +16,16 @@ import 'card_statements_page.dart';
 import 'new_card_page.dart';
 
 class _CardSummary {
-  final double usedInOpenCycle;
-  final bool lastCyclePaid;
+  /// Valor total comprometendo o limite:
+  /// soma de todos os ciclos fechados NÃO pagos + ciclo aberto atual.
+  final double totalCommitted;
+
+  /// Quantos ciclos fechados ainda estão sem pagamento.
+  final int unpaidClosedCycles;
+
   _CardSummary({
-    required this.usedInOpenCycle,
-    required this.lastCyclePaid,
+    required this.totalCommitted,
+    required this.unpaidClosedCycles,
   });
 }
 
@@ -49,47 +54,40 @@ class _CardsPageState extends State<CardsPage> {
     return (card.dueDay - 7).clamp(1, 28);
   }
 
-  /// Retorna:
-  /// - openStart / openEnd  : datas do ciclo ABERTO (ainda acumulando gastos)
-  /// - closedEnd            : data de fechamento do ciclo ANTERIOR (já fechado)
-  ({DateTime openStart, DateTime openEnd, DateTime closedEnd})
-      _cycleDates(CardEntity card) {
-    final now        = DateTime.now();
-    final today      = DateTime(now.year, now.month, now.day);
-    final closingDay = _effectiveClosingDay(card);
-
-    // Próximo fechamento (ciclo aberto termina aqui)
-    DateTime openEnd = DateTime(today.year, today.month, closingDay);
-    if (openEnd.isBefore(today)) {
-      openEnd = DateTime(today.year, today.month + 1, closingDay);
-    }
-
-    // Início do ciclo aberto = dia seguinte ao fechamento anterior
-    final closedEnd  = DateTime(openEnd.year, openEnd.month - 1, closingDay);
-    final openStart  = closedEnd.add(const Duration(days: 1));
-
-    return (openStart: openStart, openEnd: openEnd, closedEnd: closedEnd);
-  }
-
   Future<void> _loadData() async {
     final locator      = RepositoryLocator.instance;
     final cards        = await _cardsRepository.getAll();
     final transactions = await locator.transactions.getAll();
     final stmtService  = StatementService.instance;
+    final now          = DateTime.now();
+    final today        = DateTime(now.year, now.month, now.day);
 
     final Map<String, _CardSummary> summaries = {};
 
     for (final card in cards) {
       if (card.type != CardType.credit) {
         summaries[card.id] =
-            _CardSummary(usedInOpenCycle: 0, lastCyclePaid: false);
+            _CardSummary(totalCommitted: 0, unpaidClosedCycles: 0);
         continue;
       }
 
-      final (:openStart, :openEnd, :closedEnd) = _cycleDates(card);
+      final closingDay = _effectiveClosingDay(card);
 
-      // Gastos do ciclo ABERTO atual (independe de pagamento)
-      final usedInOpenCycle = transactions
+      // ── Ciclo aberto: do último fechamento até o próximo ────────────
+      DateTime openEnd = DateTime(today.year, today.month, closingDay);
+      if (openEnd.isBefore(today)) {
+        openEnd = DateTime(today.year, today.month + 1, closingDay);
+      }
+      final openStart =
+          DateTime(openEnd.year, openEnd.month - 1, closingDay)
+              .add(const Duration(days: 1));
+
+      double totalCommitted = 0.0;
+      int    unpaidClosed   = 0;
+
+      // ── Gastos do ciclo aberto (ainda não fechou, sempre comprome-
+      //    te o limite independentemente de pagamento) ─────────────────
+      final openSpend = transactions
           .where((tx) =>
               tx.cardId == card.id &&
               tx.type == TransactionType.expense &&
@@ -98,16 +96,51 @@ class _CardsPageState extends State<CardsPage> {
               !tx.date.isAfter(openEnd))
           .fold(0.0, (s, tx) => s + tx.amount.amount);
 
-      // Fatura FECHADA (ciclo anterior) está paga?
-      final lastCyclePaid = await stmtService.isPaid(
-        card.id,
-        closedEnd.year,
-        closedEnd.month,
-      );
+      totalCommitted += openSpend;
+
+      // ── Ciclos fechados: varre até 12 meses para trás ──────────────
+      // Um ciclo fechado compromete o limite até que seja marcado pago.
+      for (int i = 1; i <= 12; i++) {
+        final cycleEnd =
+            DateTime(openEnd.year, openEnd.month - i, closingDay);
+        final cycleStart =
+            DateTime(cycleEnd.year, cycleEnd.month - 1, closingDay)
+                .add(const Duration(days: 1));
+
+        // Ciclo ainda no futuro — pula (só processa fechados)
+        if (cycleEnd.isAfter(today)) continue;
+
+        final isPaid = await stmtService.isPaid(
+          card.id,
+          cycleEnd.year,
+          cycleEnd.month,
+        );
+
+        if (!isPaid) {
+          final cycleSpend = transactions
+              .where((tx) =>
+                  tx.cardId == card.id &&
+                  tx.type == TransactionType.expense &&
+                  !tx.isProvisioned &&
+                  !tx.date.isBefore(cycleStart) &&
+                  !tx.date.isAfter(cycleEnd))
+              .fold(0.0, (s, tx) => s + tx.amount.amount);
+
+          if (cycleSpend > 0) {
+            totalCommitted += cycleSpend;
+            unpaidClosed++;
+          }
+        }
+        // Se há 3 ciclos consecutivos pagos no passado, para de varrer
+        // (evita processar anos de histórico desnecessariamente)
+        else if (unpaidClosed == 0 && i > 3) {
+          break;
+        }
+      }
 
       summaries[card.id] = _CardSummary(
-        usedInOpenCycle: usedInOpenCycle,
-        lastCyclePaid: lastCyclePaid,
+        totalCommitted:   totalCommitted,
+        unpaidClosedCycles: unpaidClosed,
       );
     }
 
@@ -172,8 +205,8 @@ class _CardsPageState extends State<CardsPage> {
     if (limit == null || limit <= 0) return const SizedBox.shrink();
 
     final summary = _summaries[card.id];
-    final used    = summary?.usedInOpenCycle ?? 0;
-    final paid    = summary?.lastCyclePaid ?? false;
+    final used    = summary?.totalCommitted ?? 0;
+    final unpaid  = summary?.unpaidClosedCycles ?? 0;
     final ratio   = (used / limit).clamp(0.0, 1.0);
     final color   = _limitColor(ratio);
 
@@ -205,26 +238,26 @@ class _CardsPageState extends State<CardsPage> {
         const SizedBox(height: AppSpacing.xs),
         Row(
           children: [
-            Text(
-              'R\$ ${used.toStringAsFixed(2)} / R\$ ${limit.toStringAsFixed(2)}',
-              style: AppText.secondary,
+            Expanded(
+              child: Text(
+                'R\$ ${used.toStringAsFixed(2)} / R\$ ${limit.toStringAsFixed(2)}',
+                style: AppText.secondary,
+              ),
             ),
-            if (paid) ...[
-              const SizedBox(width: AppSpacing.sm),
+            if (unpaid > 0)
               Container(
                 padding: const EdgeInsets.symmetric(
                     horizontal: AppSpacing.xs, vertical: 1),
                 decoration: BoxDecoration(
-                  color: AppColors.limitLow.withOpacity(0.12),
+                  color: AppColors.limitHigh.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(AppRadius.chip),
                 ),
                 child: Text(
-                  'Últ. fatura paga',
+                  '$unpaid fatura${unpaid > 1 ? 's' : ''} em aberto',
                   style: AppText.badge
-                      .copyWith(color: AppColors.limitLow),
+                      .copyWith(color: AppColors.limitHigh),
                 ),
               ),
-            ],
           ],
         ),
       ],
@@ -236,7 +269,7 @@ class _CardsPageState extends State<CardsPage> {
     if (limit == null || limit <= 0) return const SizedBox.shrink();
 
     final summary = _summaries[card.id];
-    final used    = summary?.usedInOpenCycle ?? 0;
+    final used    = summary?.totalCommitted ?? 0;
     final free    = (limit - used).clamp(0.0, limit);
     final ratio   = (used / limit).clamp(0.0, 1.0);
     final color   = _limitColor(ratio);
@@ -281,7 +314,7 @@ class _CardsPageState extends State<CardsPage> {
           Icon(Icons.check_circle_outline,
               size: 11, color: AppColors.limitLow),
           const SizedBox(width: 3),
-          Text('Últ. fatura paga',
+          Text('Em dia',
               style: AppText.badge.copyWith(color: AppColors.limitLow)),
         ],
       ),
@@ -346,8 +379,9 @@ class _CardsPageState extends State<CardsPage> {
                                 final isCredit =
                                     card.type == CardType.credit;
                                 final summary  = _summaries[card.id];
-                                final isPaid   =
-                                    summary?.lastCyclePaid ?? false;
+                                final unpaid   =
+                                    summary?.unpaidClosedCycles ?? 0;
+                                final allPaid  = unpaid == 0;
 
                                 return Dismissible(
                                   key: ValueKey(card.id),
@@ -421,7 +455,7 @@ class _CardsPageState extends State<CardsPage> {
                                                   ],
                                                 ),
                                               ),
-                                              if (isCredit && isPaid)
+                                              if (isCredit && isUltra && allPaid)
                                                 _buildPaidBadge(),
                                               const SizedBox(
                                                   width: AppSpacing.xs),
