@@ -17,10 +17,10 @@ import 'new_card_page.dart';
 
 class _CardSummary {
   final double usedInOpenCycle;
-  final bool currentCyclePaid;
+  final bool lastCyclePaid;
   _CardSummary({
     required this.usedInOpenCycle,
-    required this.currentCyclePaid,
+    required this.lastCyclePaid,
   });
 }
 
@@ -33,8 +33,8 @@ class CardsPage extends StatefulWidget {
 
 class _CardsPageState extends State<CardsPage> {
   late final CardsRepository _cardsRepository;
-  List<CardEntity>           _cards     = const [];
-  Map<String, _CardSummary>  _summaries = const {};
+  List<CardEntity>          _cards     = const [];
+  Map<String, _CardSummary> _summaries = const {};
   bool _isLoading = true;
 
   @override
@@ -49,22 +49,26 @@ class _CardsPageState extends State<CardsPage> {
     return (card.dueDay - 7).clamp(1, 28);
   }
 
-  /// Datas do ciclo aberto (próximo fechamento a partir de hoje).
-  (DateTime start, DateTime end) _openCycleDates(CardEntity card) {
+  /// Retorna:
+  /// - openStart / openEnd  : datas do ciclo ABERTO (ainda acumulando gastos)
+  /// - closedEnd            : data de fechamento do ciclo ANTERIOR (já fechado)
+  ({DateTime openStart, DateTime openEnd, DateTime closedEnd})
+      _cycleDates(CardEntity card) {
     final now        = DateTime.now();
     final today      = DateTime(now.year, now.month, now.day);
     final closingDay = _effectiveClosingDay(card);
 
-    // Próximo fechamento
-    DateTime cycleEnd = DateTime(today.year, today.month, closingDay);
-    if (cycleEnd.isBefore(today)) {
-      cycleEnd = DateTime(today.year, today.month + 1, closingDay);
+    // Próximo fechamento (ciclo aberto termina aqui)
+    DateTime openEnd = DateTime(today.year, today.month, closingDay);
+    if (openEnd.isBefore(today)) {
+      openEnd = DateTime(today.year, today.month + 1, closingDay);
     }
 
-    final cycleStart = DateTime(cycleEnd.year, cycleEnd.month - 1, closingDay)
-        .add(const Duration(days: 1));
+    // Início do ciclo aberto = dia seguinte ao fechamento anterior
+    final closedEnd  = DateTime(openEnd.year, openEnd.month - 1, closingDay);
+    final openStart  = closedEnd.add(const Duration(days: 1));
 
-    return (cycleStart, cycleEnd);
+    return (openStart: openStart, openEnd: openEnd, closedEnd: closedEnd);
   }
 
   Future<void> _loadData() async {
@@ -78,28 +82,32 @@ class _CardsPageState extends State<CardsPage> {
     for (final card in cards) {
       if (card.type != CardType.credit) {
         summaries[card.id] =
-            _CardSummary(usedInOpenCycle: 0, currentCyclePaid: false);
+            _CardSummary(usedInOpenCycle: 0, lastCyclePaid: false);
         continue;
       }
 
-      final (start, end) = _openCycleDates(card);
+      final (:openStart, :openEnd, :closedEnd) = _cycleDates(card);
 
-      final usedInCycle = transactions
+      // Gastos do ciclo ABERTO atual (independe de pagamento)
+      final usedInOpenCycle = transactions
           .where((tx) =>
               tx.cardId == card.id &&
               tx.type == TransactionType.expense &&
               !tx.isProvisioned &&
-              !tx.date.isBefore(start) &&
-              !tx.date.isAfter(end))
+              !tx.date.isBefore(openStart) &&
+              !tx.date.isAfter(openEnd))
           .fold(0.0, (s, tx) => s + tx.amount.amount);
 
-      final isPaid =
-          await stmtService.isPaid(card.id, end.year, end.month);
+      // Fatura FECHADA (ciclo anterior) está paga?
+      final lastCyclePaid = await stmtService.isPaid(
+        card.id,
+        closedEnd.year,
+        closedEnd.month,
+      );
 
       summaries[card.id] = _CardSummary(
-        // Fatura paga: ciclo anterior foi quitado, ciclo aberto tem saldo real
-        usedInOpenCycle: isPaid ? 0.0 : usedInCycle,
-        currentCyclePaid: isPaid,
+        usedInOpenCycle: usedInOpenCycle,
+        lastCyclePaid: lastCyclePaid,
       );
     }
 
@@ -165,7 +173,7 @@ class _CardsPageState extends State<CardsPage> {
 
     final summary = _summaries[card.id];
     final used    = summary?.usedInOpenCycle ?? 0;
-    final paid    = summary?.currentCyclePaid ?? false;
+    final paid    = summary?.lastCyclePaid ?? false;
     final ratio   = (used / limit).clamp(0.0, 1.0);
     final color   = _limitColor(ratio);
 
@@ -189,8 +197,8 @@ class _CardsPageState extends State<CardsPage> {
             const SizedBox(width: AppSpacing.sm),
             Text(
               '${(ratio * 100).toStringAsFixed(1)}%',
-              style: AppText.badge.copyWith(
-                  fontWeight: FontWeight.bold, color: color),
+              style: AppText.badge
+                  .copyWith(fontWeight: FontWeight.bold, color: color),
             ),
           ],
         ),
@@ -211,7 +219,7 @@ class _CardsPageState extends State<CardsPage> {
                   borderRadius: BorderRadius.circular(AppRadius.chip),
                 ),
                 child: Text(
-                  'Paga',
+                  'Últ. fatura paga',
                   style: AppText.badge
                       .copyWith(color: AppColors.limitLow),
                 ),
@@ -273,7 +281,7 @@ class _CardsPageState extends State<CardsPage> {
           Icon(Icons.check_circle_outline,
               size: 11, color: AppColors.limitLow),
           const SizedBox(width: 3),
-          Text('Paga',
+          Text('Últ. fatura paga',
               style: AppText.badge.copyWith(color: AppColors.limitLow)),
         ],
       ),
@@ -339,7 +347,7 @@ class _CardsPageState extends State<CardsPage> {
                                     card.type == CardType.credit;
                                 final summary  = _summaries[card.id];
                                 final isPaid   =
-                                    summary?.currentCyclePaid ?? false;
+                                    summary?.lastCyclePaid ?? false;
 
                                 return Dismissible(
                                   key: ValueKey(card.id),
