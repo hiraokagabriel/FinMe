@@ -14,11 +14,11 @@ class ProfilePickerPage extends StatefulWidget {
 }
 
 class _ProfilePickerPageState extends State<ProfilePickerPage> {
-  final _nameCtrl  = TextEditingController();
-  bool  _creating  = false;
-  String _selectedEmoji = '👤';
+  final _nameCtrl        = TextEditingController();
+  bool  _creating        = false;
+  String _selectedEmoji  = '\uD83D\uDC64';
 
-  static const _emojis = ['👤', '💼', '🏠', '💰', '🌟', '📚', '📊'];
+  static const _emojis = ['\uD83D\uDC64','\uD83D\uDCBC','\uD83C\uDFE0','\uD83D\uDCB0','\uD83C\uDF1F','\uD83D\uDCDA','\uD83D\uDCCA'];
 
   @override
   void dispose() {
@@ -27,11 +27,9 @@ class _ProfilePickerPageState extends State<ProfilePickerPage> {
   }
 
   Future<void> _select(ProfileModel profile) async {
+    final loginId = AuthService.instance.activeLoginId!;
     await AuthService.instance.switchProfile(profile.id);
-    await ProfileService.instance.switchTo(
-      AuthService.instance.activeLoginId!,
-      profile.id,
-    );
+    await ProfileService.instance.switchTo(loginId, profile.id);
     if (!mounted) return;
     Navigator.pushReplacementNamed(context, AppRouter.dashboard);
   }
@@ -58,26 +56,17 @@ class _ProfilePickerPageState extends State<ProfilePickerPage> {
   @override
   Widget build(BuildContext context) {
     final theme    = Theme.of(context);
-    final colors   = theme.extension<AppColors>()!;
+    final scheme   = theme.colorScheme;
     final profiles = AuthService.instance.profilesForActiveLogin;
     final atLimit  = profiles.length >= AuthService.maxProfilesPerLogin;
 
     return Scaffold(
-      backgroundColor: colors.colorBackground,
+      backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: colors.colorSurface,
-        elevation: 0,
-        title: Text(
-          'Selecionar Perfil',
-          style: TextStyle(
-            color: colors.colorTextPrimary,
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
+        title: const Text('Selecionar Perfil'),
         actions: [
           IconButton(
-            icon: Icon(Icons.logout_outlined, color: colors.colorTextSecondary),
+            icon: const Icon(Icons.logout_outlined),
             tooltip: 'Sair',
             onPressed: _logout,
           ),
@@ -88,13 +77,10 @@ class _ProfilePickerPageState extends State<ProfilePickerPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Lista de perfis existentes
             if (profiles.isNotEmpty) ...[
               Text(
                 'Seus perfis',
-                style: TextStyle(
-                  color: colors.colorTextSecondary,
-                  fontSize: 13,
+                style: theme.textTheme.bodySmall?.copyWith(
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -102,24 +88,19 @@ class _ProfilePickerPageState extends State<ProfilePickerPage> {
               ...profiles.map((p) => _ProfileTile(
                 profile: p,
                 onTap: () => _select(p),
-                colors: colors,
               )),
               const SizedBox(height: 24),
             ],
 
-            // Criar novo perfil
             if (!atLimit) ...[
               Text(
                 'Novo perfil',
-                style: TextStyle(
-                  color: colors.colorTextSecondary,
-                  fontSize: 13,
+                style: theme.textTheme.bodySmall?.copyWith(
                   fontWeight: FontWeight.w600,
                 ),
               ),
               const SizedBox(height: 12),
 
-              // Seletor de emoji
               Wrap(
                 spacing: 8,
                 children: _emojis.map((e) => GestureDetector(
@@ -129,13 +110,13 @@ class _ProfilePickerPageState extends State<ProfilePickerPage> {
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
                       color: e == _selectedEmoji
-                          ? colors.colorPrimary.withOpacity(0.15)
-                          : colors.colorSurface,
-                      borderRadius: BorderRadius.circular(8),
+                          ? scheme.primary.withOpacity(0.15)
+                          : scheme.surface,
+                      borderRadius: BorderRadius.circular(AppRadius.card),
                       border: Border.all(
                         color: e == _selectedEmoji
-                            ? colors.colorPrimary
-                            : colors.colorBorder,
+                            ? scheme.primary
+                            : AppColors.divider,
                         width: e == _selectedEmoji ? 1.5 : 1,
                       ),
                     ),
@@ -150,13 +131,8 @@ class _ProfilePickerPageState extends State<ProfilePickerPage> {
                   Expanded(
                     child: TextField(
                       controller: _nameCtrl,
-                      decoration: InputDecoration(
+                      decoration: const InputDecoration(
                         hintText: 'Nome do perfil',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 12),
                       ),
                       onSubmitted: (_) => _createProfile(),
                     ),
@@ -164,14 +140,6 @@ class _ProfilePickerPageState extends State<ProfilePickerPage> {
                   const SizedBox(width: 8),
                   FilledButton(
                     onPressed: _creating ? null : _createProfile,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: colors.colorPrimary,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
                     child: _creating
                         ? const SizedBox(
                             width: 18, height: 18,
@@ -184,7 +152,7 @@ class _ProfilePickerPageState extends State<ProfilePickerPage> {
             ] else
               Text(
                 'Limite de ${AuthService.maxProfilesPerLogin} perfis atingido.',
-                style: TextStyle(color: colors.colorTextSecondary, fontSize: 13),
+                style: theme.textTheme.bodySmall,
               ),
           ],
         ),
@@ -196,45 +164,40 @@ class _ProfilePickerPageState extends State<ProfilePickerPage> {
 class _ProfileTile extends StatelessWidget {
   final ProfileModel profile;
   final VoidCallback onTap;
-  final AppColors    colors;
 
-  const _ProfileTile({
-    required this.profile,
-    required this.onTap,
-    required this.colors,
-  });
+  const _ProfileTile({required this.profile, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
+    final theme  = Theme.of(context);
+    final scheme = theme.colorScheme;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(AppRadius.card),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
-            color: colors.colorSurface,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: colors.colorBorder, width: 1),
+            color: scheme.surface,
+            borderRadius: BorderRadius.circular(AppRadius.card),
+            border: Border.all(color: AppColors.divider, width: 1),
           ),
           child: Row(
             children: [
-              Text(profile.avatarEmoji,
-                  style: const TextStyle(fontSize: 24)),
+              Text(profile.avatarEmoji, style: const TextStyle(fontSize: 24)),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   profile.name,
-                  style: TextStyle(
-                    color: colors.colorTextPrimary,
-                    fontSize: 15,
+                  style: theme.textTheme.bodyLarge?.copyWith(
                     fontWeight: FontWeight.w500,
                   ),
                 ),
               ),
               Icon(Icons.chevron_right,
-                  color: colors.colorTextSecondary, size: 20),
+                  color: scheme.onSurfaceVariant, size: 20),
             ],
           ),
         ),

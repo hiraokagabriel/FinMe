@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:hive/hive.dart';
-import 'package:uuid/uuid.dart';
 
 import '../../features/auth/data/login_model.dart';
 import '../../features/auth/data/profile_model.dart';
@@ -14,7 +13,7 @@ class AuthService extends ChangeNotifier {
   static final AuthService instance = AuthService._();
 
   static const int maxProfilesPerLogin = 5;
-  static const _kActiveLogin = 'activeLogin';
+  static const _kActiveLogin   = 'activeLogin';
   static const _kActiveProfile = 'activeProfile';
 
   String? _activeLoginId;
@@ -31,31 +30,28 @@ class AuthService extends ChangeNotifier {
   // Boot
   // ---------------------------------------------------------------------------
 
-  /// Restaura sessão persistida. Chamado em main() antes de runApp.
   Future<void> loadFromStorage() async {
-    final settings = Hive.box<String>(HiveInit.settingsBoxName);
-    final storedLogin   = settings.get(_kActiveLogin);
+    final settings     = Hive.box<String>(HiveInit.settingsBoxName);
+    final storedLogin  = settings.get(_kActiveLogin);
     final storedProfile = settings.get(_kActiveProfile);
 
     if (storedLogin != null && _loginsBox.containsKey(storedLogin)) {
       _activeLoginId   = storedLogin;
       _activeProfileId = storedProfile;
     }
-    // Se não existir, _activeLoginId = null → app direciona para LoginPage
   }
 
   // ---------------------------------------------------------------------------
   // Auth
   // ---------------------------------------------------------------------------
 
-  /// Cria novo login. Retorna false se username já existe.
   Future<bool> register(String username, String password) async {
     final exists = _loginsBox.values.any(
       (l) => l.username.toLowerCase() == username.toLowerCase(),
     );
     if (exists) return false;
 
-    final id = const Uuid().v4();
+    final id = _newId();
     await _loginsBox.put(
       id,
       LoginModel(
@@ -65,27 +61,20 @@ class AuthService extends ChangeNotifier {
         createdAt:    DateTime.now(),
       ),
     );
-
-    // Cria perfil padrão automaticamente
-    await _createProfileInternal(loginId: id, name: 'Principal', avatarEmoji: '👤');
+    await _createProfileInternal(loginId: id, name: 'Principal', avatarEmoji: '\uD83D\uDC64');
     return true;
   }
 
-  /// Autentica. Retorna false se credenciais inválidas.
   Future<bool> login(String username, String password) async {
     final login = _loginsBox.values.where(
       (l) => l.username.toLowerCase() == username.toLowerCase(),
     ).firstOrNull;
-
     if (login == null) return false;
 
-    // Login sem senha (migrado): aceita qualquer senha ou vazio
     final valid = login.passwordHash.isEmpty || login.passwordHash == _hash(password);
     if (!valid) return false;
 
     _activeLoginId = login.id;
-
-    // Seleciona o primeiro perfil disponível
     final profiles = profilesForLogin(login.id);
     _activeProfileId = profiles.isNotEmpty ? profiles.first.id : null;
 
@@ -94,12 +83,10 @@ class AuthService extends ChangeNotifier {
     if (_activeProfileId != null) {
       await settings.put(_kActiveProfile, _activeProfileId!);
     }
-
     notifyListeners();
     return true;
   }
 
-  /// Limpa sessão sem apagar dados.
   Future<void> logout() async {
     _activeLoginId   = null;
     _activeProfileId = null;
@@ -138,7 +125,6 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Remove perfil. Impede se for o único do login.
   Future<bool> deleteProfile(String profileId) async {
     if (!isAuthenticated) return false;
     final profiles = profilesForActiveLogin;
@@ -163,6 +149,13 @@ class AuthService extends ChangeNotifier {
   // Helpers
   // ---------------------------------------------------------------------------
 
+  static int _counter = 0;
+  static String _newId() {
+    final ts = DateTime.now().microsecondsSinceEpoch;
+    _counter++;
+    return '${ts}_$_counter';
+  }
+
   static String _hash(String input) =>
       sha256.convert(utf8.encode(input)).toString();
 
@@ -171,7 +164,7 @@ class AuthService extends ChangeNotifier {
     required String name,
     required String avatarEmoji,
   }) async {
-    final id = const Uuid().v4();
+    final id = _newId();
     final model = ProfileModel(
       id:          id,
       loginId:     loginId,

@@ -42,7 +42,6 @@ class _LoginPageState extends State<LoginPage> {
         setState(() { _loading = false; _error = 'Nome de usuário já existe.'; });
         return;
       }
-      // Autentica após registro
       await AuthService.instance.login(username, password);
     } else {
       final ok = await AuthService.instance.login(username, password);
@@ -54,22 +53,18 @@ class _LoginPageState extends State<LoginPage> {
     }
 
     if (!mounted) return;
-
-    // Abre boxes e inicializa repositórios para o perfil ativo
     await ProfileService.instance.loadFromStorage();
-
     if (!mounted) return;
     Navigator.pushReplacementNamed(context, AppRouter.profilePick);
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme   = Theme.of(context);
-    final colors  = theme.extension<AppColors>()!;
-    final isDark  = theme.brightness == Brightness.dark;
+    final theme  = Theme.of(context);
+    final scheme = theme.colorScheme;
 
     return Scaffold(
-      backgroundColor: colors.colorBackground,
+      backgroundColor: theme.scaffoldBackgroundColor,
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -80,11 +75,10 @@ class _LoginPageState extends State<LoginPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Logo / Título
                   Text(
                     'FinMe',
                     style: theme.textTheme.headlineMedium?.copyWith(
-                      color: colors.colorPrimary,
+                      color: scheme.primary,
                       fontWeight: FontWeight.w700,
                     ),
                     textAlign: TextAlign.center,
@@ -93,37 +87,25 @@ class _LoginPageState extends State<LoginPage> {
                   Text(
                     _isRegister ? 'Criar conta' : 'Entrar',
                     style: theme.textTheme.titleMedium?.copyWith(
-                      color: colors.colorTextSecondary,
+                      color: scheme.onSurfaceVariant,
                     ),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 32),
 
-                  // Campo usuário
                   TextFormField(
                     controller: _usernameCtrl,
-                    decoration: InputDecoration(
-                      labelText: 'Usuário',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
+                    decoration: const InputDecoration(labelText: 'Usuário'),
                     validator: (v) =>
                         (v == null || v.trim().isEmpty) ? 'Obrigatório' : null,
                     textInputAction: TextInputAction.next,
                   ),
                   const SizedBox(height: 16),
 
-                  // Campo senha
                   TextFormField(
                     controller: _passwordCtrl,
                     obscureText: true,
-                    decoration: InputDecoration(
-                      labelText: 'Senha',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
+                    decoration: const InputDecoration(labelText: 'Senha'),
                     validator: (v) =>
                         (_isRegister && (v == null || v.length < 4))
                             ? 'Mínimo 4 caracteres'
@@ -132,55 +114,37 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                   const SizedBox(height: 8),
 
-                  // Erro
                   if (_error != null)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 8),
                       child: Text(
                         _error!,
                         style: TextStyle(
-                          color: colors.colorDanger,
+                          color: scheme.error,
                           fontSize: 13,
                         ),
                       ),
                     ),
 
-                  // Botão principal
                   FilledButton(
                     onPressed: _loading ? null : _submit,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: colors.colorPrimary,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
                     child: _loading
                         ? const SizedBox(
                             width: 20, height: 20,
                             child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
+                              strokeWidth: 2, color: Colors.white),
                           )
-                        : Text(
-                            _isRegister ? 'Criar conta' : 'Entrar',
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
+                        : Text(_isRegister ? 'Criar conta' : 'Entrar'),
                   ),
                   const SizedBox(height: 16),
 
-                  // Toggle login / registro
                   TextButton(
                     onPressed: () => setState(() {
                       _isRegister = !_isRegister;
                       _error = null;
                     }),
                     child: Text(
-                      _isRegister
-                          ? 'Já tem conta? Entrar'
-                          : 'Criar nova conta',
-                      style: TextStyle(color: colors.colorPrimary),
+                      _isRegister ? 'Já tem conta? Entrar' : 'Criar nova conta',
                     ),
                   ),
                 ],

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/models/app_mode.dart';
 import '../../../core/services/app_mode_controller.dart';
+import '../../../core/services/auth_service.dart';
 import '../../../core/services/demo_seed_service.dart';
 import '../../../core/services/preferences_service.dart';
 import '../../../core/services/profile_service.dart';
@@ -45,65 +46,32 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _toggleDemo(bool enable) async {
     if (_switchingProfile) return;
 
-    if (enable) {
-      final confirm = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Ativar Modo Demo?'),
-          content: const Text(
-            'Seus dados reais serão preservados. O app será recarregado com dados de exemplo cobrindo 12 meses.\n\nDesative o Modo Demo a qualquer momento para voltar aos seus dados.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Ativar'),
-            ),
-          ],
-        ),
-      );
-      if (confirm != true || !mounted) return;
-    } else {
-      final confirm = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Desativar Modo Demo?'),
-          content: const Text(
-            'O app voltará para os seus dados reais. Os dados demo permanecem salvos e podem ser reativados.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Desativar'),
-            ),
-          ],
-        ),
-      );
-      if (confirm != true || !mounted) return;
-    }
+    final title   = enable ? 'Ativar Modo Demo?'    : 'Desativar Modo Demo?';
+    final content = enable
+        ? 'Seus dados reais serão preservados. O app será recarregado com dados de exemplo cobrindo 12 meses.\n\nDesative o Modo Demo a qualquer momento para voltar aos seus dados.'
+        : 'O app voltará para os seus dados reais. Os dados demo permanecem salvos e podem ser reativados.';
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(content),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true),  child: Text(enable ? 'Ativar' : 'Desativar')),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
 
     setState(() => _switchingProfile = true);
-
     try {
-      final target = enable
-          ? ProfileService.profileDemo
-          : ProfileService.profileDefault;
+      final loginId = AuthService.instance.activeLoginId!;
+      final target  = enable ? ProfileService.profileDemo : ProfileService.profileDefault;
 
-      await ProfileService.instance.switchTo(target);
-
-      // Popula dados demo se ainda não foram gerados
+      await ProfileService.instance.switchTo(loginId, target);
       if (enable) await DemoSeedService.instance.populate();
-
       if (!mounted) return;
-
-      // Reinicia a navegação para o dashboard com os novos dados
       Navigator.of(context).pushNamedAndRemoveUntil('/', (_) => false);
     } finally {
       if (mounted) setState(() => _switchingProfile = false);
@@ -121,13 +89,12 @@ class _SettingsPageState extends State<SettingsPage> {
       body: AnimatedBuilder(
         animation: Listenable.merge([modeController, themeController, profileService]),
         builder: (context, _) {
-          final isUltra  = modeController.mode == AppMode.ultra;
-          final isDark   = themeController.isDark;
-          final isDemo   = profileService.isDemoActive;
+          final isUltra = modeController.mode == AppMode.ultra;
+          final isDark  = themeController.isDark;
+          final isDemo  = profileService.isDemoActive;
 
           return ListView(
             children: [
-              // ── Aparência ────────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.xs),
                 child: Text('Aparência', style: AppText.sectionLabel),
@@ -141,7 +108,6 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const Divider(height: AppSpacing.h),
 
-              // ── Regional ─────────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xs),
                 child: Text('Regional', style: AppText.sectionLabel),
@@ -174,7 +140,6 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const Divider(height: AppSpacing.h),
 
-              // ── Modo de uso ───────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xs),
                 child: Text('Modo de uso', style: AppText.sectionLabel),
@@ -198,12 +163,11 @@ class _SettingsPageState extends State<SettingsPage> {
               AnimatedSwitcher(
                 duration: const Duration(milliseconds: 250),
                 child: isUltra
-                    ? _ModeBanner(key: const ValueKey('ultra'), icon: Icons.bolt, accentColor: AppColors.primary, title: 'Modo Ultra ativo', message: 'Gráficos por categoria e cartão, limite de crédito e campos avançados nas transações.')
+                    ? _ModeBanner(key: const ValueKey('ultra'),  icon: Icons.bolt,        accentColor: AppColors.primary,  title: 'Modo Ultra ativo',   message: 'Gráficos por categoria e cartão, limite de crédito e campos avançados nas transações.')
                     : _ModeBanner(key: const ValueKey('simple'), icon: Icons.spa_outlined, accentColor: AppColors.limitLow, title: 'Modo Simples ativo', message: 'Interface enxuta: apenas data na lista de transações.'),
               ),
               const Divider(height: AppSpacing.h),
 
-              // ── Dados ─────────────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xs),
                 child: Text('Dados', style: AppText.sectionLabel),
@@ -219,16 +183,12 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const Divider(height: AppSpacing.h),
 
-              // ── Modo Demo ─────────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xs),
                 child: Text('Benchmark', style: AppText.sectionLabel),
               ),
               SwitchListTile(
-                secondary: Icon(
-                  Icons.science_outlined,
-                  color: isDemo ? AppColors.warning : null,
-                ),
+                secondary: Icon(Icons.science_outlined, color: isDemo ? AppColors.warning : null),
                 title: const Text('Modo Demo'),
                 subtitle: const Text(
                   'Preenche o app com dados de exemplo de 12 meses. Seus dados reais são preservados.',
@@ -291,7 +251,7 @@ class _ModeBanner extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: AppText.sectionLabel.copyWith(color: accentColor)),
+                Text(title,   style: AppText.sectionLabel.copyWith(color: accentColor)),
                 const SizedBox(height: 3),
                 Text(message, style: AppText.secondary),
               ],
