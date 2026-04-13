@@ -43,7 +43,7 @@ class StatementService {
     final txs = allTransactions.where((tx) {
       if (tx.cardId != card.id) return false;
       if (tx.type != TransactionType.expense) return false;
-      if (tx.isBillPayment) return false; // não contabiliza pagamento de fatura
+      if (tx.isBillPayment) return false;
       final d = tx.date;
       return !d.isBefore(cycleStart) && !d.isAfter(cycleEnd);
     }).toList()
@@ -97,15 +97,17 @@ class StatementService {
   }
 
   /// Marca ou desmarca fatura como paga.
-  /// Ao marcar (paid=true): persiste flag + cria transação isBillPayment.
+  /// Ao marcar (paid=true): persiste flag + cria transação isBillPayment
+  ///   vinculada a [accountId] (conta debitada).
   /// Ao desmarcar (paid=false): remove flag + remove transação isBillPayment.
   Future<void> markPaid(
     String cardId,
     int year,
     int month, {
     required bool paid,
-    double? amount,      // necessário apenas quando paid=true
-    String? cardName,   // necessário apenas quando paid=true
+    double? amount,
+    String? cardName,
+    String? accountId, // obrigatório quando paid=true
   }) async {
     final box    = Hive.box<String>(_box);
     final repo   = RepositoryLocator.instance.transactions;
@@ -115,17 +117,17 @@ class StatementService {
     if (paid) {
       await box.put(_key(cardId, year, month), '1');
 
-      // Cria transação de pagamento se ainda não existir
       final alreadyExists = allTx.any((t) => t.id == txKey);
       if (!alreadyExists && amount != null && amount > 0) {
         await repo.add(TransactionEntity(
           id:            txKey,
           amount:        Money(amount),
-          date:          DateTime(year, month),
+          date:          DateTime.now(),
           type:          TransactionType.expense,
           paymentMethod: PaymentMethod.other,
           description:   'Fatura ${cardName ?? cardId}',
           cardId:        cardId,
+          accountId:     accountId,
           isBoleto:      false,
           isProvisioned: false,
           recurrenceRule: RecurrenceRule.none,
@@ -135,7 +137,6 @@ class StatementService {
     } else {
       await box.put(_key(cardId, year, month), '0');
 
-      // Remove transação de pagamento se existir
       if (allTx.any((t) => t.id == txKey)) {
         await repo.remove(txKey);
       }
