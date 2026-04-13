@@ -16,7 +16,7 @@ class TransactionModel {
   final String? description;
   final String categoryId;
   final String? cardId;
-  final String? accountId;     // field 18 (novo)
+  final String? accountId;     // field 18 — nullable, retrocompatível
   final bool isBoleto;
   final bool isProvisioned;
   final int? installmentCount;
@@ -25,7 +25,7 @@ class TransactionModel {
   final String? recurrenceSourceId;
   final String? toAccountId;   // field 15
   final String? notes;         // field 16
-  final bool isBillPayment;    // field 17 — retrocompatível (default false)
+  final bool isBillPayment;    // field 17
 
   TransactionModel({
     required this.id,
@@ -37,7 +37,7 @@ class TransactionModel {
     required this.description,
     required this.categoryId,
     required this.cardId,
-    required this.accountId,
+    this.accountId,           // opcional — sem required
     required this.isBoleto,
     required this.isProvisioned,
     this.installmentCount,
