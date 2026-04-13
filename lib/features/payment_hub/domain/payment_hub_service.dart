@@ -133,7 +133,8 @@ class PaymentHubService {
     return items;
   }
 
-  Future<void> markAsPaid(PaymentItem item) async {
+  /// [accountId] obrigatório para [PaymentItemType.cardBill] — conta que será debitada.
+  Future<void> markAsPaid(PaymentItem item, {String? accountId}) async {
     final locator = RepositoryLocator.instance;
     final now     = DateTime.now();
 
@@ -179,7 +180,6 @@ class PaymentHubService {
       final closingDate = item.closingDate;
       if (cardId == null || closingDate == null) return;
 
-      // Busca nome do cartão para descrição
       final allCards = await locator.cards.getAll();
       final card     = allCards.where((c) => c.id == cardId).firstOrNull;
 
@@ -187,9 +187,10 @@ class PaymentHubService {
         cardId,
         closingDate.year,
         closingDate.month,
-        paid:     true,
-        amount:   item.amount,
-        cardName: card?.name,
+        paid:      true,
+        amount:    item.amount,
+        cardName:  card?.name,
+        accountId: accountId,
       );
     }
   }
