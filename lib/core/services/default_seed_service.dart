@@ -3,6 +3,7 @@ import 'package:hive/hive.dart';
 
 import '../../features/transactions/data/transaction_model.dart';
 import '../../features/categories/data/category_model.dart';
+import '../../features/categories/domain/category_ids.dart';
 import '../../features/cards/data/card_model.dart';
 import '../../features/accounts/data/account_model.dart';
 import '../../features/accounts/domain/account_entity.dart';
@@ -31,7 +32,11 @@ class DefaultSeedService {
     final txBox  = await Hive.openBox<TransactionModel>(
         ProfileService.boxName(HiveInit.transactionsBoxName, loginId, profileId));
 
-    if (catBox.isEmpty) {
+    // Garante categoria reservada independentemente de o box estar vazio.
+    await _ensureBillPaymentCategory(catBox);
+
+    if (catBox.length == 1) {
+      // Só a reservada: box estava vazio antes do ensureBillPaymentCategory.
       final seedCategories = [
         CategoryModel(id: 'cat_food',          name: 'Alimentação',  kindIndex: 0, colorValue: 0xFFF44336, iconCodePoint: Icons.restaurant_outlined.codePoint),
         CategoryModel(id: 'cat_transport',     name: 'Transporte',   kindIndex: 0, colorValue: 0xFF2196F3, iconCodePoint: Icons.directions_car_outlined.codePoint),
@@ -99,6 +104,23 @@ class DefaultSeedService {
         ),
       ];
       await txBox.putAll({for (final t in seedTxs) t.id: t});
+    }
+  }
+
+  /// Garante que a categoria reservada de fatura exista no box.
+  /// Idempotente — seguro chamar a cada boot.
+  Future<void> _ensureBillPaymentCategory(Box<CategoryModel> catBox) async {
+    if (!catBox.containsKey(CategoryIds.billPayment)) {
+      await catBox.put(
+        CategoryIds.billPayment,
+        CategoryModel(
+          id:            CategoryIds.billPayment,
+          name:          'Fatura',
+          kindIndex:     0,
+          colorValue:    0xFF607D8B,
+          iconCodePoint: Icons.credit_card_outlined.codePoint,
+        ),
+      );
     }
   }
 }

@@ -2,6 +2,7 @@ import 'package:hive/hive.dart';
 
 import '../../../core/models/money.dart';
 import '../../../core/services/repository_locator.dart';
+import '../../../features/categories/domain/category_ids.dart';
 import 'card_entity.dart';
 import 'statement_cycle.dart';
 import '../../transactions/domain/transaction_entity.dart';
@@ -98,7 +99,7 @@ class StatementService {
 
   /// Marca ou desmarca fatura como paga.
   /// Ao marcar (paid=true): persiste flag + cria transação isBillPayment
-  ///   vinculada a [accountId] (conta debitada).
+  ///   com categoryId = CategoryIds.billPayment.
   /// Ao desmarcar (paid=false): remove flag + remove transação isBillPayment.
   Future<void> markPaid(
     String cardId,
@@ -107,7 +108,7 @@ class StatementService {
     required bool paid,
     double? amount,
     String? cardName,
-    String? accountId, // obrigatório quando paid=true
+    String? accountId,
   }) async {
     final box    = Hive.box<String>(_box);
     final repo   = RepositoryLocator.instance.transactions;
@@ -120,18 +121,19 @@ class StatementService {
       final alreadyExists = allTx.any((t) => t.id == txKey);
       if (!alreadyExists && amount != null && amount > 0) {
         await repo.add(TransactionEntity(
-          id:            txKey,
-          amount:        Money(amount),
-          date:          DateTime.now(),
-          type:          TransactionType.expense,
-          paymentMethod: PaymentMethod.other,
-          description:   'Fatura ${cardName ?? cardId}',
-          cardId:        cardId,
-          accountId:     accountId,
-          isBoleto:      false,
-          isProvisioned: false,
+          id:             txKey,
+          amount:         Money(amount),
+          date:           DateTime.now(),
+          type:           TransactionType.expense,
+          paymentMethod:  PaymentMethod.other,
+          description:    'Fatura ${cardName ?? cardId}',
+          categoryId:     CategoryIds.billPayment,
+          cardId:         cardId,
+          accountId:      accountId,
+          isBoleto:       false,
+          isProvisioned:  false,
           recurrenceRule: RecurrenceRule.none,
-          isBillPayment: true,
+          isBillPayment:  true,
         ));
       }
     } else {

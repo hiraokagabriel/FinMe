@@ -7,6 +7,7 @@ import '../../../core/services/app_mode_controller.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../cards/domain/card_entity.dart';
 import '../../categories/domain/category_entity.dart';
+import '../../categories/domain/category_ids.dart';
 import '../domain/payment_method.dart';
 import '../domain/recurrence_rule.dart';
 import '../domain/transaction_entity.dart';
@@ -38,7 +39,8 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
 
   late final Future<List<dynamic>> _loadFuture;
 
-  bool get _isEdit => widget.initialTransaction != null;
+  bool get _isEdit        => widget.initialTransaction != null;
+  bool get _isBillPayment => widget.initialTransaction?.isBillPayment ?? false;
 
   @override
   void initState() {
@@ -72,8 +74,14 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
       final seen          = <String>{};
       final categories =
           rawCategories.where((c) => seen.add(c.id)).toList(growable: false);
-      if (_selectedCategoryId == null && categories.isNotEmpty) {
-        setState(() => _selectedCategoryId = categories.first.id);
+      // Em modo normal (não bill payment), pula a categoria reservada.
+      if (_selectedCategoryId == null) {
+        final selectable = categories
+            .where((c) => c.id != CategoryIds.billPayment)
+            .toList();
+        if (selectable.isNotEmpty) {
+          setState(() => _selectedCategoryId = selectable.first.id);
+        }
       }
       return [categories, results[1]];
     });
@@ -146,6 +154,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
       installmentCount:   installments,
       recurrenceRule:     _recurrenceRule,
       recurrenceSourceId: null,
+      isBillPayment:      widget.initialTransaction?.isBillPayment ?? false,
     );
 
     if (_isEdit) {
@@ -186,21 +195,44 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
               ? List<CardEntity>.from(snapshot.data![1] as List)
               : <CardEntity>[];
 
+          // Categorias selecionáveis pelo usuário (exclui a reservada).
+          final selectableCategories = categories
+              .where((c) => c.id != CategoryIds.billPayment)
+              .toList();
+
           // Guards: garante que o value dos dropdowns só é usado
-          // quando o item correspondente já está na lista.
-          final safeCategoryId = categories.any((c) => c.id == _selectedCategoryId)
-              ? _selectedCategoryId
-              : (categories.isNotEmpty ? categories.first.id : null);
+          // quando o item correspondente já está na lista carregada.
+          final String? safeCategoryId;
+          if (_isBillPayment) {
+            // Bill payment sempre usa a categoria reservada.
+            safeCategoryId = CategoryIds.billPayment;
+          } else {
+            safeCategoryId = selectableCategories.any((c) => c.id == _selectedCategoryId)
+                ? _selectedCategoryId
+                : (selectableCategories.isNotEmpty ? selectableCategories.first.id : null);
+          }
+
           final safeCardId = cards.any((c) => c.id == _selectedCardId)
               ? _selectedCardId
               : null;
 
-          // Sincroniza estado se necessário (ex: categoria resolvida pelo guard)
           if (safeCategoryId != _selectedCategoryId) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (mounted) setState(() => _selectedCategoryId = safeCategoryId);
             });
           }
+
+          // Categoria exibida no dropdown de bill payment.
+          final billCategory = categories.firstWhere(
+            (c) => c.id == CategoryIds.billPayment,
+            orElse: () => CategoryEntity(
+              id:            CategoryIds.billPayment,
+              name:          'Fatura',
+              kind:          CategoryKind.expense,
+              colorValue:    0xFF607D8B,
+              iconCodePoint: Icons.credit_card_outlined.codePoint,
+            ),
+          );
 
           return Padding(
             padding: const EdgeInsets.all(AppSpacing.lg),
@@ -210,6 +242,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                 children: [
                   TextFormField(
                     controller: _descriptionController,
+                    readOnly:   _isBillPayment,
                     decoration: const InputDecoration(
                       labelText: 'Descrição (opcional)',
                       hintText: 'Ex: Mercado, Cinema...',
@@ -219,6 +252,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
 
                   TextFormField(
                     controller: _amountController,
+                    readOnly:   _isBillPayment,
                     keyboardType: const TextInputType.numberWithOptions(
                         decimal: true),
                     decoration: const InputDecoration(
@@ -256,7 +290,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                               child: Text('Receita'),
                             ),
                           ],
-                          onChanged: (v) {
+                          onChanged: _isBillPayment ? null : (v) {
                             if (v != null)
                               setState(() => _selectedType = v);
                           },
@@ -288,7 +322,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                                 value: PaymentMethod.other,
                                 child: Text('Outro')),
                           ],
-                          onChanged: (v) {
+                          onChanged: _isBillPayment ? null : (v) {
                             if (v != null)
                               setState(
                                   () => _selectedPaymentMethod = v);
@@ -299,66 +333,118 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                   ),
                   const SizedBox(height: AppSpacing.md),
 
-                  DropdownButtonFormField<String>(
-                    value: safeCategoryId,
-                    decoration:
-                        const InputDecoration(labelText: 'Categoria'),
-                    items: categories
-                        .map((c) => DropdownMenuItem<String>(
-                              value: c.id,
-                              child: Text(c.name),
-                            ))
-                        .toList(),
-                    onChanged: (v) =>
-                        setState(() => _selectedCategoryId = v),
-                  ),
+                  // ── Categoria ────────────────────────────────────────
+                  if (_isBillPayment)
+                    Tooltip(
+                      message:
+                          'A categoria de pagamento de fatura é gerenciada automaticamente e não pode ser alterada.',
+                      triggerMode: TooltipTriggerMode.tap,
+                      child: IgnorePointer(
+                        child: DropdownButtonFormField<String>(
+                          value: CategoryIds.billPayment,
+                          decoration: InputDecoration(
+                            labelText: 'Categoria',
+                            suffixIcon: Icon(
+                              Icons.lock_outline,
+                              size: 16,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                          items: [
+                            DropdownMenuItem<String>(
+                              value: CategoryIds.billPayment,
+                              child: Text(billCategory.name),
+                            ),
+                          ],
+                          onChanged: null,
+                        ),
+                      ),
+                    )
+                  else
+                    DropdownButtonFormField<String>(
+                      value: safeCategoryId,
+                      decoration:
+                          const InputDecoration(labelText: 'Categoria'),
+                      items: selectableCategories
+                          .map((c) => DropdownMenuItem<String>(
+                                value: c.id,
+                                child: Text(c.name),
+                              ))
+                          .toList(),
+                      onChanged: (v) =>
+                          setState(() => _selectedCategoryId = v),
+                    ),
                   const SizedBox(height: AppSpacing.xs),
 
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Data da transação'),
                     subtitle: Text(_formatDate(_selectedDate)),
-                    trailing: TextButton(
-                      onPressed: () => _pickDate(
-                        initial: _selectedDate,
-                        onPick: (d) =>
-                            setState(() => _selectedDate = d),
-                      ),
-                      child: const Text('Alterar'),
-                    ),
+                    trailing: _isBillPayment
+                        ? null
+                        : TextButton(
+                            onPressed: () => _pickDate(
+                              initial: _selectedDate,
+                              onPick: (d) =>
+                                  setState(() => _selectedDate = d),
+                            ),
+                            child: const Text('Alterar'),
+                          ),
                   ),
 
-                  DropdownButtonFormField<RecurrenceRule>(
-                    value: _recurrenceRule,
-                    decoration: const InputDecoration(
-                      labelText: 'Repetir',
-                      prefixIcon: Icon(Icons.repeat_outlined),
+                  if (!_isBillPayment) ...[
+                    DropdownButtonFormField<RecurrenceRule>(
+                      value: _recurrenceRule,
+                      decoration: const InputDecoration(
+                        labelText: 'Repetir',
+                        prefixIcon: Icon(Icons.repeat_outlined),
+                      ),
+                      items: RecurrenceRule.values
+                          .map((r) => DropdownMenuItem(
+                                value: r,
+                                child: Text(r.label),
+                              ))
+                          .toList(),
+                      onChanged: (v) {
+                        if (v != null)
+                          setState(() => _recurrenceRule = v);
+                      },
                     ),
-                    items: RecurrenceRule.values
-                        .map((r) => DropdownMenuItem(
-                              value: r,
-                              child: Text(r.label),
-                            ))
-                        .toList(),
-                    onChanged: (v) {
-                      if (v != null)
-                        setState(() => _recurrenceRule = v);
-                    },
-                  ),
-                  if (_recurrenceRule != RecurrenceRule.none)
+                    if (_recurrenceRule != RecurrenceRule.none)
+                      Padding(
+                        padding: const EdgeInsets.only(
+                            top: AppSpacing.xs,
+                            left: AppSpacing.xs),
+                        child: Row(
+                          children: [
+                            Icon(Icons.info_outline,
+                                size: 14,
+                                color: AppColors.primary),
+                            const SizedBox(width: AppSpacing.xs),
+                            Flexible(
+                              child: Text(
+                                'Ocorrências futuras serão criadas automaticamente ao abrir o app.',
+                                style: AppText.secondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+
+                  if (_isBillPayment)
                     Padding(
-                      padding: const EdgeInsets.only(
-                          top: AppSpacing.xs,
-                          left: AppSpacing.xs),
+                      padding: const EdgeInsets.symmetric(
+                          vertical: AppSpacing.sm),
                       child: Row(
                         children: [
                           Icon(Icons.info_outline,
                               size: 14,
-                              color: AppColors.primary),
+                              color: AppColors.textSecondary),
                           const SizedBox(width: AppSpacing.xs),
                           Flexible(
                             child: Text(
-                              'Ocorrências futuras serão criadas automaticamente ao abrir o app.',
+                              'Este lançamento foi gerado automaticamente ao pagar a fatura. Alguns campos são somente leitura.',
                               style: AppText.secondary,
                             ),
                           ),
@@ -366,7 +452,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                       ),
                     ),
 
-                  if (isUltra) ...[
+                  if (isUltra && !_isBillPayment) ...[
                     const Divider(height: AppSpacing.xxl),
                     Container(
                       padding: const EdgeInsets.symmetric(
