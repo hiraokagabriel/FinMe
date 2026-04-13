@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/services/repository_locator.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/app_empty_state.dart';
+import '../../../features/accounts/domain/account_entity.dart';
 import '../domain/payment_hub_service.dart';
 import '../domain/payment_item.dart';
 
@@ -15,8 +17,8 @@ class PaymentHubPage extends StatefulWidget {
 class _PaymentHubPageState extends State<PaymentHubPage> {
   final _service = PaymentHubService.instance;
 
-  List<PaymentItem> _items = [];
-  bool _isLoading = true;
+  List<PaymentItem> _items    = [];
+  bool              _isLoading = true;
 
   @override
   void initState() {
@@ -38,8 +40,33 @@ class _PaymentHubPageState extends State<PaymentHubPage> {
     await _load();
   }
 
+  // ── Seleciona conta e confirma pagamento de fatura ────────────────
+
   Future<void> _markAsPaid(PaymentItem item) async {
-    await _service.markAsPaid(item);
+    if (item.type == PaymentItemType.cardBill) {
+      final accounts = await RepositoryLocator.instance.accounts.getAll();
+
+      if (!mounted) return;
+
+      final selectedAccount = await showModalBottomSheet<AccountEntity>(
+        context: context,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.card)),
+        ),
+        builder: (ctx) => _AccountPickerSheet(
+          accounts: accounts,
+          amount:   item.amount,
+          label:    item.label,
+        ),
+      );
+
+      if (selectedAccount == null) return;
+
+      await _service.markAsPaid(item, accountId: selectedAccount.id);
+    } else {
+      await _service.markAsPaid(item);
+    }
+
     await _load();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -53,7 +80,7 @@ class _PaymentHubPageState extends State<PaymentHubPage> {
   String _formatMoney(double v) =>
       'R\$ ${v.toStringAsFixed(2).replaceAll('.', ',')}';
 
-  // ─── Resumo ───────────────────────────────────────────────
+  // ── Resumo ───────────────────────────────────────────────────
 
   Widget _buildSummary() {
     final total = _items.fold(0.0, (s, i) => s + i.amount);
@@ -100,7 +127,7 @@ class _PaymentHubPageState extends State<PaymentHubPage> {
     );
   }
 
-  // ─── Selector de janela ──────────────────────────────────────
+  // ── Selector de janela ───────────────────────────────────────
 
   Widget _buildWindowSelector() {
     final current = _service.windowDays;
@@ -120,7 +147,7 @@ class _PaymentHubPageState extends State<PaymentHubPage> {
     );
   }
 
-  // ─── Tile de fatura de cartão ───────────────────────────────
+  // ── Tile de fatura de cartão ───────────────────────────────────
 
   Widget _buildCardBillTile(PaymentItem item) {
     final now      = DateTime.now();
@@ -216,7 +243,7 @@ class _PaymentHubPageState extends State<PaymentHubPage> {
     );
   }
 
-  // ─── Tile de provisionado ───────────────────────────────────
+  // ── Tile de provisionado ───────────────────────────────────
 
   Widget _buildProvisionedTile(PaymentItem item) {
     return Container(
@@ -275,7 +302,7 @@ class _PaymentHubPageState extends State<PaymentHubPage> {
     );
   }
 
-  // ─── Build ──────────────────────────────────────────────────
+  // ── Build ────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -327,6 +354,111 @@ class _PaymentHubPageState extends State<PaymentHubPage> {
                     ],
                   ],
                 ),
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// Modal de seleção de conta
+// ────────────────────────────────────────────────────────────────────────────────
+
+class _AccountPickerSheet extends StatelessWidget {
+  final List<AccountEntity> accounts;
+  final double              amount;
+  final String              label;
+
+  const _AccountPickerSheet({
+    required this.accounts,
+    required this.amount,
+    required this.label,
+  });
+
+  String _formatMoney(double v) =>
+      'R\$ ${v.toStringAsFixed(2).replaceAll('.', ',')}';
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.lg, vertical: AppSpacing.md),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ─ Cabeçalho
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Pagar com qual conta?',
+                          style: AppText.body
+                              .copyWith(fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 2),
+                      Text(
+                        '$label • ${_formatMoney(amount)}',
+                        style: AppText.secondary,
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 20),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            const Divider(height: 1),
+            const SizedBox(height: AppSpacing.sm),
+
+            // ─ Lista de contas
+            if (accounts.isEmpty)
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(vertical: AppSpacing.lg),
+                child: Center(
+                  child: Text(
+                    'Nenhuma conta cadastrada.',
+                    style: AppText.secondary,
+                  ),
+                ),
+              )
+            else
+              ...accounts.map((acc) => InkWell(
+                    onTap: () => Navigator.of(context).pop(acc),
+                    borderRadius:
+                        BorderRadius.circular(AppRadius.card),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          vertical: AppSpacing.sm),
+                      child: Row(
+                        children: [
+                          Icon(
+                            acc.type.icon,
+                            size: 20,
+                            color: AppColors.textSecondary,
+                          ),
+                          const SizedBox(width: AppSpacing.md),
+                          Expanded(
+                            child: Text(
+                              acc.name,
+                              style: AppText.body,
+                            ),
+                          ),
+                          Text(
+                            acc.type.label,
+                            style: AppText.secondary,
+                          ),
+                        ],
+                      ),
+                    ),
+                  )),
+          ],
+        ),
+      ),
     );
   }
 }
