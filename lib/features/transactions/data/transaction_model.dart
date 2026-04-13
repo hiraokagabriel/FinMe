@@ -16,6 +16,7 @@ class TransactionModel {
   final String? description;
   final String categoryId;
   final String? cardId;
+  final String? accountId;     // field 18 (novo)
   final bool isBoleto;
   final bool isProvisioned;
   final int? installmentCount;
@@ -36,6 +37,7 @@ class TransactionModel {
     required this.description,
     required this.categoryId,
     required this.cardId,
+    required this.accountId,
     required this.isBoleto,
     required this.isProvisioned,
     this.installmentCount,
@@ -61,6 +63,7 @@ class TransactionModel {
       description:        description,
       categoryId:         categoryId,
       cardId:             cardId,
+      accountId:          accountId,
       isBoleto:           isBoleto,
       isProvisioned:      isProvisioned,
       installmentCount:   installmentCount,
@@ -86,6 +89,7 @@ class TransactionModel {
       description:         entity.description,
       categoryId:          entity.categoryId ?? '',
       cardId:              entity.cardId,
+      accountId:           entity.accountId,
       isBoleto:            entity.isBoleto,
       isProvisioned:       entity.isProvisioned,
       installmentCount:    entity.installmentCount,
@@ -119,6 +123,7 @@ class TransactionModelAdapter extends TypeAdapter<TransactionModel> {
       description:         fields[6]  as String?,
       categoryId:          (fields[7] as String?) ?? '',
       cardId:              fields[8]  as String?,
+      accountId:           fields[18] as String?,
       isBoleto:            fields[9]  as bool,
       isProvisioned:       fields[10] as bool,
       installmentCount:    fields[11] as int?,
@@ -134,7 +139,7 @@ class TransactionModelAdapter extends TypeAdapter<TransactionModel> {
   @override
   void write(BinaryWriter writer, TransactionModel obj) {
     writer
-      ..writeByte(18)
+      ..writeByte(19)
       ..writeByte(0)  ..write(obj.id)
       ..writeByte(1)  ..write(obj.amount)
       ..writeByte(2)  ..write(obj.currency)
@@ -152,6 +157,7 @@ class TransactionModelAdapter extends TypeAdapter<TransactionModel> {
       ..writeByte(14) ..write(obj.recurrenceSourceId)
       ..writeByte(15) ..write(obj.toAccountId)
       ..writeByte(16) ..write(obj.notes)
-      ..writeByte(17) ..write(obj.isBillPayment);
+      ..writeByte(17) ..write(obj.isBillPayment)
+      ..writeByte(18) ..write(obj.accountId);
   }
 }
