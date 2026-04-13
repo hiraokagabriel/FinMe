@@ -175,12 +175,32 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
       body: FutureBuilder<List<dynamic>>(
         future: _loadFuture,
         builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
           final categories = snapshot.data != null
               ? List<CategoryEntity>.from(snapshot.data![0] as List)
               : <CategoryEntity>[];
           final cards = snapshot.data != null
               ? List<CardEntity>.from(snapshot.data![1] as List)
               : <CardEntity>[];
+
+          // Guards: garante que o value dos dropdowns só é usado
+          // quando o item correspondente já está na lista.
+          final safeCategoryId = categories.any((c) => c.id == _selectedCategoryId)
+              ? _selectedCategoryId
+              : (categories.isNotEmpty ? categories.first.id : null);
+          final safeCardId = cards.any((c) => c.id == _selectedCardId)
+              ? _selectedCardId
+              : null;
+
+          // Sincroniza estado se necessário (ex: categoria resolvida pelo guard)
+          if (safeCategoryId != _selectedCategoryId) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) setState(() => _selectedCategoryId = safeCategoryId);
+            });
+          }
 
           return Padding(
             padding: const EdgeInsets.all(AppSpacing.lg),
@@ -280,7 +300,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                   const SizedBox(height: AppSpacing.md),
 
                   DropdownButtonFormField<String>(
-                    value: _selectedCategoryId,
+                    value: safeCategoryId,
                     decoration:
                         const InputDecoration(labelText: 'Categoria'),
                     items: categories
@@ -366,7 +386,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
                     const SizedBox(height: AppSpacing.md),
 
                     DropdownButtonFormField<String>(
-                      value: _selectedCardId,
+                      value: safeCardId,
                       decoration: const InputDecoration(
                           labelText: 'Cartão (opcional)'),
                       items: [
