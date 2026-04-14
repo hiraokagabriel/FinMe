@@ -4,7 +4,7 @@ Aplicativo Flutter de gestão financeira pessoal para **Android** e **Windows** 
 Foco em controle de transações, cartões de crédito, contas, categorias, recorrências, metas e relatórios.  
 Toda a persistência é **100% local via Hive** — sem backend ou API externa.
 
-> **Versão atual:** 1.0.0+1 | **Marco atual:** M3 ✅ Concluído
+> **Versão atual:** 1.0.0+1 | **Marco atual:** M5 ✅ Concluído
 
 ---
 
@@ -58,7 +58,7 @@ lib/
     ├── dashboard/              # KPIs + gráfico mensal + últimas transações
     ├── goals/                  # Metas de economia e teto de gastos
     ├── onboarding/             # Splash + fluxo de boas-vindas (M3-C)
-    ├── payment_hub/            # Hub central de pagamentos
+    ├── payment_hub/            # Hub central de pagamentos + detecção de assinaturas (M4)
     ├── reports/                # Relatórios com filtros + exportação CSV
     ├── settings/               # Configurações gerais
     ├── transactions/           # CRUD completo de transações
@@ -158,47 +158,46 @@ lib/
 - `closingDay` calculado automaticamente se não informado (`dueDay - 7`)
 - **`CardStatementsPage`**: visualização de faturas por ciclo (6 ciclos, navegação por mês)
 - Badge de status por fatura: Aberta · Fecha hoje · Pendente · Vencida · Paga
-- **Marcar fatura como paga**: persiste flag no box `preferences` + cria transação `isBillPayment` com `id` determinístico (`bill_payment_{cardId}_{year}{mm}`)
+- **Marcar fatura como paga**: persiste flag no box `preferences` + cria transação `isBillPayment` com `id` determinístico
 - **Desmarcar fatura**: remove flag + remove transação de pagamento
-- **`isPaid` com validação cruzada**: se a transação de pagamento for deletada externamente, a flag é limpa automaticamente — evita status "Paga" inconsistente
+- **`isPaid` com validação cruzada**: flag limpa automaticamente se transação deletada externamente
 - Barra de limite com percentual e cor semântica (verde/amarelo/vermelho)
 - Donut chart de uso do limite (Modo Ultra)
-- Badge "N faturas em aberto" quando há ciclos fechados não pagos
-- Badge "Em dia" quando todos os ciclos estão pagos (Modo Ultra)
-- `CardsPage` implementa `RouteAware` + `didPopNext` para recarregar dados ao voltar de qualquer sub-rota
+- Badge "N faturas em aberto" / "Em dia"
+- `CardsPage` implementa `RouteAware` + `didPopNext`
 
 ### Categorias
-- CRUD completo
-- Picker de ícone: emoji ou codepoint
-- `CategoryIds.billPayment` reservado para pagamentos de fatura
+- CRUD completo com picker de ícone (emoji ou codepoint)
+- `CategoryIds.billPayment` reservado
 
 ### Contas / Carteiras
-- CRUD completo
-- Seed automático no primeiro boot
-- Saldo calculado a partir das transações
+- CRUD completo com seed automático no primeiro boot
 
 ### Metas (Goals)
-- Meta de Economia: progresso baseado em receitas acumuladas
-- Teto de Gastos: barra de progresso baseada em despesas do período
+- Meta de Economia + Teto de Gastos com barra de progresso
 
 ### Orçamento mensal (M3-E)
 - `BudgetPage`: orçamento por categoria com período mensal
 - `BudgetModel` (typeId 6): valor-alvo por categoria/mês
-- Barra de progresso por categoria vs. gasto real
 
 ### Preferências (M3-D)
 - `PreferencesService`: box `preferences` para moeda, idioma e formato de data
-- Toggle de tema claro/escuro
-- Toggle Modo Simples / Ultra
 
 ### Relatórios
-- Filtros por período
-- Gráficos de despesas por categoria
-- Exportação CSV
+- Filtros por período, gráficos por categoria, exportação CSV
 
 ### Notificações / Alertas
 - Aviso de fatura próxima do vencimento
 - Notificação de fatura vencida não paga
+
+### Assinaturas e gastos recorrentes (M4)
+- Detecção automática de assinaturas recorrentes via `payment_hub`
+- Relatórios de gastos desnecessários com agrupamento por recorrência
+
+### Distribuição (M5)
+- Refinamento UX/UI completo
+- Empacotamento `.exe` para Windows
+- APK Android gerado
 
 ---
 
@@ -213,8 +212,8 @@ lib/
 | M3-C | Splash Screen / Onboarding | ✅ Concluído |
 | M3-D | PreferencesService (moeda, idioma, formato de data) | ✅ Concluído |
 | M3-E | BudgetPage — Orçamento mensal por categoria (typeId 6) | ✅ Concluído |
-| M4 | Detecção de assinaturas recorrentes, relatórios de gastos desnecessários | 🔲 Pendente |
-| M5 | Refinamento UX/UI, empacotamento .exe Windows, APK Android | 🔲 Pendente |
+| M4 | Detecção de assinaturas recorrentes, relatórios de gastos desnecessários | ✅ Concluído |
+| M5 | Refinamento UX/UI, empacotamento .exe Windows, APK Android | ✅ Concluído |
 
 ---
 
@@ -224,8 +223,8 @@ lib/
 |---|---|---|---|
 | #1 | `AppEmptyState` — argumento `subtitle:` inválido | Parâmetro renomeado para `message:` | Corrigido nos call sites |
 | #2 | `CardsPage` não atualizava ao voltar de sub-rotas | `_loadData()` só chamado no `initState` | `RouteAware` + `didPopNext` via `appRouteObserver` |
-| #3 | Fatura aparecia como "Paga" após deletar transação de pagamento | `isPaid` lia apenas a flag, sem validar existência da `bill_payment_*` tx | `isPaid` agora cruza flag com existência real da transação; limpa flag automaticamente se ausente |
-| #4 | Crash `Cannot write, unknown type` no boot | `Hive.isAdapterRegistered(n)` com typeId errado no guard | TypeIds corrigidos para coincidir exatamente com os declarados nos adapters |
+| #3 | Fatura aparecia como "Paga" após deletar transação de pagamento | `isPaid` lia apenas a flag sem validar existência da tx | `isPaid` cruza flag com existência real; limpa flag automaticamente |
+| #4 | Crash `Cannot write, unknown type` no boot | `Hive.isAdapterRegistered(n)` com typeId errado no guard | TypeIds corrigidos para coincidir com os declarados nos adapters |
 
 ---
 
