@@ -8,6 +8,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../cards/domain/card_entity.dart';
 import '../../categories/domain/category_entity.dart';
 import '../../categories/domain/category_ids.dart';
+import '../../categories/domain/category_kind.dart';
 import '../domain/payment_method.dart';
 import '../domain/recurrence_rule.dart';
 import '../domain/transaction_entity.dart';
@@ -223,14 +224,15 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
           }
 
           // Categoria exibida no dropdown de bill payment.
+          // Fallback inline caso o seed ainda não tenha rodado.
           final billCategory = categories.firstWhere(
             (c) => c.id == CategoryIds.billPayment,
-            orElse: () => CategoryEntity(
+            orElse: () => const CategoryEntity(
               id:            CategoryIds.billPayment,
               name:          'Fatura',
               kind:          CategoryKind.expense,
               colorValue:    0xFF607D8B,
-              iconCodePoint: Icons.credit_card_outlined.codePoint,
+              iconCodePoint: 0xe16c, // Icons.credit_card_outlined codePoint
             ),
           );
 
