@@ -16,14 +16,10 @@ class StatementService {
 
   static const _box = 'preferences';
 
-  // ── helpers ───────────────────────────────────────────────────────
-
   int _effectiveClosingDay(CardEntity card) {
     if (card.closingDay != null) return card.closingDay!;
     return (card.dueDay - 7).clamp(1, 28);
   }
-
-  // ── cálculo de ciclo ─────────────────────────────────────────────
 
   Future<StatementCycle> cycleForMonth(
     CardEntity card,
@@ -51,7 +47,10 @@ class StatementService {
       ..sort((a, b) => b.date.compareTo(a.date));
 
     final total = txs.fold(0.0, (s, t) => s + t.amount.amount);
-    final paid  = await isPaid(card.id, year, month);
+    final paid  = await isPaid(
+      card.id, year, month,
+      allTransactions: allTransactions,
+    );
 
     return StatementCycle(
       cycleStart:   cycleStart,
@@ -85,22 +84,42 @@ class StatementService {
     return cycles;
   }
 
-  // ── persistência do status pago ─────────────────────────────────
-
   String _key(String cardId, int year, int month) {
     final mm = month.toString().padLeft(2, '0');
     return 'stmt_paid_${cardId}_$year$mm';
   }
 
-  Future<bool> isPaid(String cardId, int year, int month) async {
-    final box = Hive.box<String>(_box);
-    return box.get(_key(cardId, year, month)) == '1';
+  String _billPaymentTxKey(String cardId, int year, int month) {
+    final mm = month.toString().padLeft(2, '0');
+    return 'bill_payment_${cardId}_$year$mm';
   }
 
-  /// Marca ou desmarca fatura como paga.
-  /// Ao marcar (paid=true): persiste flag + cria transação isBillPayment
-  ///   com categoryId = CategoryIds.billPayment.
-  /// Ao desmarcar (paid=false): remove flag + remove transação isBillPayment.
+  /// Retorna true somente se a flag estiver '1' E a transação
+  /// de pagamento ainda existir no repositório.
+  /// Se a transação foi deletada externamente, limpa a flag
+  /// automaticamente para manter consistência.
+  Future<bool> isPaid(
+    String cardId,
+    int year,
+    int month, {
+    List<TransactionEntity>? allTransactions,
+  }) async {
+    final box = Hive.box<String>(_box);
+    if (box.get(_key(cardId, year, month)) != '1') return false;
+
+    final txKey = _billPaymentTxKey(cardId, year, month);
+    final txs   = allTransactions ?? await RepositoryLocator.instance.transactions.getAll();
+    final exists = txs.any((t) => t.id == txKey);
+
+    if (!exists) {
+      // Transação de pagamento foi deletada externamente — invalida a flag.
+      await box.put(_key(cardId, year, month), '0');
+      return false;
+    }
+
+    return true;
+  }
+
   Future<void> markPaid(
     String cardId,
     int year,
@@ -143,11 +162,5 @@ class StatementService {
         await repo.remove(txKey);
       }
     }
-  }
-
-  /// Chave determinística da transação de pagamento de fatura.
-  String _billPaymentTxKey(String cardId, int year, int month) {
-    final mm = month.toString().padLeft(2, '0');
-    return 'bill_payment_${cardId}_$year$mm';
   }
 }
