@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/services/theme_controller.dart';
 import '../core/services/auth_service.dart';
+import '../core/services/route_observer.dart';
 import '../core/theme/app_theme.dart';
 import 'router.dart';
 
@@ -30,6 +31,7 @@ class FinMeApp extends StatelessWidget {
           themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
           initialRoute: _resolveInitialRoute(),
           onGenerateRoute: AppRouter.onGenerateRoute,
+          navigatorObservers: [appRouteObserver],
         );
       },
     );

@@ -8,6 +8,7 @@ import '../domain/statement_service.dart';
 import '../../../core/models/app_mode.dart';
 import '../../../core/services/app_mode_controller.dart';
 import '../../../core/services/repository_locator.dart';
+import '../../../core/services/route_observer.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/app_empty_state.dart';
 import '../../../features/transactions/domain/transaction_entity.dart';
@@ -16,11 +17,7 @@ import 'card_statements_page.dart';
 import 'new_card_page.dart';
 
 class _CardSummary {
-  /// Valor total comprometendo o limite:
-  /// soma de todos os ciclos fechados NÃO pagos + ciclo aberto atual.
   final double totalCommitted;
-
-  /// Quantos ciclos fechados ainda estão sem pagamento.
   final int unpaidClosedCycles;
 
   _CardSummary({
@@ -36,7 +33,8 @@ class CardsPage extends StatefulWidget {
   State<CardsPage> createState() => _CardsPageState();
 }
 
-class _CardsPageState extends State<CardsPage> {
+class _CardsPageState extends State<CardsPage>
+    with RouteAware {
   late final CardsRepository _cardsRepository;
   List<CardEntity>          _cards     = const [];
   Map<String, _CardSummary> _summaries = const {};
@@ -46,6 +44,26 @@ class _CardsPageState extends State<CardsPage> {
   void initState() {
     super.initState();
     _cardsRepository = RepositoryLocator.instance.cards;
+    _loadData();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    appRouteObserver.subscribe(this, ModalRoute.of(context)!);
+  }
+
+  @override
+  void dispose() {
+    appRouteObserver.unsubscribe(this);
+    super.dispose();
+  }
+
+  /// Chamado quando uma rota pushed sobre esta é removida (pop).
+  /// Garante que o limite e status de fatura reflitam qualquer
+  /// alteração feita em TransactionsPage (ex: apagar bill payment).
+  @override
+  void didPopNext() {
     _loadData();
   }
 
@@ -73,7 +91,6 @@ class _CardsPageState extends State<CardsPage> {
 
       final closingDay = _effectiveClosingDay(card);
 
-      // ── Ciclo aberto: do último fechamento até o próximo ────────────
       DateTime openEnd = DateTime(today.year, today.month, closingDay);
       if (openEnd.isBefore(today)) {
         openEnd = DateTime(today.year, today.month + 1, closingDay);
@@ -85,8 +102,6 @@ class _CardsPageState extends State<CardsPage> {
       double totalCommitted = 0.0;
       int    unpaidClosed   = 0;
 
-      // ── Gastos do ciclo aberto (ainda não fechou, sempre comprome-
-      //    te o limite independentemente de pagamento) ─────────────────
       final openSpend = transactions
           .where((tx) =>
               tx.cardId == card.id &&
@@ -98,8 +113,6 @@ class _CardsPageState extends State<CardsPage> {
 
       totalCommitted += openSpend;
 
-      // ── Ciclos fechados: varre até 12 meses para trás ──────────────
-      // Um ciclo fechado compromete o limite até que seja marcado pago.
       for (int i = 1; i <= 12; i++) {
         final cycleEnd =
             DateTime(openEnd.year, openEnd.month - i, closingDay);
@@ -107,7 +120,6 @@ class _CardsPageState extends State<CardsPage> {
             DateTime(cycleEnd.year, cycleEnd.month - 1, closingDay)
                 .add(const Duration(days: 1));
 
-        // Ciclo ainda no futuro — pula (só processa fechados)
         if (cycleEnd.isAfter(today)) continue;
 
         final isPaid = await stmtService.isPaid(
@@ -130,10 +142,7 @@ class _CardsPageState extends State<CardsPage> {
             totalCommitted += cycleSpend;
             unpaidClosed++;
           }
-        }
-        // Se há 3 ciclos consecutivos pagos no passado, para de varrer
-        // (evita processar anos de histórico desnecessariamente)
-        else if (unpaidClosed == 0 && i > 3) {
+        } else if (unpaidClosed == 0 && i > 3) {
           break;
         }
       }
