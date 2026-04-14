@@ -7,6 +7,7 @@ import '../../../core/services/repository_locator.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/app_empty_state.dart';
 import '../../transactions/domain/transaction_entity.dart';
+import '../../transactions/presentation/new_transaction_page.dart';
 import '../../categories/domain/category_entity.dart';
 
 const _months = [
@@ -112,6 +113,46 @@ class _CardStatementsPageState extends State<CardStatementsPage> {
     }
   }
 
+  Future<void> _openEdit(TransactionEntity tx) async {
+    final ok = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => NewTransactionPage(initialTransaction: tx),
+      ),
+    );
+    if (ok == true) await _loadData();
+  }
+
+  Future<void> _confirmAndDelete(TransactionEntity tx) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Excluir lançamento'),
+        content: Text(
+          'Deseja excluir "${tx.description ?? 'Sem descrição'}"?\n'
+          'Esta ação não pode ser desfeita.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text('Excluir',
+                style: TextStyle(color: AppColors.danger)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await RepositoryLocator.instance.transactions.remove(tx.id);
+    await _loadData();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Lançamento excluído')),
+    );
+  }
+
   CategoryEntity? _categoryOf(TransactionEntity tx) {
     if (tx.categoryId == null) return null;
     try {
@@ -184,9 +225,53 @@ class _CardStatementsPageState extends State<CardStatementsPage> {
                                   const Divider(height: 1),
                               itemBuilder: (context, i) {
                                 final tx = _current.transactions[i];
-                                return _TransactionTile(
-                                  tx:       tx,
-                                  category: _categoryOf(tx),
+                                return Dismissible(
+                                  key: ValueKey('stmt_${tx.id}'),
+                                  direction: DismissDirection.endToStart,
+                                  confirmDismiss: (_) async {
+                                    final ok = await showDialog<bool>(
+                                      context: context,
+                                      builder: (ctx) => AlertDialog(
+                                        title: const Text('Excluir lançamento'),
+                                        content: Text(
+                                          'Deseja excluir "${tx.description ?? 'Sem descrição'}"?',
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () => Navigator.of(ctx).pop(false),
+                                            child: const Text('Cancelar'),
+                                          ),
+                                          TextButton(
+                                            onPressed: () => Navigator.of(ctx).pop(true),
+                                            child: Text('Excluir',
+                                                style: TextStyle(color: AppColors.danger)),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                    return ok ?? false;
+                                  },
+                                  onDismissed: (_) async {
+                                    await RepositoryLocator.instance.transactions.remove(tx.id);
+                                    await _loadData();
+                                    if (!mounted) return;
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('Lançamento excluído')),
+                                    );
+                                  },
+                                  background: Container(
+                                    color: AppColors.danger,
+                                    alignment: Alignment.centerRight,
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: AppSpacing.lg),
+                                    child: const Icon(Icons.delete_outline,
+                                        color: Colors.white),
+                                  ),
+                                  child: _TransactionTile(
+                                    tx:       tx,
+                                    category: _categoryOf(tx),
+                                    onTap:    () => _openEdit(tx),
+                                  ),
                                 );
                               },
                             ),
@@ -308,9 +393,14 @@ class _CycleHeader extends StatelessWidget {
 }
 
 class _TransactionTile extends StatelessWidget {
-  const _TransactionTile({required this.tx, this.category});
+  const _TransactionTile({
+    required this.tx,
+    required this.onTap,
+    this.category,
+  });
   final TransactionEntity tx;
   final CategoryEntity?   category;
+  final VoidCallback      onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -320,35 +410,26 @@ class _TransactionTile extends StatelessWidget {
         ? Text(String.fromCharCode(cp), style: const TextStyle(fontSize: 20))
         : const Icon(Icons.label_outline, size: 20);
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
-      child: Row(
+    return ListTile(
+      onTap: onTap,
+      leading: iconWidget,
+      title: Text(
+        tx.description ?? 'Sem descrição',
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.onSurface,
+          fontStyle: isProvisioned ? FontStyle.italic : FontStyle.normal,
+        ),
+      ),
+      subtitle: Text(
+        _fmtDayMonthNum(tx.date),
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          fontSize: 12,
+        ),
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          iconWidget,
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  tx.description ?? 'Sem descrição',
-                  style: AppText.body.copyWith(
-                    color: Theme.of(context).colorScheme.onSurface,
-                    fontStyle: isProvisioned
-                        ? FontStyle.italic
-                        : FontStyle.normal,
-                  ),
-                ),
-                Text(
-                  _fmtDayMonthNum(tx.date),
-                  style: AppText.secondary.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-          ),
           if (isProvisioned)
             Padding(
               padding: const EdgeInsets.only(right: AppSpacing.xs),
@@ -360,10 +441,18 @@ class _TransactionTile extends StatelessWidget {
             ),
           Text(
             'R\$ ${tx.amount.amount.toStringAsFixed(2)}',
-            style: AppText.amount.copyWith(
+            style: TextStyle(
               color: AppColors.danger,
               fontStyle: isProvisioned ? FontStyle.italic : FontStyle.normal,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
             ),
+          ),
+          const SizedBox(width: AppSpacing.xs),
+          Icon(
+            Icons.chevron_right,
+            size: 16,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
         ],
       ),
