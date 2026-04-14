@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:uuid/uuid.dart';
 
 import '../data/transactions_repository.dart';
 import '../domain/transaction_entity.dart';
@@ -15,9 +16,14 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/app_empty_state.dart';
 import 'new_transaction_page.dart';
 
+// ── Enums de filtro ──────────────────────────────────────────────────────────
+
 enum _PeriodFilter { thisMonth, lastMonth, thisWeek, all }
 
 enum _TypeFilter { all, income, expense, transfer }
+
+/// Filtro pelo estado de realização da transação.
+enum _StatusFilter { all, paid, unpaid, future }
 
 extension _PeriodFilterPersistence on _PeriodFilter {
   String get key => name;
@@ -59,6 +65,8 @@ String _periodLabel(_PeriodFilter f) {
   }
 }
 
+// ── Page ─────────────────────────────────────────────────────────────────────
+
 class TransactionsPage extends StatefulWidget {
   const TransactionsPage({super.key});
 
@@ -69,8 +77,8 @@ class TransactionsPage extends StatefulWidget {
 class _TransactionsPageState extends State<TransactionsPage> {
   late final TransactionsRepository _transactionsRepository;
   List<TransactionEntity> _allTransactions = const [];
-  List<TransactionEntity> _filtered       = const [];
-  List<TransactionEntity> _provisioned    = const [];
+  List<TransactionEntity> _filtered        = const [];
+  List<TransactionEntity> _provisioned     = const [];
   Map<String, CategoryEntity> _categoriesById = const {};
   Map<String, CardEntity>     _cardsById      = const {};
   bool _isLoading = true;
@@ -78,15 +86,15 @@ class _TransactionsPageState extends State<TransactionsPage> {
   late _PeriodFilter _period;
   String? _filterCategoryId;
   TransactionType? _filterType;
+  _StatusFilter   _filterStatus = _StatusFilter.all;
   double? _minAmountFilter;
   double? _maxAmountFilter;
   double _maxAmountInData = 0;
 
-  // ── Busca ──────────────────────────────────────────────────────────────
-  bool _searchActive = false;
-  String _searchQuery = '';
+  bool   _searchActive = false;
+  String _searchQuery  = '';
   final _searchController = TextEditingController();
-  final _searchFocus = FocusNode();
+  final _searchFocus      = FocusNode();
 
   double _totalExpenses = 0;
   double _totalIncome   = 0;
@@ -108,8 +116,10 @@ class _TransactionsPageState extends State<TransactionsPage> {
     super.dispose();
   }
 
+  // ── Data ──────────────────────────────────────────────────────────────────
+
   Future<void> _loadData() async {
-    final locator = RepositoryLocator.instance;
+    final locator        = RepositoryLocator.instance;
     final transactions   = await _transactionsRepository.getAll();
     final categoriesList = await locator.categories.getAll();
     final cardsList      = await locator.cards.getAll();
@@ -124,42 +134,61 @@ class _TransactionsPageState extends State<TransactionsPage> {
     setState(() {
       _allTransactions = transactions;
       _categoriesById  = {for (final c in categoriesList) c.id: c};
-      _cardsById       = {for (final c in cardsList) c.id: c};
+      _cardsById       = {for (final c in cardsList)      c.id: c};
       _maxAmountInData = maxAmount;
       _isLoading       = false;
     });
     _applyFilters();
   }
 
+  // ── Filters ───────────────────────────────────────────────────────────────
+
   void _applyFilters() {
     final (start, end) = _periodRange(_period);
-    final query = _searchQuery.toLowerCase().trim();
+    final query  = _searchQuery.toLowerCase().trim();
+    final today  = DateTime.now();
+    final todayDay = DateTime(today.year, today.month, today.day);
 
-    final provisioned = _allTransactions
-        .where((tx) => tx.isProvisioned)
-        .toList()
-      ..sort((a, b) {
-        final da = a.provisionedDueDate ?? a.date;
-        final db = b.provisionedDueDate ?? b.date;
-        return da.compareTo(db);
-      });
+    // — Provisioned (não realizadas) filtradas por _statusFilter —
+    List<TransactionEntity> provisioned = [];
+    if (_filterStatus == _StatusFilter.all ||
+        _filterStatus == _StatusFilter.unpaid ||
+        _filterStatus == _StatusFilter.future) {
+      provisioned = _allTransactions.where((tx) {
+        if (!tx.isProvisioned) return false;
+        final dueDate = tx.provisionedDueDate ?? tx.date;
+        final dueDay  = DateTime(dueDate.year, dueDate.month, dueDate.day);
+        final isPast  = dueDay.compareTo(todayDay) <= 0;
+        if (_filterStatus == _StatusFilter.unpaid  && !isPast) return false;
+        if (_filterStatus == _StatusFilter.future  &&  isPast) return false;
+        return true;
+      }).toList()
+        ..sort((a, b) {
+          final da = a.provisionedDueDate ?? a.date;
+          final db = b.provisionedDueDate ?? b.date;
+          return da.compareTo(db);
+        });
+    }
 
-    final result = _allTransactions.where((tx) {
-      if (tx.isProvisioned) return false;
-      final inPeriod = !tx.date.isBefore(start) && !tx.date.isAfter(end);
-      final inCategory =
-          _filterCategoryId == null || tx.categoryId == _filterCategoryId;
-      final inSearch = query.isEmpty ||
-          (tx.description?.toLowerCase().contains(query) ?? false);
-      final inType = _filterType == null || tx.type == _filterType;
-
-      final amountAbs = tx.amount.amount.abs();
-      final inMin = _minAmountFilter == null || amountAbs >= _minAmountFilter!;
-      final inMax = _maxAmountFilter == null || amountAbs <= _maxAmountFilter!;
-
-      return inPeriod && inCategory && inSearch && inType && inMin && inMax;
-    }).toList()
-      ..sort((a, b) => b.date.compareTo(a.date));
+    // — Realizadas filtradas por todos os critérios —
+    List<TransactionEntity> result = [];
+    if (_filterStatus == _StatusFilter.all ||
+        _filterStatus == _StatusFilter.paid) {
+      result = _allTransactions.where((tx) {
+        if (tx.isProvisioned) return false;
+        final inPeriod   = !tx.date.isBefore(start) && !tx.date.isAfter(end);
+        final inCategory = _filterCategoryId == null ||
+            tx.categoryId == _filterCategoryId;
+        final inSearch   = query.isEmpty ||
+            (tx.description?.toLowerCase().contains(query) ?? false);
+        final inType     = _filterType == null || tx.type == _filterType;
+        final amountAbs  = tx.amount.amount.abs();
+        final inMin = _minAmountFilter == null || amountAbs >= _minAmountFilter!;
+        final inMax = _maxAmountFilter == null || amountAbs <= _maxAmountFilter!;
+        return inPeriod && inCategory && inSearch && inType && inMin && inMax;
+      }).toList()
+        ..sort((a, b) => b.date.compareTo(a.date));
+    }
 
     double expenses = 0, income = 0;
     for (final tx in result) {
@@ -171,10 +200,10 @@ class _TransactionsPageState extends State<TransactionsPage> {
     }
 
     setState(() {
-      _filtered       = result;
-      _provisioned    = provisioned;
-      _totalExpenses  = expenses;
-      _totalIncome    = income;
+      _filtered      = result;
+      _provisioned   = provisioned;
+      _totalExpenses = expenses;
+      _totalIncome   = income;
     });
   }
 
@@ -193,20 +222,17 @@ class _TransactionsPageState extends State<TransactionsPage> {
   void _setTypeFilter(_TypeFilter filter) {
     setState(() {
       switch (filter) {
-        case _TypeFilter.all:
-          _filterType = null;
-          break;
-        case _TypeFilter.income:
-          _filterType = TransactionType.income;
-          break;
-        case _TypeFilter.expense:
-          _filterType = TransactionType.expense;
-          break;
-        case _TypeFilter.transfer:
-          _filterType = TransactionType.transfer;
-          break;
+        case _TypeFilter.all:      _filterType = null; break;
+        case _TypeFilter.income:   _filterType = TransactionType.income; break;
+        case _TypeFilter.expense:  _filterType = TransactionType.expense; break;
+        case _TypeFilter.transfer: _filterType = TransactionType.transfer; break;
       }
     });
+    _applyFilters();
+  }
+
+  void _setStatusFilter(_StatusFilter s) {
+    setState(() => _filterStatus = s);
     _applyFilters();
   }
 
@@ -224,16 +250,81 @@ class _TransactionsPageState extends State<TransactionsPage> {
     });
   }
 
-  /// Número de filtros ativos (não-padrão) para o badge.
   int get _activeFilterCount {
     int count = 0;
     if (_period != _PeriodFilter.thisMonth) count++;
     if (_filterCategoryId != null) count++;
     if (_filterType != null) count++;
+    if (_filterStatus != _StatusFilter.all) count++;
     if (_minAmountFilter != null || _maxAmountFilter != null) count++;
     if (_searchQuery.trim().isNotEmpty) count++;
     return count;
   }
+
+  // ── Consolidar pagamento ──────────────────────────────────────────────────
+
+  /// Converte uma transação provisionada em realizada (isProvisioned = false).
+  /// Remove o registro antigo e insere o novo com a data de hoje.
+  Future<void> _consolidatePayment(TransactionEntity tx) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Confirmar pagamento'),
+        content: Text(
+          'Marcar "${tx.description ?? 'Sem descrição'}" como pago?\n'
+          'A transação será registrada com a data de hoje.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Confirmar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    final paid = TransactionEntity(
+      id:                 const Uuid().v4(),
+      amount:             tx.amount,
+      date:               DateTime.now(),
+      type:               tx.type,
+      paymentMethod:      tx.paymentMethod,
+      description:        tx.description,
+      categoryId:         tx.categoryId,
+      cardId:             tx.cardId,
+      accountId:          tx.accountId,
+      toAccountId:        tx.toAccountId,
+      isBoleto:           tx.isBoleto,
+      isProvisioned:      false,
+      installmentCount:   tx.installmentCount,
+      provisionedDueDate: tx.provisionedDueDate,
+      recurrenceRule:     tx.recurrenceRule,
+      recurrenceSourceId: tx.recurrenceSourceId,
+      notes:              tx.notes,
+      isBillPayment:      tx.isBillPayment,
+    );
+
+    await _transactionsRepository.remove(tx.id);
+    await _transactionsRepository.add(paid);
+    await _loadData();
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '${tx.description ?? 'Transação'} marcada como paga.',
+        ),
+        backgroundColor: AppColors.limitLow,
+      ),
+    );
+  }
+
+  // ── Forms ─────────────────────────────────────────────────────────────────
 
   Future<void> _openForm({TransactionEntity? initial}) async {
     final ok = await Navigator.of(context).push<bool>(
@@ -264,6 +355,17 @@ class _TransactionsPageState extends State<TransactionsPage> {
         ],
       ),
     );
+  }
+
+  // ── Helpers de display ────────────────────────────────────────────────────
+
+  /// Retorna o nome da categoria para exibição, tratando bill-payment e
+  /// categoryId vazio/null sem mostrar "Sem categoria" incorretamente.
+  String _categoryLabel(TransactionEntity tx) {
+    if (tx.isBillPayment) return 'Pagamento de fatura';
+    final cat = _categoriesById[tx.categoryId];
+    if (cat != null) return cat.name;
+    return 'Sem categoria';
   }
 
   // ── AppBar ────────────────────────────────────────────────────────────────
@@ -323,44 +425,42 @@ class _TransactionsPageState extends State<TransactionsPage> {
 
   void _openFiltersBottomSheet() {
     final initialPeriod = _period;
-    final initialType = _filterType;
-    final initialMin = _minAmountFilter ?? 0;
-    final initialMax = _maxAmountFilter ?? _maxAmountInData;
+    final initialType   = _filterType;
+    final initialStatus = _filterStatus;
+    final initialMin    = _minAmountFilter ?? 0;
+    final initialMax    = _maxAmountFilter ?? _maxAmountInData;
 
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
       builder: (context) {
-        _PeriodFilter modalPeriod = initialPeriod;
+        _PeriodFilter  modalPeriod = initialPeriod;
         TransactionType? modalType = initialType;
+        _StatusFilter  modalStatus = initialStatus;
         double modalMin = initialMin;
         double modalMax = initialMax;
 
         _TypeFilter typeFromTx(TransactionType? txType) {
           if (txType == null) return _TypeFilter.all;
           switch (txType) {
-            case TransactionType.income:
-              return _TypeFilter.income;
-            case TransactionType.expense:
-              return _TypeFilter.expense;
-            case TransactionType.transfer:
-              return _TypeFilter.transfer;
+            case TransactionType.income:   return _TypeFilter.income;
+            case TransactionType.expense:  return _TypeFilter.expense;
+            case TransactionType.transfer: return _TypeFilter.transfer;
           }
         }
 
         return StatefulBuilder(
           builder: (context, setModalState) {
-            final selectedType = typeFromTx(modalType);
+            final selectedType   = typeFromTx(modalType);
             final hasAmountRange = _maxAmountInData > 0;
 
             return Padding(
               padding: EdgeInsets.only(
-                left: AppSpacing.lg,
-                right: AppSpacing.lg,
-                top: AppSpacing.lg,
-                bottom:
-                    MediaQuery.of(context).viewInsets.bottom + AppSpacing.lg,
+                left:   AppSpacing.lg,
+                right:  AppSpacing.lg,
+                top:    AppSpacing.lg,
+                bottom: MediaQuery.of(context).viewInsets.bottom + AppSpacing.lg,
               ),
               child: SingleChildScrollView(
                 child: Column(
@@ -369,6 +469,8 @@ class _TransactionsPageState extends State<TransactionsPage> {
                   children: [
                     Text('Filtros', style: AppText.screenTitle),
                     const SizedBox(height: AppSpacing.lg),
+
+                    // — Período —
                     Text('Período', style: AppText.sectionLabel),
                     const SizedBox(height: AppSpacing.sm),
                     Wrap(
@@ -386,13 +488,61 @@ class _TransactionsPageState extends State<TransactionsPage> {
                                 : AppColors.textSecondary,
                             fontSize: 13,
                           ),
-                          onSelected: (_) {
-                            setModalState(() => modalPeriod = f);
-                          },
+                          onSelected: (_) =>
+                              setModalState(() => modalPeriod = f),
                         );
                       }).toList(),
                     ),
                     const SizedBox(height: AppSpacing.lg),
+
+                    // — Status —
+                    Text('Status', style: AppText.sectionLabel),
+                    const SizedBox(height: AppSpacing.sm),
+                    Wrap(
+                      spacing: AppSpacing.xs,
+                      runSpacing: AppSpacing.xs,
+                      children: [
+                        _StatusFilter.all,
+                        _StatusFilter.paid,
+                        _StatusFilter.unpaid,
+                        _StatusFilter.future,
+                      ].map((s) {
+                        final selected = s == modalStatus;
+                        final label = switch (s) {
+                          _StatusFilter.all    => 'Todos',
+                          _StatusFilter.paid   => 'Pagos',
+                          _StatusFilter.unpaid => 'Não pagos',
+                          _StatusFilter.future => 'Futuros',
+                        };
+                        final color = switch (s) {
+                          _StatusFilter.paid   => AppColors.limitLow,
+                          _StatusFilter.unpaid => AppColors.danger,
+                          _StatusFilter.future => AppColors.warning,
+                          _StatusFilter.all    => AppColors.primary,
+                        };
+                        return ChoiceChip(
+                          label: Text(label),
+                          selected: selected,
+                          selectedColor: selected
+                              ? color.withOpacity(0.14)
+                              : AppColors.primarySubtle,
+                          labelStyle: TextStyle(
+                            color: selected
+                                ? color
+                                : AppColors.textSecondary,
+                            fontSize: 13,
+                            fontWeight: selected
+                                ? FontWeight.w600
+                                : FontWeight.normal,
+                          ),
+                          onSelected: (_) =>
+                              setModalState(() => modalStatus = s),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+
+                    // — Tipo —
                     Text('Tipo', style: AppText.sectionLabel),
                     const SizedBox(height: AppSpacing.sm),
                     Wrap(
@@ -400,9 +550,9 @@ class _TransactionsPageState extends State<TransactionsPage> {
                       children: _TypeFilter.values.map((t) {
                         final selected = t == selectedType;
                         final label = switch (t) {
-                          _TypeFilter.all => 'Todos',
-                          _TypeFilter.income => 'Receitas',
-                          _TypeFilter.expense => 'Despesas',
+                          _TypeFilter.all      => 'Todos',
+                          _TypeFilter.income   => 'Receitas',
+                          _TypeFilter.expense  => 'Despesas',
                           _TypeFilter.transfer => 'Transferências',
                         };
                         return ChoiceChip(
@@ -419,17 +569,13 @@ class _TransactionsPageState extends State<TransactionsPage> {
                             setModalState(() {
                               switch (t) {
                                 case _TypeFilter.all:
-                                  modalType = null;
-                                  break;
+                                  modalType = null; break;
                                 case _TypeFilter.income:
-                                  modalType = TransactionType.income;
-                                  break;
+                                  modalType = TransactionType.income; break;
                                 case _TypeFilter.expense:
-                                  modalType = TransactionType.expense;
-                                  break;
+                                  modalType = TransactionType.expense; break;
                                 case _TypeFilter.transfer:
-                                  modalType = TransactionType.transfer;
-                                  break;
+                                  modalType = TransactionType.transfer; break;
                               }
                             });
                           },
@@ -437,6 +583,8 @@ class _TransactionsPageState extends State<TransactionsPage> {
                       }).toList(),
                     ),
                     const SizedBox(height: AppSpacing.lg),
+
+                    // — Valor —
                     Text('Valor (R\$)', style: AppText.sectionLabel),
                     const SizedBox(height: AppSpacing.sm),
                     if (!hasAmountRange)
@@ -448,14 +596,10 @@ class _TransactionsPageState extends State<TransactionsPage> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(
-                            'Mín: R\$ ${modalMin.toStringAsFixed(0)}',
-                            style: AppText.secondary,
-                          ),
-                          Text(
-                            'Máx: R\$ ${modalMax.toStringAsFixed(0)}',
-                            style: AppText.secondary,
-                          ),
+                          Text('Mín: R\$ ${modalMin.toStringAsFixed(0)}',
+                              style: AppText.secondary),
+                          Text('Máx: R\$ ${modalMax.toStringAsFixed(0)}',
+                              style: AppText.secondary),
                         ],
                       ),
                       RangeSlider(
@@ -476,17 +620,19 @@ class _TransactionsPageState extends State<TransactionsPage> {
                       ),
                     ],
                     const SizedBox(height: AppSpacing.lg),
+
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         TextButton(
                           onPressed: () {
                             setState(() {
-                              _period = _PeriodFilter.thisMonth;
-                              _filterType = null;
+                              _period           = _PeriodFilter.thisMonth;
+                              _filterType       = null;
+                              _filterStatus     = _StatusFilter.all;
                               _filterCategoryId = null;
-                              _minAmountFilter = null;
-                              _maxAmountFilter = null;
+                              _minAmountFilter  = null;
+                              _maxAmountFilter  = null;
                             });
                             _applyFilters();
                             Navigator.of(context).pop();
@@ -496,8 +642,9 @@ class _TransactionsPageState extends State<TransactionsPage> {
                         ElevatedButton(
                           onPressed: () {
                             setState(() {
-                              _period = modalPeriod;
-                              _filterType = modalType;
+                              _period       = modalPeriod;
+                              _filterType   = modalType;
+                              _filterStatus = modalStatus;
                               if (hasAmountRange) {
                                 _minAmountFilter =
                                     modalMin <= 0 ? null : modalMin;
@@ -526,7 +673,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
     );
   }
 
-  // ── Filtros ──────────────────────────────────────────────────────────────
+  // ── Filtros inline ────────────────────────────────────────────────────────
 
   Widget _buildSimpleFiltersRow() {
     return SingleChildScrollView(
@@ -587,7 +734,8 @@ class _TransactionsPageState extends State<TransactionsPage> {
             width: 1,
             height: 24,
             color: AppColors.divider,
-            margin: const EdgeInsets.symmetric(horizontal: AppSpacing.xs + 2),
+            margin:
+                const EdgeInsets.symmetric(horizontal: AppSpacing.xs + 2),
           ),
           Padding(
             padding: const EdgeInsets.only(right: AppSpacing.xs + 2),
@@ -640,7 +788,50 @@ class _TransactionsPageState extends State<TransactionsPage> {
     );
   }
 
-  // ── Resumo ───────────────────────────────────────────────────────────────
+  // ── Status filter row (exibido em ambos os modos) ─────────────────────────
+
+  Widget _buildStatusFilterRow() {
+    const statusOptions = [
+      (_StatusFilter.all,    'Todos',     null),
+      (_StatusFilter.paid,   'Pagos',     AppColors.limitLow),
+      (_StatusFilter.unpaid, 'Não pagos', AppColors.danger),
+      (_StatusFilter.future, 'Futuros',   AppColors.warning),
+    ];
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md, vertical: AppSpacing.xs),
+      child: Row(
+        children: statusOptions.map((entry) {
+          final (status, label, color) = entry;
+          final selected = _filterStatus == status;
+          final effectiveColor = color ?? AppColors.primary;
+          return Padding(
+            padding: const EdgeInsets.only(right: AppSpacing.xs + 2),
+            child: FilterChip(
+              label: Text(label),
+              selected: selected,
+              selectedColor: effectiveColor.withOpacity(0.13),
+              checkmarkColor: effectiveColor,
+              labelStyle: TextStyle(
+                color: selected ? effectiveColor : AppColors.textSecondary,
+                fontSize: 12,
+                fontWeight:
+                    selected ? FontWeight.w600 : FontWeight.normal,
+              ),
+              side: selected
+                  ? BorderSide(color: effectiveColor.withOpacity(0.4))
+                  : null,
+              onSelected: (_) => _setStatusFilter(status),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  // ── Resumo ────────────────────────────────────────────────────────────────
 
   Widget _buildSimpleSummary() {
     return Padding(
@@ -682,7 +873,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
     );
   }
 
-  // ── Gráficos ─────────────────────────────────────────────────────────────
+  // ── Gráficos ──────────────────────────────────────────────────────────────
 
   static const List<Color> _chartColors = [
     AppColors.primary,
@@ -744,7 +935,8 @@ class _TransactionsPageState extends State<TransactionsPage> {
                               width: 10,
                               height: 10,
                               decoration: BoxDecoration(
-                                color: _chartColors[i % _chartColors.length],
+                                color:
+                                    _chartColors[i % _chartColors.length],
                                 shape: BoxShape.circle,
                               ),
                             ),
@@ -811,13 +1003,20 @@ class _TransactionsPageState extends State<TransactionsPage> {
     );
   }
 
-  // ── Seção A vencer ───────────────────────────────────────────────────────
+  // ── Seção A vencer / provisionadas ────────────────────────────────────────
 
   Widget _buildProvisionedSection() {
     if (_provisioned.isEmpty) return const SizedBox.shrink();
 
-    final today = DateTime.now();
+    final today    = DateTime.now();
     final todayDay = DateTime(today.year, today.month, today.day);
+
+    // Título dinâmico conforme o filtro de status
+    final sectionTitle = switch (_filterStatus) {
+      _StatusFilter.future => 'FUTUROS',
+      _StatusFilter.unpaid => 'NÃO PAGOS',
+      _            => 'A VENCER',
+    };
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -831,7 +1030,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
                   size: 14, color: AppColors.warning),
               const SizedBox(width: AppSpacing.xs + 2),
               Text(
-                'A VENCER',
+                sectionTitle,
                 style: AppText.badge.copyWith(
                   color: AppColors.warning,
                   letterSpacing: 1,
@@ -842,9 +1041,9 @@ class _TransactionsPageState extends State<TransactionsPage> {
         ),
         ..._provisioned.map((tx) {
           final dueDate = tx.provisionedDueDate ?? tx.date;
-          final dueDay =
+          final dueDay  =
               DateTime(dueDate.year, dueDate.month, dueDate.day);
-          final daysLeft = dueDay.difference(todayDay).inDays;
+          final daysLeft   = dueDay.difference(todayDay).inDays;
           final isOverdue  = daysLeft < 0;
           final isDueToday = daysLeft == 0;
 
@@ -868,12 +1067,13 @@ class _TransactionsPageState extends State<TransactionsPage> {
               ? AppColors.danger
               : (isDueToday ? AppColors.warning : AppColors.primary);
 
-          final category = _categoriesById[tx.categoryId];
-          final card =
-              tx.cardId != null ? _cardsById[tx.cardId!] : null;
+          final card            = tx.cardId != null ? _cardsById[tx.cardId!] : null;
           final installmentText = tx.installmentCount != null
               ? ' (${tx.installmentCount}x)'
               : '';
+
+          // Usa o helper _categoryLabel para corrigir "Sem Categoria" em faturas
+          final categoryLabel = _categoryLabel(tx);
 
           return Dismissible(
             key: ValueKey('prov_${tx.id}'),
@@ -890,48 +1090,72 @@ class _TransactionsPageState extends State<TransactionsPage> {
             background: Container(
               color: AppColors.danger,
               alignment: Alignment.centerRight,
-              padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.lg),
-              child: const Icon(Icons.delete_outline,
-                  color: Colors.white),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+              child: const Icon(Icons.delete_outline, color: Colors.white),
             ),
             child: ListTile(
               onTap: () => _openForm(initial: tx),
-              leading: _CategoryDot(category: category),
+              leading: tx.isBillPayment
+                  ? CircleAvatar(
+                      radius: 18,
+                      backgroundColor:
+                          AppColors.primary.withOpacity(0.18),
+                      child: Icon(Icons.credit_card_outlined,
+                          size: 16, color: AppColors.primary),
+                    )
+                  : _CategoryDot(
+                      category: _categoriesById[tx.categoryId]),
               title: Text(
                   '${tx.description ?? 'Sem descrição'}$installmentText'),
               subtitle: Text(
-                '${category?.name ?? 'Sem cat.'}'
+                '$categoryLabel'
                 '${card != null ? ' · ${card.name}' : ''}'
                 ' · $dueDateText',
               ),
-              trailing: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.end,
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    '- R\$ ${tx.amount.amount.toStringAsFixed(2)}',
-                    style: AppText.body.copyWith(
-                      color: AppColors.danger,
-                      fontWeight: FontWeight.w600,
-                    ),
+                  Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        '- R\$ ${tx.amount.amount.toStringAsFixed(2)}',
+                        style: AppText.body.copyWith(
+                          color: AppColors.danger,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.xs + 2,
+                            vertical: AppSpacing.xs - 2),
+                        decoration: BoxDecoration(
+                          color: badgeColor.withOpacity(0.12),
+                          borderRadius:
+                              BorderRadius.circular(AppRadius.chip),
+                        ),
+                        child: Text(
+                          daysLabel,
+                          style: AppText.badge.copyWith(
+                              color: badgeColor,
+                              fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 2),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.xs + 2,
-                        vertical: AppSpacing.xs - 2),
-                    decoration: BoxDecoration(
-                      color: badgeColor.withOpacity(0.12),
-                      borderRadius:
-                          BorderRadius.circular(AppRadius.chip),
-                    ),
-                    child: Text(
-                      daysLabel,
-                      style: AppText.badge.copyWith(
-                          color: badgeColor,
-                          fontWeight: FontWeight.w600),
-                    ),
+                  const SizedBox(width: AppSpacing.xs),
+                  // Botão consolidar pagamento
+                  IconButton(
+                    tooltip: 'Marcar como pago',
+                    icon: Icon(Icons.check_circle_outline,
+                        color: AppColors.limitLow, size: 22),
+                    onPressed: () => _consolidatePayment(tx),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                        minWidth: 32, minHeight: 32),
                   ),
                 ],
               ),
@@ -943,15 +1167,14 @@ class _TransactionsPageState extends State<TransactionsPage> {
     );
   }
 
-  // ── Lista ─────────────────────────────────────────────────────────────────
+  // ── Lista de transações realizadas ────────────────────────────────────────
 
   List<_TransactionDayGroup> _groupTransactionsByDay(
       List<TransactionEntity> source) {
     if (source.isEmpty) return const [];
-    final sorted = [...source]
-      ..sort((a, b) => b.date.compareTo(a.date));
+    final sorted = [...source]..sort((a, b) => b.date.compareTo(a.date));
 
-    final groups = <_TransactionDayGroup>[];
+    final groups  = <_TransactionDayGroup>[];
     DateTime? currentDate;
     List<TransactionEntity> bucket = [];
 
@@ -959,7 +1182,8 @@ class _TransactionsPageState extends State<TransactionsPage> {
       final d = DateTime(tx.date.year, tx.date.month, tx.date.day);
       if (currentDate == null || d != currentDate) {
         if (currentDate != null) {
-          groups.add(_TransactionDayGroup(date: currentDate, items: bucket));
+          groups.add(
+              _TransactionDayGroup(date: currentDate, items: bucket));
         }
         currentDate = d;
         bucket = [tx];
@@ -969,19 +1193,20 @@ class _TransactionsPageState extends State<TransactionsPage> {
     }
 
     if (currentDate != null) {
-      groups.add(_TransactionDayGroup(date: currentDate, items: bucket));
+      groups
+          .add(_TransactionDayGroup(date: currentDate, items: bucket));
     }
 
     return groups;
   }
 
   String _groupHeaderLabel(DateTime date) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final target = DateTime(date.year, date.month, date.day);
-    final diff = target.difference(today).inDays;
+    final now     = DateTime.now();
+    final today   = DateTime(now.year, now.month, now.day);
+    final target  = DateTime(date.year, date.month, date.day);
+    final diff    = target.difference(today).inDays;
 
-    if (diff == 0) return 'Hoje';
+    if (diff == 0)  return 'Hoje';
     if (diff == -1) return 'Ontem';
 
     return '${date.day.toString().padLeft(2, '0')}'
@@ -990,21 +1215,30 @@ class _TransactionsPageState extends State<TransactionsPage> {
   }
 
   Widget _buildTransactionList(bool isSimple) {
-    if (_filtered.isEmpty) {
+    // Se filtro de status é unpaid/future, mostrar empty state específico
+    final onlyProvisioned = _filterStatus == _StatusFilter.unpaid ||
+        _filterStatus == _StatusFilter.future;
+
+    if (_filtered.isEmpty && (onlyProvisioned || _provisioned.isEmpty)) {
       return SliverFillRemaining(
         child: AppEmptyState(
           icon: Icons.receipt_long_outlined,
           title: 'Nenhuma transação',
-          message: 'Nenhuma transação encontrada para o período selecionado.',
+          message:
+              'Nenhuma transação encontrada para os filtros selecionados.',
           actionLabel: 'Adicionar transação',
           onAction: () => _openForm(),
         ),
       );
     }
 
-    final groups = _groupTransactionsByDay(_filtered);
-    final children = <Widget>[];
-    int animationIndex = 0;
+    if (_filtered.isEmpty) {
+      return const SliverToBoxAdapter(child: SizedBox.shrink());
+    }
+
+    final groups          = _groupTransactionsByDay(_filtered);
+    final children        = <Widget>[];
+    int animationIndex    = 0;
 
     for (final group in groups) {
       children.add(
@@ -1023,10 +1257,9 @@ class _TransactionsPageState extends State<TransactionsPage> {
       );
 
       for (final tx in group.items) {
-        final category = _categoriesById[tx.categoryId];
         final card = tx.cardId != null ? _cardsById[tx.cardId!] : null;
 
-        final isExpense = tx.type == TransactionType.expense;
+        final isExpense  = tx.type == TransactionType.expense;
         final amountText =
             '${isExpense ? '-' : '+'} R\$ ${tx.amount.amount.toStringAsFixed(2)}';
 
@@ -1035,9 +1268,12 @@ class _TransactionsPageState extends State<TransactionsPage> {
             '/${tx.date.month.toString().padLeft(2, '0')}'
             '/${tx.date.year}';
 
+        // Usa _categoryLabel para corrigir "Sem Categoria" em isBillPayment
+        final catLabel = _categoryLabel(tx);
+
         final subtitleText = isSimple
             ? dateText
-            : '${category?.name ?? 'Sem categoria'}'
+            : '$catLabel'
               ' · ${card != null ? card.name : 'Sem cartão'}'
               ' · $dateText'
               '${tx.installmentCount != null ? ' · ${tx.installmentCount}x' : ''}';
@@ -1070,7 +1306,16 @@ class _TransactionsPageState extends State<TransactionsPage> {
                   ),
                   child: ListTile(
                     onTap: () => _openForm(initial: tx),
-                    leading: _CategoryDot(category: category),
+                    leading: tx.isBillPayment
+                        ? CircleAvatar(
+                            radius: 18,
+                            backgroundColor:
+                                AppColors.primary.withOpacity(0.18),
+                            child: Icon(Icons.credit_card_outlined,
+                                size: 16, color: AppColors.primary),
+                          )
+                        : _CategoryDot(
+                            category: _categoriesById[tx.categoryId]),
                     title: Text(tx.description ?? 'Sem descrição'),
                     subtitle: Text(subtitleText),
                     trailing: Text(
@@ -1124,6 +1369,10 @@ class _TransactionsPageState extends State<TransactionsPage> {
                           ? _buildSimpleFiltersRow()
                           : _buildUltraFiltersRow(),
                     ),
+                    // Linha de status sempre visível
+                    SliverToBoxAdapter(
+                      child: _buildStatusFilterRow(),
+                    ),
                     const SliverToBoxAdapter(child: Divider(height: 1)),
                     SliverToBoxAdapter(
                       child: isSimple
@@ -1135,13 +1384,13 @@ class _TransactionsPageState extends State<TransactionsPage> {
                           child: _buildExpensesByCategoryChart()),
                       SliverToBoxAdapter(
                           child: _buildExpensesByCardChart()),
-                      SliverToBoxAdapter(
-                          child: _buildProvisionedSection()),
                     ],
+                    // Seção provisionada — visível em qualquer modo quando há dados
+                    SliverToBoxAdapter(
+                        child: _buildProvisionedSection()),
                     const SliverToBoxAdapter(child: Divider(height: 1)),
                     SliverPadding(
-                      padding:
-                          const EdgeInsets.only(bottom: 80),
+                      padding: const EdgeInsets.only(bottom: 80),
                       sliver: _buildTransactionList(isSimple),
                     ),
                   ],
@@ -1152,12 +1401,11 @@ class _TransactionsPageState extends State<TransactionsPage> {
   }
 }
 
-// ── Widgets auxiliares ──────────────────────────────────────────────────────
+// ── Widgets auxiliares ───────────────────────────────────────────────────────
 
-/// Badge numérico sobreposto a qualquer widget filho.
 class _FilterBadge extends StatelessWidget {
   const _FilterBadge({required this.count, required this.child});
-  final int count;
+  final int   count;
   final Widget child;
 
   @override
@@ -1169,9 +1417,9 @@ class _FilterBadge extends StatelessWidget {
         child,
         Positioned(
           right: 6,
-          top: 6,
+          top:   6,
           child: Container(
-            width: 16,
+            width:  16,
             height: 16,
             decoration: BoxDecoration(
               color: AppColors.primary,
@@ -1181,10 +1429,10 @@ class _FilterBadge extends StatelessWidget {
             child: Text(
               '$count',
               style: const TextStyle(
-                fontSize: 10,
+                fontSize:   10,
                 fontWeight: FontWeight.w700,
-                color: Colors.white,
-                height: 1,
+                color:      Colors.white,
+                height:     1,
               ),
             ),
           ),
@@ -1212,9 +1460,7 @@ class _CategoryDot extends StatelessWidget {
       child: Text(
         letter,
         style: TextStyle(
-            color: color,
-            fontWeight: FontWeight.bold,
-            fontSize: 13),
+            color: color, fontWeight: FontWeight.bold, fontSize: 13),
       ),
     );
   }
@@ -1226,10 +1472,9 @@ class _SummaryChip extends StatelessWidget {
     required this.value,
     required this.color,
   });
-
   final String label;
   final String value;
-  final Color color;
+  final Color  color;
 
   @override
   Widget build(BuildContext context) {
@@ -1240,8 +1485,8 @@ class _SummaryChip extends StatelessWidget {
         const SizedBox(height: 2),
         Text(
           value,
-          style:
-              AppText.body.copyWith(fontWeight: FontWeight.w700, color: color),
+          style: AppText.body.copyWith(
+              color: color, fontWeight: FontWeight.w600),
         ),
       ],
     );
@@ -1249,56 +1494,56 @@ class _SummaryChip extends StatelessWidget {
 }
 
 class _TransactionDayGroup {
-  const _TransactionDayGroup({
-    required this.date,
-    required this.items,
-  });
-
-  final DateTime date;
+  const _TransactionDayGroup(
+      {required this.date, required this.items});
+  final DateTime                date;
   final List<TransactionEntity> items;
 }
 
 class _StaggeredItem extends StatefulWidget {
-  const _StaggeredItem({
-    required this.index,
-    required this.child,
-  });
-
-  final int index;
+  const _StaggeredItem({required this.index, required this.child});
+  final int    index;
   final Widget child;
 
   @override
   State<_StaggeredItem> createState() => _StaggeredItemState();
 }
 
-class _StaggeredItemState extends State<_StaggeredItem> {
-  double _opacity = 0;
-  Offset _offset = const Offset(0, 0.12);
+class _StaggeredItemState extends State<_StaggeredItem>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double>   _opacity;
+  late final Animation<Offset>   _slide;
 
   @override
   void initState() {
     super.initState();
-    Future.delayed(Duration(milliseconds: 40 * widget.index), () {
-      if (!mounted) return;
-      setState(() {
-        _opacity = 1;
-        _offset = Offset.zero;
-      });
+    _ctrl = AnimationController(
+      vsync:    this,
+      duration: const Duration(milliseconds: 280),
+    );
+    _opacity = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+    _slide   = Tween<Offset>(
+      begin: const Offset(0, 0.04),
+      end:   Offset.zero,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+
+    Future.delayed(Duration(milliseconds: widget.index * 30), () {
+      if (mounted) _ctrl.forward();
     });
   }
 
   @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return AnimatedSlide(
-      duration: const Duration(milliseconds: 260),
-      curve: Curves.easeOutCubic,
-      offset: _offset,
-      child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 260),
-        curve: Curves.easeOutCubic,
-        opacity: _opacity,
-        child: widget.child,
-      ),
+    return FadeTransition(
+      opacity: _opacity,
+      child: SlideTransition(position: _slide, child: widget.child),
     );
   }
 }
