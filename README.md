@@ -1,218 +1,293 @@
 # FinMe
 
-FinMe é um aplicativo de finanças pessoais focado em pessoas que lidam com **alto volume de cartões, contas e bancos**, oferecendo uma forma clara de **provisionar** e **visualizar gastos passados, recentes e futuros** em um só lugar.
+Aplicativo Flutter de gestão financeira pessoal para **Android** e **Windows** (desktop-first).  
+Foco em controle de transações, cartões de crédito, contas, categorias, recorrências, metas e relatórios.  
+Toda a persistência é **100% local via Hive** — sem backend ou API externa.
 
-> ⚠️ Projeto em construção – uso inicial focado em desenvolvimento e experimentação.
-
----
-
-## Visão geral
-
-O objetivo do FinMe é facilitar a vida de quem precisa acompanhar **muitos cartões e contas ao mesmo tempo**, consolidando informações que normalmente ficariam espalhadas em dezenas de apps e internet bankings diferentes.
-
-Alguns problemas que o FinMe se propõe a resolver:
-
-- Dificuldade de acompanhar faturas de **muitos cartões** (10, 20, 30+ cartões ao mesmo tempo).
-- Cansaço de abrir vários apps/bancos só para entender “quanto vou pagar este mês”.
-- Falta de visão consolidada do que já foi gasto, do que ainda vai vencer e do que é supérfluo.
-
-O app é pensado para servir **desde iniciantes em controle financeiro** até usuários avançados que precisam de uma ferramenta de “guerra” para organizar dezenas de cartões e transações.
+> **Versão atual:** 1.0.0+1 | **Marco atual:** M3 ✅ Concluído
 
 ---
 
-## Modos de uso: Simples e Ultra
+## Stack
 
-O FinMe tem dois modos de operação, pensados para perfis diferentes de usuário.
+| Camada | Tecnologia |
+|---|---|
+| UI / lógica | Flutter (Dart) |
+| Persistência | Hive (adapters manuais, sem build_runner) |
+| Gráficos | fl_chart |
+| Exportação | csv |
+| Estado | StatefulWidget + setState + ValueNotifier |
+| Injeção | RepositoryLocator (singleton) |
+| Navegação | Navigator.pushNamed + RouteObserver global |
+
+---
+
+## Modos de uso
 
 ### Modo Simples
-
-Voltado para quem está começando a organizar as finanças e não quer complexidade:
-
-- Acompanhamento de **dinheiro que sai da conta**.
-- Visualização de **valores de fatura** e compromissos básicos.
-- Foco em poucos elementos na tela, sem excesso de configurações.
+Voltado para quem está começando. Baixa densidade, sem gráficos, filtros mínimos, transações provisionadas ocultas.
 
 ### Modo Ultra
+"Tanque de guerra" para quem lida com muitos cartões e alto volume de transações. Alta densidade, gráficos obrigatórios, filtros completos (banco, cartão, categoria, tipo, busca global), provisionados visíveis.
 
-Pensado como um “tanque de guerra” para quem lida com muitos cartões, contas e bancos:
-
-- Organização de **diversos cartões**, inclusive múltiplos cartões do mesmo banco.
-- Controle de **cartões de bancos diferentes** em uma visão única.
-- **Provisionamento de gastos** (saber o que está por vir, não só o que já foi gasto).
-- Detecção de **gastos desnecessários**, como:
-  - Assinaturas esquecidas ou indesejadas.
-  - Anuidades e tarifas recorrentes.
-- Análise de **volume de gastos no débito** (para onde está indo o dinheiro no dia a dia).
-- Registro e acompanhamento de **boletos**, tanto pagos na hora quanto provisionados.
-
-A troca entre Modo Simples e Modo Ultra será feita via **toggle/configuração dentro do app**, permitindo que o mesmo usuário evolua de um modo para outro quando se sentir confortável.
+A regra de ouro: máximo compartilhamento de domínio entre os modos — apenas a apresentação muda.
 
 ---
 
-## Público-alvo
+## Arquitetura
 
-- Pessoas com **muitos cartões de crédito/débito** e contas em vários bancos.
-- Quem precisa consolidar e enxergar com clareza:
-  - Gastos do mês.
-  - Gastos da semana.
-  - Períodos personalizados (15 dias, etc.).
-- Usuários iniciantes em finanças (Modo Simples).
-- Usuários avançados ou profissionais que lidam com **alto volume de transações** (Modo Ultra).
+Clean Architecture por feature:
 
----
+```
+lib/
+├── app/                        # MaterialApp, Router
+├── core/
+│   ├── models/                 # Money, AppMode
+│   ├── services/               # HiveInit, RepositoryLocator, ThemeController,
+│   │                           # AppModeController, RecurrenceService,
+│   │                           # ProfileService, DefaultSeedService,
+│   │                           # AuthService, RouteObserver
+│   ├── theme/                  # AppTheme, tokens de cor/espaçamento/tipografia
+│   └── widgets/                # AppEmptyState, AppText, etc.
+└── features/
+    ├── accounts/               # Contas/carteiras
+    ├── auth/                   # Login / sessão
+    ├── budget/                 # Orçamento mensal por categoria (M3-E)
+    ├── cards/                  # Cartões de crédito/débito + faturas
+    ├── categories/             # Categorias com picker de ícone
+    ├── dashboard/              # KPIs + gráfico mensal + últimas transações
+    ├── goals/                  # Metas de economia e teto de gastos
+    ├── onboarding/             # Splash + fluxo de boas-vindas (M3-C)
+    ├── payment_hub/            # Hub central de pagamentos
+    ├── reports/                # Relatórios com filtros + exportação CSV
+    ├── settings/               # Configurações gerais
+    ├── transactions/           # CRUD completo de transações
+    └── transfer/               # Transferência entre contas
+```
 
-## Funcionalidades principais (MVP)
+### Convenções de nomenclatura
 
-O MVP (primeira versão utilizável) do FinMe foca em:
-
-- **Cadastro de cartões**
-  - Suporte a **múltiplos cartões por banco**.
-  - Organização por banco, tipo de cartão, etc.
-
-- **Cadastro de receitas e despesas**
-  - Inclusão de diferentes formas de pagamento:
-    - Crédito, débito, boleto, pix, etc.
-  - Registro de boletos tanto:
-    - Pagos imediatamente.
-    - Provisionados para datas futuras.
-
-- **Categorias de despesas**
-  - Criação e gerenciamento de categorias (ex.: alimentação, transporte, assinaturas, etc.).
-  - Visualização de **quanto está sendo gasto em cada categoria**.
-  - Detalhamento dentro de uma categoria (quais gastos compõem aquele total).
-
-- **Visualização consolidada**
-  - Visão de gastos:
-    - Passados.
-    - Recentes.
-    - Provisionados/futuros.
-
-Importação/exportação (CSV, backups, etc.) **não estará presente no MVP**, mas está prevista para versões futuras.
-
----
-
-## Plataformas e tecnologia
-
-- **Plataformas alvo**
-  - Inicialmente:
-    - 🪟 **Windows**
-    - 🤖 **Android**
-  - Futuro:
-    - 🍎 **iOS / iPadOS**
-    - 💻 **macOS**
-
-- **Stack principal**
-  - Aplicativo construído em **Flutter** e **Dart**.
-  - Foco atual em desktop (Windows), com base de código já pensada para mobile.
+| Sufixo | Uso |
+|---|---|
+| `*_entity.dart` | Entidade pura do domínio |
+| `*_model.dart` | Modelo Hive com `@HiveType`/`@HiveField` |
+| `*_repository.dart` | Interface abstrata |
+| `hive_*_repository.dart` | Implementação concreta Hive |
+| `*_page.dart` | Tela completa |
+| `*_controller.dart` | Singleton com estado global |
 
 ---
 
-## Estado do projeto
+## Hive — TypeIds registrados
 
-- Status: **Em construção**.
-- Objetivo atual:
-  - Estruturar a base do app (modelos, cadastro de cartões, despesas/receitas, categorias).
-  - Começar pelas telas essenciais para o fluxo de quem trabalha com muitos cartões.
+| TypeId | Classe |
+|---|---|
+| 0 | TransactionModel |
+| 2 | CategoryModel |
+| 3 | CardModel |
+| 4 | AccountModel |
+| 5 | GoalModel |
+| 6 | BudgetModel |
+| 1 | *(livre — evitar por precaução)* |
+| 7+ | *(reservado para marcos futuros)* |
 
-Este repositório é, por enquanto, **pessoal/experimental**, mas nada impede que se torne open source ou um produto mais formal no futuro.
+**Boxes:** `transactions`, `categories`, `cards`, `settings`, `goals`, `accounts`, `preferences`
 
----
-
-## Como rodar localmente (desenvolvimento)
-
-> 💻 Foco desta seção: **desenvolvedores**.  
-> É esperado que você já tenha o **Flutter SDK** instalado e configurado no seu ambiente.
-
-### Pré-requisitos
-
-- Flutter instalado e configurado no seu sistema.
-- Ambiente com suporte a:
-  - Windows (para rodar `-d windows`).
-  - Android (caso queira rodar em emulador/dispositivo Android).
-
-### Passo a passo
-
-1. **Clonar o repositório**
-
-   ```bash
-   git clone https://github.com/hiraokagabriel/FinMe.git
-   cd FinMe
-   ```
-
-2. **Instalar dependências**
-
-   ```bash
-   flutter pub get
-   ```
-
-3. **Rodar no Windows (desktop)**
-
-   ```bash
-   flutter run -d windows
-   ```
-
-4. **Rodar em dispositivo/emulador Android (opcional)**
-
-   Certifique-se de que há um dispositivo/emulador Android disponível e execute:
-
-   ```bash
-   flutter devices
-   flutter run -d <id_do_dispositivo>
-   ```
+> ⚠️ Nunca reutilizar um TypeId. O argumento de `Hive.isAdapterRegistered(n)` deve ser exatamente o typeId declarado no adapter.
 
 ---
 
-## Distribuição
+## Rotas
 
-- A ideia é oferecer futuramente um **executável (.exe)** para Windows, permitindo que usuários finais usem o FinMe sem precisar instalar Flutter ou ferramentas de desenvolvimento.
-- No momento, o foco é o **fluxo de desenvolvimento via código fonte**.
-
----
-
-## Roadmap (alto nível)
-
-> Detalhes serão aprofundados em breve em um arquivo `ROADMAP.md` ou `claude.md`.
-
-Ideias de evolução:
-
-- ✅ MVP:
-  - Cadastro de cartões.
-  - Cadastro de receitas/despesas.
-  - Categorias e visualização por categoria.
-  - Registro e provisionamento de boletos.
-
-- 🔜 Próximos passos:
-  - Visualizações mais ricas (gráficos, dashboards simples).
-  - Modo simples/ultra com experiências de interface bem diferenciadas.
-  - Alertas para assinaturas e gastos recorrentes identificados como desnecessários.
-  - Exportação/backup de dados.
-
-- 🔭 Futuro:
-  - Versões estáveis para Android, iOS/iPadOS e macOS.
-  - Possíveis integrações com bancos ou arquivos de extrato (a avaliar).
+| Rota | Tela |
+|---|---|
+| `/` | DashboardPage |
+| `/transactions` | TransactionsPage |
+| `/cards` | CardsPage |
+| `/settings` | SettingsPage |
+| `/goals` | GoalsPage |
+| `/reports` | ReportsPage |
+| `/accounts` | AccountsPage |
+| `/transfer` | TransferPage |
+| `/budget` | BudgetPage |
+| `/onboarding` | OnboardingPage |
+| `/login` | LoginPage |
 
 ---
 
-## Contribuição
+## Funcionalidades implementadas
 
-No momento, **o projeto não está aberto a contribuições externas**.  
-Sugestões, issues e pull requests podem até ser vistos, mas não há compromisso de análise ou merge.
+### Core / Infraestrutura
+- Persistência 100% local via Hive (adapters manuais, sem build_runner)
+- `RepositoryLocator` singleton para injeção de dependências
+- `HiveInit` com registro de adapters + guards de typeId + migração de dados
+- `DefaultSeedService`: seed automático de categorias e contas no primeiro boot
+- `RecurrenceService.generatePending()`: gera transações recorrentes pendentes no boot
+- `ThemeController`: tema claro/escuro com toggle persistido
+- `AppModeController`: alternância Modo Simples / Modo Ultra persistida
+- `RouteObserver` global (`appRouteObserver`) registrado no `MaterialApp` para reatividade entre rotas
+- `AuthService`: sessão de login local com persistência
+- `ProfileService`: perfil do usuário persistido
+
+### Autenticação / Onboarding (M3-C)
+- Splash screen com animação de entrada
+- Fluxo de onboarding multi-etapa (boas-vindas, configuração inicial)
+- Flag `isOnboardingDone` persistida no Hive — onboarding exibido apenas uma vez
+- Login local com `AuthService`
+
+### Dashboard
+- KPIs: receitas, despesas e saldo do mês atual
+- Gráfico de linha mensal (fl_chart)
+- Lista das últimas transações
+- Adaptativo por modo (Simples: KPIs; Ultra: KPIs + gráfico + lista densa)
+
+### Transações
+- CRUD completo: criação, edição, exclusão
+- Tipos: `income`, `expense`, `transfer`
+- Campos: `accountId`, `toAccountId`, `cardId`, `categoryId`, `notes`, `isBoleto`, `isProvisioned`, `isBillPayment`, `recurrenceRule`
+- Filtros (Modo Ultra): banco, cartão, categoria, tipo, busca global, período
+- Tabela adaptativa: 3 colunas (Simples) vs 5+ colunas (Ultra)
+- Provisionados exibidos em itálico + ícone de relógio (Ultra)
+
+### Transferências
+- Transferência entre contas: débito na origem + crédito no destino
+- Par vinculado por `transferPairId` — não duplica saldo nos cálculos
+
+### Cartões (M3)
+- CRUD de cartões de crédito e débito
+- `closingDay` calculado automaticamente se não informado (`dueDay - 7`)
+- **`CardStatementsPage`**: visualização de faturas por ciclo (6 ciclos, navegação por mês)
+- Badge de status por fatura: Aberta · Fecha hoje · Pendente · Vencida · Paga
+- **Marcar fatura como paga**: persiste flag no box `preferences` + cria transação `isBillPayment` com `id` determinístico (`bill_payment_{cardId}_{year}{mm}`)
+- **Desmarcar fatura**: remove flag + remove transação de pagamento
+- **`isPaid` com validação cruzada**: se a transação de pagamento for deletada externamente, a flag é limpa automaticamente — evita status "Paga" inconsistente
+- Barra de limite com percentual e cor semântica (verde/amarelo/vermelho)
+- Donut chart de uso do limite (Modo Ultra)
+- Badge "N faturas em aberto" quando há ciclos fechados não pagos
+- Badge "Em dia" quando todos os ciclos estão pagos (Modo Ultra)
+- `CardsPage` implementa `RouteAware` + `didPopNext` para recarregar dados ao voltar de qualquer sub-rota
+
+### Categorias
+- CRUD completo
+- Picker de ícone: emoji ou codepoint
+- `CategoryIds.billPayment` reservado para pagamentos de fatura
+
+### Contas / Carteiras
+- CRUD completo
+- Seed automático no primeiro boot
+- Saldo calculado a partir das transações
+
+### Metas (Goals)
+- Meta de Economia: progresso baseado em receitas acumuladas
+- Teto de Gastos: barra de progresso baseada em despesas do período
+
+### Orçamento mensal (M3-E)
+- `BudgetPage`: orçamento por categoria com período mensal
+- `BudgetModel` (typeId 6): valor-alvo por categoria/mês
+- Barra de progresso por categoria vs. gasto real
+
+### Preferências (M3-D)
+- `PreferencesService`: box `preferences` para moeda, idioma e formato de data
+- Toggle de tema claro/escuro
+- Toggle Modo Simples / Ultra
+
+### Relatórios
+- Filtros por período
+- Gráficos de despesas por categoria
+- Exportação CSV
+
+### Notificações / Alertas
+- Aviso de fatura próxima do vencimento
+- Notificação de fatura vencida não paga
+
+---
+
+## Marcos de desenvolvimento
+
+| Marco | Descrição | Status |
+|---|---|---|
+| M1 | CRUD base: transações, cartões, categorias, contas | ✅ Concluído |
+| M2 | Dashboard, metas, relatórios, tema, modo Simples/Ultra | ✅ Concluído |
+| M3-A | Faturas de cartão: ciclos, marcar como paga, barra de limite | ✅ Concluído |
+| M3-B | Transferências entre contas, recorrência automática | ✅ Concluído |
+| M3-C | Splash Screen / Onboarding | ✅ Concluído |
+| M3-D | PreferencesService (moeda, idioma, formato de data) | ✅ Concluído |
+| M3-E | BudgetPage — Orçamento mensal por categoria (typeId 6) | ✅ Concluído |
+| M4 | Detecção de assinaturas recorrentes, relatórios de gastos desnecessários | 🔲 Pendente |
+| M5 | Refinamento UX/UI, empacotamento .exe Windows, APK Android | 🔲 Pendente |
+
+---
+
+## Bugs corrigidos (histórico relevante)
+
+| # | Descrição | Causa | Fix |
+|---|---|---|---|
+| #1 | `AppEmptyState` — argumento `subtitle:` inválido | Parâmetro renomeado para `message:` | Corrigido nos call sites |
+| #2 | `CardsPage` não atualizava ao voltar de sub-rotas | `_loadData()` só chamado no `initState` | `RouteAware` + `didPopNext` via `appRouteObserver` |
+| #3 | Fatura aparecia como "Paga" após deletar transação de pagamento | `isPaid` lia apenas a flag, sem validar existência da `bill_payment_*` tx | `isPaid` agora cruza flag com existência real da transação; limpa flag automaticamente se ausente |
+| #4 | Crash `Cannot write, unknown type` no boot | `Hive.isAdapterRegistered(n)` com typeId errado no guard | TypeIds corrigidos para coincidir exatamente com os declarados nos adapters |
+
+---
+
+## Design System
+
+**Personalidade:** clean, funcional, alta densidade de dados (referência: Linear). Sem gradientes decorativos, sombras dramáticas ou ornamentos.
+
+**Regra de ouro:** nunca usar valores hex diretamente em widgets — sempre tokens de `lib/core/theme/app_theme.dart`.
+
+### Paleta principal
+
+| Token | Claro | Escuro |
+|---|---|---|
+| `colorBackground` | `#F5F7FA` | `#121212` |
+| `colorSurface` | `#FFFFFF` | `#1E1E1E` |
+| `colorPrimary` | `#42A5F5` | `#81D4FA` |
+| `colorTextPrimary` | `#202124` | `#E8EAED` |
+| `colorTextSecondary` | `#5F6368` | `#9AA0A6` |
+| `colorWarning` | `#FF9800` | `#FFB74D` |
+| `colorDanger` | `#E53935` | `#EF5350` |
+
+### Espaçamento e bordas
+- Múltiplos de `4px` (4, 8, 12, 16, 20, 24, 32…)
+- `BorderRadius` de cards: `8px` | chips/badges: `4px` ou pílula
+- Bordas de separação: `1px` com opacidade `0.15`
+- Sombras: `elevation: 1` ou `boxShadow opacity: 0.08`
+- Máx. 3 tamanhos de fonte por tela
+
+### Tipografia
+
+| Contexto | Tamanho | Peso |
+|---|---|---|
+| Título de tela | 18–20px | w600 |
+| Cabeçalho de seção | 14px | w600 |
+| Corpo / tabela | 13–14px | w400 |
+| Apoio (datas, categorias) | 12px | w400 |
+| Badge / chip | 11px | w500 |
+
+---
+
+## Como rodar localmente
+
+```bash
+# 1. Clonar
+git clone https://github.com/hiraokagabriel/FinMe.git
+cd FinMe
+
+# 2. Instalar dependências
+flutter pub get
+
+# 3. Rodar no Windows
+flutter run -d windows
+
+# 4. Rodar no Android
+flutter devices
+flutter run -d <id_do_dispositivo>
+```
+
+> Se o app travar no boot após atualização de schema Hive, apague os arquivos `.hive` em `AppData\Roaming\com.example.finme\` e reinicie.
 
 ---
 
 ## Licença
 
-Licença **a definir**.  
-Enquanto não houver um arquivo de licença explícito (`LICENSE`), considere o uso destinado apenas a fins de estudo e desenvolvimento pessoal.
-
----
-
-## Motivação
-
-O FinMe nasceu de uma necessidade real: lidar diariamente com **mais de 50 cartões**, em múltiplos bancos, e a dificuldade de:
-
-- Enxergar os gastos do mês de forma consolidada.
-- Acompanhar gastos na semana, 15 dias, ou períodos específicos.
-- Provisionar o que ainda vai vencer sem se perder entre faturas e apps.
-
-Checar cartão por cartão manualmente gera um **cansaço desnecessário**. O FinMe é a tentativa de transformar esse caos em uma visão clara e centralizada das finanças.
+A definir. Uso restrito a fins de estudo e desenvolvimento pessoal enquanto não houver `LICENSE` explícito.
