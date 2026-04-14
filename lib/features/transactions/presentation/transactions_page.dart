@@ -7,6 +7,7 @@ import '../domain/transaction_entity.dart';
 import '../domain/transaction_type.dart';
 import '../../categories/domain/category_entity.dart';
 import '../../cards/domain/card_entity.dart';
+import '../../cards/domain/statement_service.dart';
 import '../../../core/models/app_mode.dart';
 import '../../../core/services/app_mode_controller.dart';
 import '../../../core/services/preferences_service.dart';
@@ -260,6 +261,50 @@ class _TransactionsPageState extends State<TransactionsPage> {
     return count;
   }
 
+  // ── Deleção centralizada ──────────────────────────────────────────────────
+
+  /// Remove a transação e, se for um pagamento de fatura (isBillPayment),
+  /// reabre a fatura correspondente removendo o flag Hive de "paga".
+  Future<void> _deleteTransaction(TransactionEntity tx) async {
+    await _transactionsRepository.remove(tx.id);
+
+    if (tx.isBillPayment && tx.cardId != null) {
+      // A chave do ciclo está codificada no id: bill_payment_{cardId}_{year}{mm}
+      // Extrai ano/mês a partir da data da própria transação.
+      await StatementService.instance.markPaid(
+        tx.cardId!,
+        tx.date.year,
+        tx.date.month,
+        paid: false,
+      );
+    }
+
+    await _loadData();
+    if (!mounted) return;
+
+    if (tx.isBillPayment) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(
+            'Pagamento de fatura removido. A fatura foi reaberta.',
+          ),
+          backgroundColor: AppColors.warning,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 4),
+          action: SnackBarAction(
+            label: 'OK',
+            textColor: Colors.white,
+            onPressed: () {},
+          ),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Transação excluída')),
+      );
+    }
+  }
+
   // ── Consolidar pagamento ──────────────────────────────────────────────────
 
   /// Converte uma transação provisionada em realizada (isProvisioned = false).
@@ -335,12 +380,38 @@ class _TransactionsPageState extends State<TransactionsPage> {
   }
 
   Future<bool?> _confirmDelete(TransactionEntity tx) {
+    final isBillPay = tx.isBillPayment;
     return showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Excluir transação'),
-        content:
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
             Text('Deseja excluir "${tx.description ?? 'Sem descrição'}"?'),
+            if (isBillPay) ...[
+              const SizedBox(height: 12),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.warning_amber_rounded,
+                      color: AppColors.warning, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Esta é um pagamento de fatura. Excluí-lo irá reabrir a fatura do cartão.',
+                      style: TextStyle(
+                        color: AppColors.warning,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -1077,14 +1148,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
             key: ValueKey('prov_${tx.id}'),
             direction: DismissDirection.endToStart,
             confirmDismiss: (_) => _confirmDelete(tx),
-            onDismissed: (_) async {
-              await _transactionsRepository.remove(tx.id);
-              await _loadData();
-              if (!mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Transação excluída')),
-              );
-            },
+            onDismissed: (_) => _deleteTransaction(tx),
             background: Container(
               color: AppColors.danger,
               alignment: Alignment.centerRight,
@@ -1284,14 +1348,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
                 key: ValueKey(tx.id),
                 direction: DismissDirection.endToStart,
                 confirmDismiss: (_) => _confirmDelete(tx),
-                onDismissed: (_) async {
-                  await _transactionsRepository.remove(tx.id);
-                  await _loadData();
-                  if (!mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Transação excluída')),
-                  );
-                },
+                onDismissed: (_) => _deleteTransaction(tx),
                 background: Container(
                   color: AppColors.danger,
                   alignment: Alignment.centerRight,
