@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:uuid/uuid.dart';
 
 import '../data/transactions_repository.dart';
 import '../domain/transaction_entity.dart';
@@ -289,7 +288,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
     if (confirmed != true) return;
 
     final paid = TransactionEntity(
-      id:                 const Uuid().v4(),
+      id:                 DateTime.now().microsecondsSinceEpoch.toString(),
       amount:             tx.amount,
       date:               DateTime.now(),
       type:               tx.type,
@@ -1169,244 +1168,290 @@ class _TransactionsPageState extends State<TransactionsPage> {
 
   // ── Lista de transações realizadas ────────────────────────────────────────
 
-  List<_TransactionDayGroup> _groupTransactionsByDay(
-      List<TransactionEntity> source) {
-    if (source.isEmpty) return const [];
-    final sorted = [...source]..sort((a, b) => b.date.compareTo(a.date));
-
-    final groups  = <_TransactionDayGroup>[];
-    DateTime? currentDate;
-    List<TransactionEntity> bucket = [];
-
-    for (final tx in sorted) {
-      final d = DateTime(tx.date.year, tx.date.month, tx.date.day);
-      if (currentDate == null || d != currentDate) {
-        if (currentDate != null) {
-          groups.add(
-              _TransactionDayGroup(date: currentDate, items: bucket));
-        }
-        currentDate = d;
-        bucket = [tx];
-      } else {
-        bucket.add(tx);
-      }
+  List<_TransactionDayGroup> _groupByDay(List<TransactionEntity> txs) {
+    final Map<String, List<TransactionEntity>> map = {};
+    for (final tx in txs) {
+      final key =
+          '${tx.date.year}-${tx.date.month.toString().padLeft(2, '0')}-${tx.date.day.toString().padLeft(2, '0')}';
+      map.putIfAbsent(key, () => []).add(tx);
     }
-
-    if (currentDate != null) {
-      groups
-          .add(_TransactionDayGroup(date: currentDate, items: bucket));
-    }
-
-    return groups;
+    return map.entries
+        .map((e) => _TransactionDayGroup(dateKey: e.key, txs: e.value))
+        .toList()
+      ..sort((a, b) => b.dateKey.compareTo(a.dateKey));
   }
 
-  String _groupHeaderLabel(DateTime date) {
-    final now     = DateTime.now();
-    final today   = DateTime(now.year, now.month, now.day);
-    final target  = DateTime(date.year, date.month, date.day);
-    final diff    = target.difference(today).inDays;
-
-    if (diff == 0)  return 'Hoje';
-    if (diff == -1) return 'Ontem';
-
-    return '${date.day.toString().padLeft(2, '0')}'
-        '/${date.month.toString().padLeft(2, '0')}'
-        '/${date.year}';
-  }
-
-  Widget _buildTransactionList(bool isSimple) {
-    // Se filtro de status é unpaid/future, mostrar empty state específico
-    final onlyProvisioned = _filterStatus == _StatusFilter.unpaid ||
-        _filterStatus == _StatusFilter.future;
-
-    if (_filtered.isEmpty && (onlyProvisioned || _provisioned.isEmpty)) {
-      return SliverFillRemaining(
-        child: AppEmptyState(
-          icon: Icons.receipt_long_outlined,
-          title: 'Nenhuma transação',
-          message:
-              'Nenhuma transação encontrada para os filtros selecionados.',
-          actionLabel: 'Adicionar transação',
-          onAction: () => _openForm(),
-        ),
-      );
-    }
-
+  Widget _buildTransactionList() {
     if (_filtered.isEmpty) {
-      return const SliverToBoxAdapter(child: SizedBox.shrink());
-    }
-
-    final groups          = _groupTransactionsByDay(_filtered);
-    final children        = <Widget>[];
-    int animationIndex    = 0;
-
-    for (final group in groups) {
-      children.add(
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.lg,
-            AppSpacing.md,
-            AppSpacing.lg,
-            AppSpacing.xs,
-          ),
-          child: Text(
-            _groupHeaderLabel(group.date),
-            style: AppText.sectionLabel,
-          ),
-        ),
+      return const AppEmptyState(
+        icon: Icons.receipt_long_outlined,
+        title: 'Nenhuma transação',
+        subtitle: 'Tente ajustar os filtros ou adicione uma nova transação.',
       );
-
-      for (final tx in group.items) {
-        final card = tx.cardId != null ? _cardsById[tx.cardId!] : null;
-
-        final isExpense  = tx.type == TransactionType.expense;
-        final amountText =
-            '${isExpense ? '-' : '+'} R\$ ${tx.amount.amount.toStringAsFixed(2)}';
-
-        final dateText =
-            '${tx.date.day.toString().padLeft(2, '0')}'
-            '/${tx.date.month.toString().padLeft(2, '0')}'
-            '/${tx.date.year}';
-
-        // Usa _categoryLabel para corrigir "Sem Categoria" em isBillPayment
-        final catLabel = _categoryLabel(tx);
-
-        final subtitleText = isSimple
-            ? dateText
-            : '$catLabel'
-              ' · ${card != null ? card.name : 'Sem cartão'}'
-              ' · $dateText'
-              '${tx.installmentCount != null ? ' · ${tx.installmentCount}x' : ''}';
-
-        children.add(
-          _StaggeredItem(
-            index: animationIndex++,
-            child: Column(
-              children: [
-                Dismissible(
-                  key: ValueKey(tx.id),
-                  direction: DismissDirection.endToStart,
-                  confirmDismiss: (_) => _confirmDelete(tx),
-                  onDismissed: (_) async {
-                    await _transactionsRepository.remove(tx.id);
-                    await _loadData();
-                    if (!mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                          content: Text('Transação excluída')),
-                    );
-                  },
-                  background: Container(
-                    color: AppColors.danger,
-                    alignment: Alignment.centerRight,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.lg),
-                    child: const Icon(Icons.delete_outline,
-                        color: Colors.white),
-                  ),
-                  child: ListTile(
-                    onTap: () => _openForm(initial: tx),
-                    leading: tx.isBillPayment
-                        ? CircleAvatar(
-                            radius: 18,
-                            backgroundColor:
-                                AppColors.primary.withOpacity(0.18),
-                            child: Icon(Icons.credit_card_outlined,
-                                size: 16, color: AppColors.primary),
-                          )
-                        : _CategoryDot(
-                            category: _categoriesById[tx.categoryId]),
-                    title: Text(tx.description ?? 'Sem descrição'),
-                    subtitle: Text(subtitleText),
-                    trailing: Text(
-                      amountText,
-                      style: AppText.body.copyWith(
-                        color: isExpense
-                            ? AppColors.danger
-                            : AppColors.limitLow,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
-                const Divider(height: 1),
-              ],
-            ),
-          ),
-        );
-      }
     }
 
-    return SliverList(
-      delegate: SliverChildListDelegate(children),
-    );
-  }
+    final groups = _groupByDay(_filtered);
+    final isUltra = AppModeController.instance.mode == AppMode.ultra;
 
-  // ── Build principal ───────────────────────────────────────────────────────
+    return ListView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: groups.length,
+      itemBuilder: (context, gi) {
+        final group = groups[gi];
+        final parts = group.dateKey.split('-');
+        final day   = int.parse(parts[2]);
+        final month = int.parse(parts[1]);
+        final year  = int.parse(parts[0]);
+        final date  = DateTime(year, month, day);
 
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: AppModeController.instance,
-      builder: (context, _) {
-        final mode     = AppModeController.instance.mode;
-        final isSimple = mode == AppMode.simple;
-        final isUltra  = mode == AppMode.ultra;
+        final now       = DateTime.now();
+        final today     = DateTime(now.year, now.month, now.day);
+        final yesterday = today.subtract(const Duration(days: 1));
 
-        return Scaffold(
-          appBar: _buildAppBar(),
-          floatingActionButton: FloatingActionButton.extended(
-            onPressed: () => _openForm(),
-            icon: const Icon(Icons.add),
-            label: const Text('Nova transação'),
-          ),
-          body: _isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : CustomScrollView(
-                  slivers: [
-                    SliverToBoxAdapter(
-                      child: isSimple
-                          ? _buildSimpleFiltersRow()
-                          : _buildUltraFiltersRow(),
+        final String dateLabel;
+        if (date == today) {
+          dateLabel = 'Hoje';
+        } else if (date == yesterday) {
+          dateLabel = 'Ontem';
+        } else {
+          const months = [
+            '', 'jan', 'fev', 'mar', 'abr', 'mai', 'jun',
+            'jul', 'ago', 'set', 'out', 'nov', 'dez',
+          ];
+          dateLabel = '$day ${months[month]}${year != now.year ? ' $year' : ''}';
+        }
+
+        final dayTotal = group.txs.fold<double>(0, (sum, tx) {
+          if (tx.type == TransactionType.income)    return sum + tx.amount.amount;
+          if (tx.type == TransactionType.expense)   return sum - tx.amount.amount;
+          return sum;
+        });
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // — Cabeçalho do dia —
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.xs),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    dateLabel.toUpperCase(),
+                    style: AppText.badge.copyWith(
+                      color: AppColors.textSecondary,
+                      letterSpacing: 0.8,
                     ),
-                    // Linha de status sempre visível
-                    SliverToBoxAdapter(
-                      child: _buildStatusFilterRow(),
+                  ),
+                  Text(
+                    '${dayTotal >= 0 ? '+' : ''}R\$ ${dayTotal.toStringAsFixed(2)}',
+                    style: AppText.badge.copyWith(
+                      color: dayTotal >= 0
+                          ? AppColors.limitLow
+                          : AppColors.danger,
+                      fontWeight: FontWeight.w600,
                     ),
-                    const SliverToBoxAdapter(child: Divider(height: 1)),
-                    SliverToBoxAdapter(
-                      child: isSimple
-                          ? _buildSimpleSummary()
-                          : _buildUltraSummary(),
-                    ),
-                    if (isUltra) ...[
-                      SliverToBoxAdapter(
-                          child: _buildExpensesByCategoryChart()),
-                      SliverToBoxAdapter(
-                          child: _buildExpensesByCardChart()),
-                    ],
-                    // Seção provisionada — visível em qualquer modo quando há dados
-                    SliverToBoxAdapter(
-                        child: _buildProvisionedSection()),
-                    const SliverToBoxAdapter(child: Divider(height: 1)),
-                    SliverPadding(
-                      padding: const EdgeInsets.only(bottom: 80),
-                      sliver: _buildTransactionList(isSimple),
-                    ),
-                  ],
+                  ),
+                ],
+              ),
+            ),
+
+            // — Itens do dia —
+            ...group.txs.map((tx) {
+              final isTransfer = tx.type == TransactionType.transfer;
+              final isIncome   = tx.type == TransactionType.income;
+              final amountSign = isIncome ? '+' : '-';
+              final amountColor = isTransfer
+                  ? AppColors.primary
+                  : (isIncome ? AppColors.limitLow : AppColors.danger);
+
+              final card = tx.cardId != null ? _cardsById[tx.cardId!] : null;
+              final installmentText = tx.installmentCount != null
+                  ? ' (${tx.installmentCount}x)'
+                  : '';
+
+              final categoryLabel = _categoryLabel(tx);
+
+              String subtitle;
+              if (isUltra) {
+                subtitle =
+                    '$categoryLabel${card != null ? ' · ${card.name}' : ''}';
+              } else {
+                subtitle = categoryLabel;
+              }
+
+              return Dismissible(
+                key: ValueKey(tx.id),
+                direction: DismissDirection.endToStart,
+                confirmDismiss: (_) => _confirmDelete(tx),
+                onDismissed: (_) async {
+                  await _transactionsRepository.remove(tx.id);
+                  await _loadData();
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Transação excluída')),
+                  );
+                },
+                background: Container(
+                  color: AppColors.danger,
+                  alignment: Alignment.centerRight,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.lg),
+                  child:
+                      const Icon(Icons.delete_outline, color: Colors.white),
                 ),
+                child: ListTile(
+                  onTap: () => _openForm(initial: tx),
+                  leading: tx.isBillPayment
+                      ? CircleAvatar(
+                          radius: 18,
+                          backgroundColor:
+                              AppColors.primary.withOpacity(0.18),
+                          child: Icon(Icons.credit_card_outlined,
+                              size: 16, color: AppColors.primary),
+                        )
+                      : _CategoryDot(
+                          category: _categoriesById[tx.categoryId]),
+                  title: Text(
+                      '${tx.description ?? 'Sem descrição'}$installmentText'),
+                  subtitle: Text(subtitle),
+                  trailing: Text(
+                    '$amountSign R\$ ${tx.amount.amount.toStringAsFixed(2)}',
+                    style: AppText.body.copyWith(
+                      color: amountColor,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              );
+            }),
+            const Divider(height: 1),
+          ],
         );
       },
     );
   }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    final isUltra = AppModeController.instance.mode == AppMode.ultra;
+
+    return Scaffold(
+      appBar: _buildAppBar(),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _loadData,
+              child: CustomScrollView(
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // — Filtros de período —
+                        if (isUltra)
+                          _buildUltraFiltersRow()
+                        else
+                          _buildSimpleFiltersRow(),
+
+                        // — Filtros de status —
+                        _buildStatusFilterRow(),
+
+                        // — Resumo —
+                        if (isUltra)
+                          _buildUltraSummary()
+                        else
+                          _buildSimpleSummary(),
+
+                        // — Seção provisionadas —
+                        _buildProvisionedSection(),
+
+                        // — Gráficos (Ultra only) —
+                        if (isUltra) ...[
+                          _buildExpensesByCategoryChart(),
+                          _buildExpensesByCardChart(),
+                        ],
+
+                        // — Lista de transações realizadas —
+                        _buildTransactionList(),
+
+                        const SizedBox(height: AppSpacing.xl),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _openForm(),
+        tooltip: 'Nova transação',
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
 }
 
-// ── Widgets auxiliares ───────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+class _TransactionDayGroup {
+  final String dateKey;
+  final List<TransactionEntity> txs;
+  const _TransactionDayGroup({required this.dateKey, required this.txs});
+}
+
+class _CategoryDot extends StatelessWidget {
+  final CategoryEntity? category;
+  const _CategoryDot({this.category});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = category?.colorValue != null
+        ? Color(category!.colorValue!)
+        : AppColors.textSecondary;
+    final label = category != null ? category!.name[0].toUpperCase() : '?';
+    return CircleAvatar(
+      radius: 18,
+      backgroundColor: color.withOpacity(0.18),
+      child: Text(label, style: TextStyle(color: color, fontSize: 13)),
+    );
+  }
+}
+
+class _SummaryChip extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color  color;
+
+  const _SummaryChip({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: AppText.secondary.copyWith(fontSize: 11)),
+        const SizedBox(height: 2),
+        Text(value,
+            style: AppText.body
+                .copyWith(color: color, fontWeight: FontWeight.w600)),
+      ],
+    );
+  }
+}
 
 class _FilterBadge extends StatelessWidget {
-  const _FilterBadge({required this.count, required this.child});
-  final int   count;
+  final int count;
   final Widget child;
+  const _FilterBadge({required this.count, required this.child});
 
   @override
   Widget build(BuildContext context) {
@@ -1416,134 +1461,18 @@ class _FilterBadge extends StatelessWidget {
       children: [
         child,
         Positioned(
+          top: 6,
           right: 6,
-          top:   6,
           child: Container(
-            width:  16,
-            height: 16,
+            width: 8,
+            height: 8,
             decoration: BoxDecoration(
               color: AppColors.primary,
               shape: BoxShape.circle,
             ),
-            alignment: Alignment.center,
-            child: Text(
-              '$count',
-              style: const TextStyle(
-                fontSize:   10,
-                fontWeight: FontWeight.w700,
-                color:      Colors.white,
-                height:     1,
-              ),
-            ),
           ),
         ),
       ],
-    );
-  }
-}
-
-class _CategoryDot extends StatelessWidget {
-  const _CategoryDot({this.category});
-  final CategoryEntity? category;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = category?.colorValue != null
-        ? Color(category!.colorValue!)
-        : AppColors.textSecondary;
-    final letter = category != null && category!.name.isNotEmpty
-        ? category!.name[0].toUpperCase()
-        : '?';
-    return CircleAvatar(
-      radius: 18,
-      backgroundColor: color.withOpacity(0.18),
-      child: Text(
-        letter,
-        style: TextStyle(
-            color: color, fontWeight: FontWeight.bold, fontSize: 13),
-      ),
-    );
-  }
-}
-
-class _SummaryChip extends StatelessWidget {
-  const _SummaryChip({
-    required this.label,
-    required this.value,
-    required this.color,
-  });
-  final String label;
-  final String value;
-  final Color  color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: AppText.secondary),
-        const SizedBox(height: 2),
-        Text(
-          value,
-          style: AppText.body.copyWith(
-              color: color, fontWeight: FontWeight.w600),
-        ),
-      ],
-    );
-  }
-}
-
-class _TransactionDayGroup {
-  const _TransactionDayGroup(
-      {required this.date, required this.items});
-  final DateTime                date;
-  final List<TransactionEntity> items;
-}
-
-class _StaggeredItem extends StatefulWidget {
-  const _StaggeredItem({required this.index, required this.child});
-  final int    index;
-  final Widget child;
-
-  @override
-  State<_StaggeredItem> createState() => _StaggeredItemState();
-}
-
-class _StaggeredItemState extends State<_StaggeredItem>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-  late final Animation<double>   _opacity;
-  late final Animation<Offset>   _slide;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync:    this,
-      duration: const Duration(milliseconds: 280),
-    );
-    _opacity = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
-    _slide   = Tween<Offset>(
-      begin: const Offset(0, 0.04),
-      end:   Offset.zero,
-    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
-
-    Future.delayed(Duration(milliseconds: widget.index * 30), () {
-      if (mounted) _ctrl.forward();
-    });
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FadeTransition(
-      opacity: _opacity,
-      child: SlideTransition(position: _slide, child: widget.child),
     );
   }
 }
