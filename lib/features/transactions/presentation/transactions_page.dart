@@ -1071,7 +1071,6 @@ class _TransactionsPageState extends State<TransactionsPage> {
               ? ' (${tx.installmentCount}x)'
               : '';
 
-          // Usa o helper _categoryLabel para corrigir "Sem Categoria" em faturas
           final categoryLabel = _categoryLabel(tx);
 
           return Dismissible(
@@ -1146,7 +1145,6 @@ class _TransactionsPageState extends State<TransactionsPage> {
                     ],
                   ),
                   const SizedBox(width: AppSpacing.xs),
-                  // Botão consolidar pagamento
                   IconButton(
                     tooltip: 'Marcar como pago',
                     icon: Icon(Icons.check_circle_outline,
@@ -1186,7 +1184,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
       return const AppEmptyState(
         icon: Icons.receipt_long_outlined,
         title: 'Nenhuma transação',
-        subtitle: 'Tente ajustar os filtros ou adicione uma nova transação.',
+        message: 'Tente ajustar os filtros ou adicione uma nova transação.',
       );
     }
 
