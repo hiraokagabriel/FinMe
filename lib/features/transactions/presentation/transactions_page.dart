@@ -25,6 +25,8 @@ enum _TypeFilter { all, income, expense, transfer }
 /// Filtro pelo estado de realização da transação.
 enum _StatusFilter { all, paid, unpaid, future }
 
+enum _DeleteAction { none, single, group }
+
 extension _PeriodFilterPersistence on _PeriodFilter {
   String get key => name;
   static _PeriodFilter fromKey(String key) =>
@@ -139,6 +141,30 @@ class _TransactionsPageState extends State<TransactionsPage> {
       _isLoading       = false;
     });
     _applyFilters();
+  }
+
+  // ── Helpers de grupo e parcelas ───────────────────────────────────────────
+
+  List<TransactionEntity> _siblingsFor(TransactionEntity tx) {
+    final groupId = tx.recurrenceSourceId ?? tx.id;
+    return _allTransactions
+        .where((t) =>
+            t.recurrenceSourceId == groupId ||
+            t.id == groupId)
+        .toList();
+  }
+
+  String? _installmentLabel(TransactionEntity tx) {
+    final total = tx.installmentCount;
+    if (total == null || total <= 1) return null;
+
+    final siblings = _siblingsFor(tx)
+      ..sort((a, b) => a.date.compareTo(b.date));
+    final index = siblings.indexWhere((t) => t.id == tx.id);
+    if (index == -1) return null;
+
+    final current = index + 1; // 1-based
+    return '$current/$total';
   }
 
   // ── Filters ───────────────────────────────────────────────────────────────
@@ -261,16 +287,12 @@ class _TransactionsPageState extends State<TransactionsPage> {
     return count;
   }
 
-  // ── Deleção centralizada ──────────────────────────────────────────────────
+  // ── Deleção e consolidação ────────────────────────────────────────────────
 
-  /// Remove a transação e, se for um pagamento de fatura (isBillPayment),
-  /// reabre a fatura correspondente removendo o flag Hive de "paga".
   Future<void> _deleteTransaction(TransactionEntity tx) async {
     await _transactionsRepository.remove(tx.id);
 
     if (tx.isBillPayment && tx.cardId != null) {
-      // A chave do ciclo está codificada no id: bill_payment_{cardId}_{year}{mm}
-      // Extrai ano/mês a partir da data da própria transação.
       await StatementService.instance.markPaid(
         tx.cardId!,
         tx.date.year,
@@ -305,7 +327,137 @@ class _TransactionsPageState extends State<TransactionsPage> {
     }
   }
 
-  // ── Consolidar pagamento ──────────────────────────────────────────────────
+  Future<_DeleteAction> _confirmDeleteWithGroup(TransactionEntity tx) async {
+    final siblings = _siblingsFor(tx);
+    final hasGroup = siblings.length > 1 && tx.installmentCount != null;
+
+    if (!hasGroup && !tx.isBillPayment) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Excluir transação'),
+          content: Text(
+            'Deseja excluir "${tx.description ?? 'Sem descrição'}"?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text('Excluir',
+                  style: TextStyle(color: AppColors.danger)),
+            ),
+          ],
+        ),
+      );
+      return ok == true ? _DeleteAction.single : _DeleteAction.none;
+    }
+
+    return showDialog<_DeleteAction>(
+      context: context,
+      builder: (context) {
+        _DeleteAction selected = _DeleteAction.single;
+
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return AlertDialog(
+              title: const Text('Excluir transação'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('"${tx.description ?? 'Sem descrição'}"'),
+                  if (hasGroup) ...[
+                    const SizedBox(height: 12),
+                    const Text('O que você deseja excluir?'),
+                    const SizedBox(height: 8),
+                    RadioListTile<_DeleteAction>(
+                      value: _DeleteAction.single,
+                      groupValue: selected,
+                      onChanged: (v) {
+                        if (v != null) setStateDialog(() => selected = v);
+                      },
+                      title: const Text('Somente esta parcela'),
+                    ),
+                    RadioListTile<_DeleteAction>(
+                      value: _DeleteAction.group,
+                      groupValue: selected,
+                      onChanged: (v) {
+                        if (v != null) setStateDialog(() => selected = v);
+                      },
+                      title: Text(
+                        'Toda a compra (${siblings.length} parcelas)',
+                      ),
+                    ),
+                  ],
+                  if (tx.isBillPayment) ...[
+                    const SizedBox(height: 12),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.warning_amber_rounded,
+                            color: AppColors.warning, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Esta é um pagamento de fatura. Excluí-lo irá reabrir a fatura do cartão.',
+                            style: TextStyle(
+                              color: AppColors.warning,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () =>
+                      Navigator.of(context).pop(_DeleteAction.none),
+                  child: const Text('Cancelar'),
+                ),
+                TextButton(
+                  onPressed: () =>
+                      Navigator.of(context).pop(selected),
+                  child: Text('Excluir',
+                      style: TextStyle(color: AppColors.danger)),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    ).then((value) => value ?? _DeleteAction.none);
+  }
+
+  Future<bool> _handleDelete(TransactionEntity tx) async {
+    final action = await _confirmDeleteWithGroup(tx);
+    if (action == _DeleteAction.none) return false;
+
+    if (action == _DeleteAction.single) {
+      await _deleteTransaction(tx);
+    } else {
+      final siblings = _siblingsFor(tx);
+      for (final t in siblings) {
+        await _transactionsRepository.remove(t.id);
+      }
+      await _loadData();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Compra parcelada (${siblings.length} parcelas) excluída',
+            ),
+          ),
+        );
+      }
+    }
+    return true;
+  }
 
   /// Converte uma transação provisionada em realizada (isProvisioned = false).
   /// Remove o registro antigo e insere o novo com a data de hoje.
@@ -377,54 +529,6 @@ class _TransactionsPageState extends State<TransactionsPage> {
       ),
     );
     if (ok == true) await _loadData();
-  }
-
-  Future<bool?> _confirmDelete(TransactionEntity tx) {
-    final isBillPay = tx.isBillPayment;
-    return showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Excluir transação'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Deseja excluir "${tx.description ?? 'Sem descrição'}"?'),
-            if (isBillPay) ...[
-              const SizedBox(height: 12),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.warning_amber_rounded,
-                      color: AppColors.warning, size: 18),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Esta é um pagamento de fatura. Excluí-lo irá reabrir a fatura do cartão.',
-                      style: TextStyle(
-                        color: AppColors.warning,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancelar'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text('Excluir',
-                style: TextStyle(color: AppColors.danger)),
-          ),
-        ],
-      ),
-    );
   }
 
   // ── Helpers de display ────────────────────────────────────────────────────
@@ -1138,17 +1242,17 @@ class _TransactionsPageState extends State<TransactionsPage> {
               : (isDueToday ? AppColors.warning : AppColors.primary);
 
           final card            = tx.cardId != null ? _cardsById[tx.cardId!] : null;
-          final installmentText = tx.installmentCount != null
-              ? ' (${tx.installmentCount}x)'
-              : '';
+          final installmentLabel = _installmentLabel(tx);
+          final installmentText  =
+              installmentLabel != null ? ' ($installmentLabel)' : '';
 
           final categoryLabel = _categoryLabel(tx);
 
           return Dismissible(
             key: ValueKey('prov_${tx.id}'),
             direction: DismissDirection.endToStart,
-            confirmDismiss: (_) => _confirmDelete(tx),
-            onDismissed: (_) => _deleteTransaction(tx),
+            confirmDismiss: (_) => _handleDelete(tx),
+            onDismissed: (_) {},
             background: Container(
               color: AppColors.danger,
               alignment: Alignment.centerRight,
@@ -1330,9 +1434,9 @@ class _TransactionsPageState extends State<TransactionsPage> {
                   : (isIncome ? AppColors.limitLow : AppColors.danger);
 
               final card = tx.cardId != null ? _cardsById[tx.cardId!] : null;
-              final installmentText = tx.installmentCount != null
-                  ? ' (${tx.installmentCount}x)'
-                  : '';
+              final installmentLabel = _installmentLabel(tx);
+              final installmentText  =
+                  installmentLabel != null ? ' ($installmentLabel)' : '';
 
               final categoryLabel = _categoryLabel(tx);
 
@@ -1347,8 +1451,8 @@ class _TransactionsPageState extends State<TransactionsPage> {
               return Dismissible(
                 key: ValueKey(tx.id),
                 direction: DismissDirection.endToStart,
-                confirmDismiss: (_) => _confirmDelete(tx),
-                onDismissed: (_) => _deleteTransaction(tx),
+                confirmDismiss: (_) => _handleDelete(tx),
+                onDismissed: (_) {},
                 background: Container(
                   color: AppColors.danger,
                   alignment: Alignment.centerRight,

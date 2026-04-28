@@ -132,9 +132,14 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
 
     final isUltra       = AppModeController.instance.mode == AppMode.ultra;
     final effectiveCard = isUltra ? _selectedCardId : null;
-    final installments  = isUltra
-        ? int.tryParse(_installmentController.text.trim())
-        : null;
+
+    // Em criação, lemos o campo de parcelas; em edição, preservamos o valor original.
+    final int? installments;
+    if (!_isEdit && isUltra) {
+      installments = int.tryParse(_installmentController.text.trim());
+    } else {
+      installments = widget.initialTransaction?.installmentCount;
+    }
 
     // Se for nova transação, modo Ultra e com parcelas > 1,
     // criamos N lançamentos mensais dividindo o valor total,
@@ -211,7 +216,7 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
             : null,
         installmentCount:   installments,
         recurrenceRule:     _recurrenceRule,
-        recurrenceSourceId: null,
+        recurrenceSourceId: widget.initialTransaction?.recurrenceSourceId,
         isBillPayment:      widget.initialTransaction?.isBillPayment ?? false,
       );
 
