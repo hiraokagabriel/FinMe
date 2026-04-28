@@ -136,32 +136,90 @@ class _NewTransactionPageState extends State<NewTransactionPage> {
         ? int.tryParse(_installmentController.text.trim())
         : null;
 
-    final tx = TransactionEntity(
-      id:                 baseId,
-      amount:             Money(amount),
-      date:               _selectedDate,
-      type:               _selectedType,
-      paymentMethod:      _selectedPaymentMethod,
-      description:        _descriptionController.text.isEmpty
-          ? null
-          : _descriptionController.text,
-      categoryId:         _selectedCategoryId,
-      cardId:             effectiveCard,
-      isBoleto:           false,
-      isProvisioned:      isUltra ? _isProvisioned : false,
-      provisionedDueDate: (isUltra && _isProvisioned)
-          ? _provisionedDueDate
-          : null,
-      installmentCount:   installments,
-      recurrenceRule:     _recurrenceRule,
-      recurrenceSourceId: null,
-      isBillPayment:      widget.initialTransaction?.isBillPayment ?? false,
-    );
+    // Se for nova transação, modo Ultra e com parcelas > 1,
+    // criamos N lançamentos mensais dividindo o valor total,
+    // ajustando centavos restantes na última parcela.
+    if (!_isEdit && isUltra && installments != null && installments > 1) {
+      if (amount <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Informe um valor válido para parcelar')),
+        );
+        setState(() => _isSaving = false);
+        return;
+      }
 
-    if (_isEdit) {
-      await locator.transactions.update(tx);
+      final totalCents      = (amount * 100).round();
+      final installmentsCnt = installments;
+      final baseCents       = totalCents ~/ installmentsCnt;
+      final remainder       = totalCents % installmentsCnt;
+
+      var currentDate = _selectedDate;
+      for (var i = 0; i < installmentsCnt; i++) {
+        final cents       = baseCents + (i == installmentsCnt - 1 ? remainder : 0);
+        final partAmount  = cents / 100.0;
+        final txId        = i == 0 ? baseId : '${baseId}_$i';
+
+        final txParcel = TransactionEntity(
+          id:                 txId,
+          amount:             Money(partAmount),
+          date:               currentDate,
+          type:               _selectedType,
+          paymentMethod:      _selectedPaymentMethod,
+          description:        _descriptionController.text.isEmpty
+              ? null
+              : _descriptionController.text,
+          categoryId:         _selectedCategoryId,
+          cardId:             effectiveCard,
+          isBoleto:           false,
+          isProvisioned:      isUltra ? _isProvisioned : false,
+          provisionedDueDate: (isUltra && _isProvisioned)
+              ? _provisionedDueDate
+              : null,
+          installmentCount:   installmentsCnt,
+          // Parcelas já são geradas individualmente, então não usamos recorrência.
+          recurrenceRule:     RecurrenceRule.none,
+          recurrenceSourceId: baseId,
+          isBillPayment:      widget.initialTransaction?.isBillPayment ?? false,
+        );
+
+        await locator.transactions.add(txParcel);
+
+        // Próxima parcela no mês seguinte.
+        currentDate = DateTime(
+          currentDate.year,
+          currentDate.month + 1,
+          currentDate.day,
+        );
+      }
     } else {
-      await locator.transactions.add(tx);
+      // Comportamento padrão: uma única transação.
+      final tx = TransactionEntity(
+        id:                 baseId,
+        amount:             Money(amount),
+        date:               _selectedDate,
+        type:               _selectedType,
+        paymentMethod:      _selectedPaymentMethod,
+        description:        _descriptionController.text.isEmpty
+            ? null
+            : _descriptionController.text,
+        categoryId:         _selectedCategoryId,
+        cardId:             effectiveCard,
+        isBoleto:           false,
+        isProvisioned:      isUltra ? _isProvisioned : false,
+        provisionedDueDate: (isUltra && _isProvisioned)
+            ? _provisionedDueDate
+            : null,
+        installmentCount:   installments,
+        recurrenceRule:     _recurrenceRule,
+        recurrenceSourceId: null,
+        isBillPayment:      widget.initialTransaction?.isBillPayment ?? false,
+      );
+
+      if (_isEdit) {
+        await locator.transactions.update(tx);
+      } else {
+        await locator.transactions.add(tx);
+      }
     }
 
     if (!mounted) return;
