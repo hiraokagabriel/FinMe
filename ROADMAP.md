@@ -14,12 +14,14 @@ Direção do produto e próximos passos. Tarefas detalhadas e status: `docs/BACK
 - **Fase 3 — Telas**: Painel, Previsão, Cartões, Contas, Transações, Recorrentes, Categorias e Ajustes.
 - **Fase 4 — Integração**: polimento de app, dados e formulários; smoke test.
 - **Fase 5 — Previsibilidade avançada**: cobertura de faturas, linha do tempo de vencimentos (60 dias), parcelas comprometidas, melhor cartão para comprar hoje e mudança de ciclo com vigência.
+- **Fase 6 — Pendências conhecidas**: import de backup tudo-ou-nada, previsão cobre os 60 dias da linha do tempo, `copyWith` limpa anuláveis e fatura de transição sem fusão na mudança de ciclo (T-040..T-046).
 
 ## Próximos passos sugeridos
 
-1. Build e teste em Android real (hoje validado só em Windows).
-2. Importação de extrato CSV/OFX, manual (o usuário escolhe o arquivo).
-3. Metas de economia.
-4. Auditoria rápida de gastos: essencial × supérfluo.
-5. Detecção automática de assinaturas a partir do histórico de transações.
-6. Distribuição do Windows: `.exe` e instalador.
+1. Build e teste em Android real (T-045, manual; hoje validado só em Windows).
+2. Memoizar a linha de fechamentos do cartão (T-047, desempenho em volume Ultra).
+3. Importação de extrato CSV/OFX, manual (o usuário escolhe o arquivo).
+4. Metas de economia.
+5. Auditoria rápida de gastos: essencial × supérfluo.
+6. Detecção automática de assinaturas a partir do histórico de transações.
+7. Distribuição do Windows: `.exe` e instalador.

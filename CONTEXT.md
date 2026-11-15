@@ -99,12 +99,13 @@ Onboarding: escolha de modo e opção "Criar dados de exemplo" (fictícios).
 Detalhes completos em `docs/SPEC.md` §5. Resumo:
 
 - **Ciclo de fatura** (§5.1): compra no dia do fechamento ou depois vai para a próxima fatura. Mudança de dias de fechamento/vencimento com transações exige vigência (`withCycleChange`, §4.2).
+- **Fatura de transição** (§5.1, regras 1–11): com histórico de ciclo, a fatura é o período entre dois fechamentos consecutivos da linha de fechamentos (todos os segmentos). Fechamento cujo mês de vencimento não avança é descartado: cada mês de vencimento tem no máximo uma fatura, e a de transição só cobre um período maior (sem fusão). Datas vêm só do mês de vencimento. Pagamento com `invoiceKey` de mês descartado é remapeado para o próximo fechamento mantido (`invoiceMonthForKey`). Parcela i vai para o fechamento i-1 posições após o da 1ª (`installmentDueMonth`). Sem histórico, valem as fórmulas originais.
 - **Faturas** (§5.2): status open/closed/paid/overdue; pagamento parcial gera saldo restante; estorno abate.
 - **Parcelas** (§5.3): centavos distribuídos sem perda (100,00 em 3x = 33,34 + 33,33 + 33,33).
 - **Recorrência** (§5.4): mensal, semanal e anual com fim de mês clampado (31 → 28/29 ou 30); ocorrência já materializada não duplica.
 - **Saldos** (§5.5): provisionado não afeta saldo; transferência move entre contas; débito afeta a conta; crédito só afeta a conta ao pagar a fatura.
 - **Categorias** (§5.6): gasto inclui cartão, exclui transferência e receita.
-- **Previsão** (§5.7): eventos por conta e consolidados; saldo negativo marcado; fatura paga não gera evento.
+- **Previsão** (§5.7): eventos por conta e consolidados; saldo negativo marcado; fatura paga não gera evento. Horizonte = o mais tarde entre o fim de `forecastMonths` e hoje + 60 dias (`ForecastService.horizonEnd`, `Ledger.invoiceTimelineDays`); previsão, linha do tempo e ocorrências projetadas de cartão usam o mesmo fim.
 - **Insights de cartão** (§5.8): melhor cartão para comprar hoje considera dias até o vencimento e limite livre (cartão sem limite fica de fora); cartão sem conta de pagamento é sinalizado.
 - **Cobertura de faturas** (§5.9): fatura nos próximos dias cuja conta de pagamento fica negativa (`needsAttention`).
 
@@ -114,7 +115,8 @@ Detalhes completos em `docs/SPEC.md` §5. Resumo:
 - Dados da v1 são **ignorados** (outros nomes de box, outro formato). Nenhuma migração.
 - Todos os dados ficam em memória no boot; escrita no Hive é assíncrona. Derivados caros são memoizados no `Ledger`.
 - Registro corrompido é pulado na carga (não derruba o boot).
-- Backup JSON: exportar e importar (`replaceAll` grava novos antes de apagar antigos). CSV: transações do mês.
+- Backup JSON: exportar e importar. O import é tudo-ou-nada (SPEC §3.5): valida tudo antes de gravar, tira um retrato de todas as coleções e das configurações, e em qualquer falha (gravação ou `materializeRecurring`) restaura o retrato com `replaceAll`/`settings.update` e relança o erro. Limite: se o disco falhar também na restauração, o estado pode ficar parcial. CSV: transações do mês.
+- Entidades: `copyWith` limpa campos anuláveis com sentinela privada `_keep` (SPEC §4): omitido mantém, `null` limpa, valor substitui. Vale para `Transaction`, `RecurringRule`, `PaymentCard` e `TransactionCategory`.
 - Excluir conta ou cartão com transações: só arquivar.
 
 ## 8. Testes
@@ -122,7 +124,9 @@ Detalhes completos em `docs/SPEC.md` §5. Resumo:
 - `test/app/`: ledger, insights do ledger, smoke test (app sobe com seed em memória e navega).
 - `test/core/`: `year_month`, utils, theme, widgets, `collection_repository`, `backup_service`.
 - `test/features/`: entidades, faturas, ciclo de cartão, parcelas e recorrência, saldos e categorias, previsão, linha do tempo de vencimentos, insights de cartão, e widget tests das telas (cartões, contas, transações, recorrentes, categorias, previsão, painel, ajustes). Onboarding ainda sem teste dedicado.
+- Fase 6: `copy_with_clear_test.dart` e `copy_with_clear_card_category_test.dart` (sentinela do `copyWith`); `card_cycle_test.dart` com os exemplos da SPEC §5.1 (fatura de transição, parcelas, pagamento de mês descartado); rollback do import em `backup_service_test.dart` (store que falha uma vez); horizonte de 60 dias em `forecast_test.dart` e `ledger_insights_test.dart`.
 - Domínio e `core/utils|models|services` têm testes unitários. Widget tests usam `MemoryRecordStore`.
+- Total atual: 303 testes (`bash tool/check.sh` → `CHECK OK`).
 
 ## 9. Workflow de agentes
 
@@ -132,6 +136,7 @@ Detalhes completos em `docs/SPEC.md` §5. Resumo:
   - `finme-verifier` (haiku, effort high): roda format/analyze/test e corrige erros mecânicos.
   - `finme-reviewer` (opus, effort medium, somente leitura): revisa corretude financeira, aderência ao SPEC e desempenho.
 - `.claude/skills/finme-auto/SKILL.md` (`/finme-auto [T-XXX|feature]`): orquestra planner → coders → verifier → reviewer → commit. Thread principal em opus.
+- Lições da Fase 6: (1) worktrees novos saem de `origin/main`, que ainda aponta para a v1; reapontar o branch para a `main` local antes de trabalhar. (2) Coders em paralelo compartilham a árvore: o `check.sh` roda `dart format lib test` em tudo e pode falhar por arquivo pela metade de outro coder; o portão final é rodado pelo orquestrador depois de todos terminarem. (3) `pubspec.lock` e registrantes gerados (`linux/`, `macos/`, `windows/`) mudam com o `pub get` implícito; ficam fora dos commits de tarefa.
 
 ## 10. Histórico do rewrite (v2)
 
@@ -148,7 +153,7 @@ Detalhes completos em `docs/SPEC.md` §5. Resumo:
 - `06b1531` previsibilidade: cobertura de faturas, vencimentos 60 dias, parcelas comprometidas, melhor cartão, ciclo com vigência (T-033..T-038)
 - `9194b17` correções da revisão da Fase 5 e documentação v2 (T-021)
 - `152052b` pendências: backup atômico, previsão 60 dias, copyWith limpa anuláveis, fatura de transição (T-040..T-044)
-- correções da revisão da Fase 6: pagamento de mês descartado abate a fatura de transição, horizonte único (T-046)
+- `7e3e1f4` correções da revisão da Fase 6: pagamento de mês descartado abate a fatura de transição, horizonte único (T-046)
 
 ## 11. Status
 

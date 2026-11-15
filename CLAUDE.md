@@ -196,6 +196,12 @@ Ao adicionar código:
 - Cores só via `context.colors` (tokens de `lib/core/theme/`).
 - Sem `withOpacity` (use `withValues(alpha:)`) e sem `DropdownButtonFormField.value` (use `initialValue`).
 - Não adicione dependências. As permitidas são `hive`, `hive_flutter`, `path_provider`, `fl_chart`, `csv` e `file_selector`.
+- Mês de fatura só via `lib/features/cards/domain/invoice_cycle.dart` (`invoiceDueMonth`, `installmentDueMonth`, `invoiceMonthForKey`, `purchaseDueDate`). Nunca calcule com `addMonths` à mão: com histórico de ciclo existe fatura de transição (SPEC §5.1).
+- Horizonte de previsão só via `ForecastService.horizonEnd` / `Ledger.invoiceTimelineDays`; não recalcule o fim em outro lugar.
+- `copyWith` de entidade com campo anulável: parâmetro `Object? x = _keep` e `identical(x, _keep)` (SPEC §4). Omitido mantém, `null` limpa.
+- Worktree: novos worktrees saem de `origin/main` (v1 antiga). Rode `git reset --hard main` no branch novo antes de trabalhar.
+- Coders em paralelo: arquivos disjuntos por tarefa. O portão final roda depois que todos terminam (o `check.sh` formata a árvore inteira).
+- `pubspec.lock` e registrantes gerados de plugins (`linux/`, `macos/`, `windows/flutter/`) mudam com o `pub get`; não entram em commit de tarefa.
 
 ---
 
