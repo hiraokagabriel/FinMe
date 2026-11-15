@@ -45,6 +45,8 @@ class _CardFormState extends State<_CardForm> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _name;
   late final TextEditingController _bank;
+  // Autocomplete exige focusNode junto com textEditingController.
+  final _bankFocus = FocusNode();
   late final TextEditingController _last4;
   late final TextEditingController _limit;
   late final TextEditingController _closing;
@@ -101,6 +103,7 @@ class _CardFormState extends State<_CardForm> {
     for (final c in [_name, _bank, _last4, _limit, _closing, _due]) {
       c.dispose();
     }
+    _bankFocus.dispose();
     super.dispose();
   }
 
@@ -145,6 +148,7 @@ class _CardFormState extends State<_CardForm> {
               const SizedBox(height: AppSpace.md),
               Autocomplete<String>(
                 textEditingController: _bank,
+                focusNode: _bankFocus,
                 optionsBuilder: (value) => _bankOptions(value.text, bankNames),
                 fieldViewBuilder: (context, controller, focusNode, onSubmit) =>
                     TextFormField(
@@ -210,7 +214,7 @@ class _CardFormState extends State<_CardForm> {
                 if (_reorganizes(s)) ...[
                   const SizedBox(height: AppSpace.sm),
                   Text(
-                    'Mudar fechamento/vencimento reorganiza as faturas passadas deste cartão.',
+                    'Mudar fechamento/vencimento pede a data em que passa a valer.',
                     style: TextStyle(
                       fontSize: 12,
                       color: context.colors.warning,
@@ -301,47 +305,60 @@ class _CardFormState extends State<_CardForm> {
     );
   }
 
+  /// Cartão com os campos do form. Ciclo e histórico vêm de [old] (novo cartão: vazio).
+  PaymentCard _cardFromForm(PaymentCard? old) {
+    final credit = _kind == CardKind.credit;
+    return PaymentCard(
+      id: _id,
+      name: _name.text.trim(),
+      bankName: _bank.text.trim(),
+      brand: _brand,
+      kind: _kind,
+      last4: _last4.text.trim(),
+      // Em débito, limite e dias de fatura são ignorados (SPEC §4.2).
+      limitCents: credit ? (parseMoney(_limit.text) ?? 0) : 0,
+      closingDay: old?.closingDay ?? 1,
+      dueDay: old?.dueDay ?? 1,
+      // Recriado em vez de copyWith: copyWith não consegue limpar paymentAccountId (null = "Nenhuma").
+      paymentAccountId: _accountId,
+      colorValue: _color,
+      archived: old?.archived ?? false,
+      cycleHistory: old?.cycleHistory ?? const [],
+    );
+  }
+
   Future<void> _save(AppServices s) async {
     if (_saving || !(_formKey.currentState?.validate() ?? false)) {
       return;
     }
-    setState(() => _saving = true);
-    try {
-      if (_reorganizes(s)) {
-        final ok = await confirmDialog(
-          context,
-          title: 'Reorganizar faturas?',
-          message:
-              'Mudar fechamento/vencimento reorganiza as faturas passadas deste cartão.',
-          confirmLabel: 'Salvar',
-        );
-        if (!mounted) {
-          return;
-        }
-        if (!ok) {
-          setState(() => _saving = false);
-          return;
-        }
-      }
-      final credit = _kind == CardKind.credit;
-      final old = widget.initial;
-      await s.cards.upsert(
-        PaymentCard(
-          id: _id,
-          name: _name.text.trim(),
-          bankName: _bank.text.trim(),
-          brand: _brand,
-          kind: _kind,
-          last4: _last4.text.trim(),
-          // Em débito, limite e dias de fatura são ignorados (SPEC §4.2).
-          limitCents: credit ? (parseMoney(_limit.text) ?? 0) : 0,
-          closingDay: credit ? int.parse(_closing.text.trim()) : 1,
-          dueDay: credit ? int.parse(_due.text.trim()) : 1,
-          paymentAccountId: _accountId,
-          colorValue: _color,
-          archived: old?.archived ?? false,
+    final credit = _kind == CardKind.credit;
+    final closing = credit ? int.parse(_closing.text.trim()) : 1;
+    final due = credit ? int.parse(_due.text.trim()) : 1;
+    final draft = _cardFromForm(widget.initial);
+    final PaymentCard next;
+    if (_reorganizes(s)) {
+      // Diálogo antes do spinner: o botão só fica "salvando" depois de confirmar.
+      final changed = await showDialog<PaymentCard>(
+        context: context,
+        builder: (_) => _CycleChangeDialog(
+          today: s.ledger.today,
+          buildCard: (from) => draft.withCycleChange(
+            closingDay: closing,
+            dueDay: due,
+            effectiveFrom: from,
+          ),
         ),
       );
+      if (changed == null || !mounted) {
+        return;
+      }
+      next = changed;
+    } else {
+      next = draft.copyWith(closingDay: closing, dueDay: due);
+    }
+    setState(() => _saving = true);
+    try {
+      await s.cards.upsert(next);
       if (mounted) {
         Navigator.of(context).pop();
       }
@@ -362,6 +379,73 @@ Iterable<String> _bankOptions(String text, List<String> names) {
     return names;
   }
   return names.where((n) => n.toLowerCase().contains(query));
+}
+
+/// Pergunta a partir de quando vale a nova regra de fechamento/vencimento.
+/// Só fecha com um cartão válido; [ArgumentError] de data mostra erro e mantém o diálogo.
+class _CycleChangeDialog extends StatefulWidget {
+  const _CycleChangeDialog({required this.today, required this.buildCard});
+
+  final DateTime today;
+  final PaymentCard Function(DateTime effectiveFrom) buildCard;
+
+  @override
+  State<_CycleChangeDialog> createState() => _CycleChangeDialogState();
+}
+
+class _CycleChangeDialogState extends State<_CycleChangeDialog> {
+  late DateTime _from = widget.today;
+  String? _error;
+
+  void _confirm() {
+    try {
+      Navigator.of(context).pop(widget.buildCard(_from));
+    } on ArgumentError catch (e) {
+      setState(() => _error = 'Data inválida: ${e.message}');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Mudar ciclo do cartão?'),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Compras a partir desta data usam o novo fechamento/vencimento. Faturas anteriores não mudam.',
+            ),
+            const SizedBox(height: AppSpace.md),
+            DateField(
+              value: _from,
+              label: 'Vale a partir de',
+              onChanged: (d) => setState(() {
+                _from = d;
+                _error = null;
+              }),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: AppSpace.sm),
+              Text(
+                _error!,
+                style: TextStyle(fontSize: 12, color: context.colors.danger),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(onPressed: _confirm, child: const Text('Salvar')),
+      ],
+    );
+  }
 }
 
 class _ColorDot extends StatelessWidget {

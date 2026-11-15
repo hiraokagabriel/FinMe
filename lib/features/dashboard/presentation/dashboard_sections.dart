@@ -4,7 +4,9 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/widgets.dart';
+import '../../accounts/domain/account.dart';
 import '../../cards/domain/invoice.dart';
+import '../../forecast/domain/invoice_timeline.dart';
 import '../../transactions/domain/transaction.dart';
 import 'dashboard_summary.dart';
 
@@ -398,5 +400,168 @@ class _ShareBar extends StatelessWidget {
         );
       },
     );
+  }
+}
+
+/// Simples: alerta de faturas sem saldo previsto na conta de pagamento (mostra a mais próxima).
+class CoverageBanner extends StatelessWidget {
+  const CoverageBanner({super.key, required this.items});
+
+  final List<InvoiceDue> items;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final textTheme = Theme.of(context).textTheme;
+    final count = items.length;
+    final nearest = items.first;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: c.danger.withValues(alpha: 0.1),
+        borderRadius: AppRadius.cardBorder,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpace.lg),
+        child: Row(
+          children: [
+            Icon(Icons.event_busy_outlined, color: c.danger),
+            const SizedBox(width: AppSpace.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '$count ${count == 1 ? 'fatura' : 'faturas'} nos próximos 60 dias sem saldo previsto na conta de pagamento',
+                    style: textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Text(
+                    'Mais próxima: ${nearest.invoice.card.name} em ${formatDate(nearest.date)}',
+                    style: textTheme.bodySmall?.copyWith(
+                      color: c.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Ultra: uma linha por fatura pendente com data, cartão, conta, valor e saldo após.
+class CoverageCard extends StatelessWidget {
+  const CoverageCard({super.key, required this.items, required this.accounts});
+
+  final List<InvoiceDue> items;
+  final Map<String, Account> accounts;
+
+  @override
+  Widget build(BuildContext context) {
+    return SectionCard(
+      title: 'Cobertura de faturas',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final d in items)
+            _CoverageLine(due: d, account: accounts[d.accountId]),
+        ],
+      ),
+    );
+  }
+}
+
+class _CoverageLine extends StatelessWidget {
+  const _CoverageLine({required this.due, required this.account});
+
+  final InvoiceDue due;
+  final Account? account;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final textTheme = Theme.of(context).textTheme;
+    final balanceAfter = due.accountBalanceAfterCents;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              SizedBox(
+                width: 44,
+                child: Text(
+                  formatShortDate(due.date),
+                  style: textTheme.bodySmall,
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  due.invoice.card.name,
+                  style: textTheme.bodyMedium,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              MoneyText(
+                due.amountCents,
+                style: textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.only(left: 44),
+            child: Wrap(
+              spacing: AppSpace.sm,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Text(
+                  due.hasAccount
+                      ? _accountLabel(account)
+                      : 'Sem conta de pagamento',
+                  style: textTheme.bodySmall?.copyWith(
+                    color: due.hasAccount ? c.textSecondary : c.warning,
+                  ),
+                ),
+                if (balanceAfter != null)
+                  Wrap(
+                    spacing: AppSpace.xs,
+                    children: [
+                      Text(
+                        'Saldo após',
+                        style: textTheme.bodySmall?.copyWith(
+                          color: c.textSecondary,
+                        ),
+                      ),
+                      MoneyText(
+                        balanceAfter,
+                        style: textTheme.bodySmall?.copyWith(
+                          color: c.danger,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _accountLabel(Account? account) {
+    if (account == null) {
+      return 'Conta';
+    }
+    return account.bankName.isEmpty
+        ? account.name
+        : '${account.name} (${account.bankName})';
   }
 }

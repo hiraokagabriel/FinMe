@@ -126,4 +126,44 @@ void main() {
     expect(find.text('Novembro 2026'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('melhor cartão no Simples: uma linha, sem tabela', (
+    tester,
+  ) async {
+    final s = await seeded(tester);
+    final best = s.ledger.bestCardsToday.firstWhere((o) => o.hasLimit);
+    await pumpIn(tester, s, const Scaffold(body: CardsPage()));
+    expect(
+      find.textContaining('Melhor para comprar hoje: ${best.card.name} '),
+      findsOneWidget,
+    );
+    expect(find.byType(DataTable), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('melhor cartão no Ultra: tabela com todos os crédito', (
+    tester,
+  ) async {
+    final s = await seeded(tester, mode: AppMode.ultra);
+    await pumpIn(tester, s, const Scaffold(body: CardsPage()));
+    expect(find.text('Melhor cartão para comprar hoje'), findsOneWidget);
+    final table = tester.widget<DataTable>(find.byType(DataTable));
+    expect(table.rows.length, s.ledger.bestCardsToday.length);
+    expect(table.rows.length, 3);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('crédito sem conta de pagamento ativa ganha badge', (
+    tester,
+  ) async {
+    final s = await seeded(tester);
+    final beta = s.accounts.byId('acc_beta')!;
+    await tester.runAsync(
+      () => s.accounts.upsert(beta.copyWith(archived: true)),
+    );
+    await pumpIn(tester, s, const Scaffold(body: CardsPage()));
+    // Beta Master e Gama Elo usam acc_beta; Alfa Visa e o débito não.
+    expect(find.text('Sem conta de pagamento'), findsNWidgets(2));
+    expect(tester.takeException(), isNull);
+  });
 }

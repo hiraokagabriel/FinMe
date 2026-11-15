@@ -8,6 +8,8 @@ import '../../accounts/domain/account.dart';
 import '../domain/forecast.dart';
 import 'forecast_chart.dart';
 import 'forecast_events.dart';
+import 'forecast_installments.dart';
+import 'forecast_invoice_timeline.dart';
 import 'forecast_summary.dart';
 
 const _horizons = [3, 6, 12];
@@ -67,6 +69,16 @@ class ForecastPage extends StatelessWidget {
                       ForecastMonthCards(months: forecast.months),
                       const SizedBox(height: AppSpace.lg),
                       if (ultra) ...[
+                        InvoiceTimelineSection(
+                          items: s.ledger.invoiceTimeline,
+                          accounts: s.ledger.accountsById,
+                        ),
+                        const SizedBox(height: AppSpace.lg),
+                        InstallmentCommitmentsSection(
+                          items: s.ledger.installmentCommitments,
+                          cards: s.ledger.cardsById,
+                        ),
+                        const SizedBox(height: AppSpace.lg),
                         SectionCard(
                           title: 'Saldo diário',
                           child: ForecastDailyChart(daily: forecast.daily),

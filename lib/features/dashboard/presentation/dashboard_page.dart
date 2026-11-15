@@ -4,6 +4,7 @@ import '../../../app/app_scope.dart';
 import '../../../core/models/app_settings.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/widgets.dart';
+import '../../accounts/domain/account.dart';
 import 'dashboard_sections.dart';
 import 'dashboard_summary.dart';
 
@@ -35,6 +36,7 @@ class DashboardPage extends StatelessWidget {
                         constraints: const BoxConstraints(maxWidth: 1200),
                         child: _DashboardBody(
                           summary: summary,
+                          accounts: s.ledger.accountsById,
                           ultra: ultra,
                           wide: width >= 1100,
                         ),
@@ -55,11 +57,13 @@ class DashboardPage extends StatelessWidget {
 class _DashboardBody extends StatelessWidget {
   const _DashboardBody({
     required this.summary,
+    required this.accounts,
     required this.ultra,
     required this.wide,
   });
 
   final DashboardSummary summary;
+  final Map<String, Account> accounts;
   final bool ultra;
   final bool wide;
 
@@ -91,6 +95,13 @@ class _DashboardBody extends StatelessWidget {
             date: negativeDate,
             accounts: ultra ? summary.negativeAccounts : const [],
           ),
+        ],
+        if (summary.attention.isNotEmpty) ...[
+          _gap,
+          if (ultra)
+            CoverageCard(items: summary.attention, accounts: accounts)
+          else
+            CoverageBanner(items: summary.attention),
         ],
         _gap,
         columns,

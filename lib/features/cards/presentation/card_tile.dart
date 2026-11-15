@@ -17,11 +17,15 @@ class CardTile extends StatelessWidget {
     required this.card,
     required this.ultra,
     this.subscriptions = 0,
+    this.missingPaymentAccount = false,
   });
 
   final PaymentCard card;
   final bool ultra;
   final int subscriptions;
+
+  /// Cartão de crédito sem conta de pagamento ativa (badge `warning`).
+  final bool missingPaymentAccount;
 
   @override
   Widget build(BuildContext context) {
@@ -56,6 +60,7 @@ class CardTile extends StatelessWidget {
                           card: card,
                           ultra: ultra,
                           subscriptions: subscriptions,
+                          missingPaymentAccount: missingPaymentAccount,
                         ),
                         const SizedBox(height: AppSpace.md),
                         if (card.kind == CardKind.credit)
@@ -117,11 +122,13 @@ class _Tags extends StatelessWidget {
     required this.card,
     required this.ultra,
     required this.subscriptions,
+    required this.missingPaymentAccount,
   });
 
   final PaymentCard card;
   final bool ultra;
   final int subscriptions;
+  final bool missingPaymentAccount;
 
   @override
   Widget build(BuildContext context) {
@@ -136,6 +143,8 @@ class _Tags extends StatelessWidget {
         ),
         if (card.archived)
           StatusBadge(label: 'Arquivado', color: c.textSecondary),
+        if (missingPaymentAccount)
+          StatusBadge(label: 'Sem conta de pagamento', color: c.warning),
         if (ultra && subscriptions > 0)
           StatusBadge(label: '$subscriptions assinaturas', color: c.primary),
       ],

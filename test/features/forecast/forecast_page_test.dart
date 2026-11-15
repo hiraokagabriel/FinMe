@@ -2,8 +2,12 @@ import 'package:finme/app/app_scope.dart';
 import 'package:finme/app/bootstrap.dart';
 import 'package:finme/app/seed.dart';
 import 'package:finme/core/models/app_settings.dart';
+import 'package:finme/core/models/year_month.dart';
 import 'package:finme/core/services/record_store.dart';
 import 'package:finme/core/theme/app_theme.dart';
+import 'package:finme/features/cards/domain/card_insights.dart';
+import 'package:finme/features/forecast/presentation/forecast_installments.dart';
+import 'package:finme/features/forecast/presentation/forecast_invoice_timeline.dart';
 import 'package:finme/features/forecast/presentation/forecast_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -57,6 +61,8 @@ void main() {
     expect(find.text('Abril 2027'), findsOneWidget);
     expect(find.text('Próximos eventos'), findsOneWidget);
     expect(find.text('Saldo diário'), findsNothing);
+    expect(find.text('Vencimentos (60 dias)'), findsNothing);
+    expect(find.text('Parcelas já comprometidas'), findsNothing);
     expect(find.text('Todas as contas'), findsNothing);
     expect(tester.takeException(), isNull);
   });
@@ -69,6 +75,27 @@ void main() {
     await _pumpPage(tester, s);
     await _setMode(tester, s, AppMode.ultra);
 
+    // ListView preguiçoso: as seções ficam fora da viewport até rolar.
+    await tester.scrollUntilVisible(
+      find.text('Vencimentos (60 dias)'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('Vencimentos (60 dias)'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Parcelas já comprometidas'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('Parcelas já comprometidas'), findsOneWidget);
+    // Seed tem parcelas que caem em dezembro/2026 (primeiro mês do compromisso).
+    expect(find.text('dez/2026'), findsOneWidget);
+    expect(find.text('Nenhuma parcela futura'), findsNothing);
+    await tester.scrollUntilVisible(
+      find.text('Saldo diário'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('Saldo diário'), findsOneWidget);
     // ListView preguiçoso: a seção de eventos fica fora da viewport até rolar.
     await tester.scrollUntilVisible(
@@ -80,6 +107,46 @@ void main() {
     expect(find.text('Todas as contas'), findsOneWidget);
     expect(find.widgetWithText(FilterChip, 'Transferência'), findsOneWidget);
     expect(find.text('Próximos eventos'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('linha do tempo sem faturas mostra estado vazio', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 800));
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: const Scaffold(
+          body: InvoiceTimelineSection(items: [], accounts: {}),
+        ),
+      ),
+    );
+    expect(find.text('Vencimentos (60 dias)'), findsOneWidget);
+    expect(
+      find.text('Nenhuma fatura a vencer nos próximos 60 dias'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('parcelas sem valor no período mostram estado vazio', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 800));
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: const Scaffold(
+          body: InstallmentCommitmentsSection(
+            items: [
+              InstallmentCommitment(month: YearMonth(2026, 12), byCard: {}),
+            ],
+            cards: {},
+          ),
+        ),
+      ),
+    );
+    expect(find.text('Parcelas já comprometidas'), findsOneWidget);
+    expect(find.text('Nenhuma parcela futura'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

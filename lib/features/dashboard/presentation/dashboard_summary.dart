@@ -4,6 +4,7 @@ import '../../accounts/domain/account.dart';
 import '../../cards/domain/invoice.dart';
 import '../../cards/domain/payment_card.dart';
 import '../../forecast/domain/forecast.dart';
+import '../../forecast/domain/invoice_timeline.dart';
 import '../../transactions/domain/transaction.dart';
 
 /// Fatura atual de um cartão (a não quitada mais antiga) com o uso do limite.
@@ -47,6 +48,7 @@ class DashboardSummary {
     required this.invoices,
     required this.upcoming,
     required this.categories,
+    required this.attention,
   });
 
   final int currentCents;
@@ -60,6 +62,9 @@ class DashboardSummary {
   final List<InvoiceRow> invoices;
   final List<Transaction> upcoming;
   final List<CategoryRow> categories;
+
+  /// Faturas dos próximos 60 dias sem saldo previsto na conta de pagamento (§5.9).
+  final List<InvoiceDue> attention;
 
   /// Simples: 8 vencimentos e 3 categorias. Ultra: 15 e 8.
   factory DashboardSummary.of(Ledger ledger, {required bool ultra}) {
@@ -126,6 +131,10 @@ class DashboardSummary {
       categories: [
         for (final e in spending.take(ultra ? 8 : 3))
           CategoryRow(name: _categoryName(ledger, e.key), cents: e.value),
+      ],
+      attention: [
+        for (final d in ledger.invoiceTimeline)
+          if (d.needsAttention) d,
       ],
     );
   }

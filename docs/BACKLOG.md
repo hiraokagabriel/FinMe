@@ -135,32 +135,32 @@ aceite:
 - `installmentCommitments`: 100,00 em 3x comprado 10/11/2026 no cartão fecha 5/vence 12, `from: 2026-12` → 12 entradas; dez 33,34, jan 33,33, fev 33,33, demais 0 com `byCard` vazio; compra à vista e recorrência projetada na mesma fatura não entram; dois cartões somam em `totalCents` e separam em `byCard`.
 - `cardsWithoutPaymentAccount`: `null` e conta inexistente/arquivada entram; cartão arquivado não entra.
 
-### T-033 · Ledger: visões da Fase 5 · `todo` · deps: T-020a, T-031, T-032
+### T-033 · Ledger: visões da Fase 5 · `done` · deps: T-020a, T-031, T-032
 files: `lib/app/ledger.dart`, `test/app/ledger_insights_test.dart`
 contrato: SPEC §6.2 (`invoiceTimeline`, `bestCardsToday`, `installmentCommitments`, `cardsWithoutPaymentAccount`)
 aceite: cada getter memoizado (mesma instância entre leituras sem mudança) e zerado em `_invalidate`; após `cards.upsert` recalcula; `invoiceTimeline` usa as faturas de `invoicesFor` de todos os cartões de crédito (ids batem com `forecast.events`).
 
-### T-034 · Painel: alerta de cobertura · `todo` · deps: T-033 · parallel: yes
+### T-034 · Painel: alerta de cobertura · `done` · deps: T-033 · parallel: yes
 files: `lib/features/dashboard/presentation/dashboard_summary.dart`, `lib/features/dashboard/presentation/dashboard_sections.dart`, `lib/features/dashboard/presentation/dashboard_page.dart`, `test/features/dashboard/dashboard_page_test.dart`
 contrato: SPEC §7.3 "Previsibilidade avançada", linha "Cobertura de faturas". `DashboardSummary` ganha `List<InvoiceDue> attention` (= `ledger.invoiceTimeline.where((d) => d.needsAttention)`). Novos widgets em `dashboard_sections.dart`: `CoverageBanner({required List<InvoiceDue> items})` (Simples) e `CoverageCard({required List<InvoiceDue> items, required Map<String, Account> accounts})` (Ultra), logo após o `NegativeBalanceBanner`.
 aceite: widget test com conta sem saldo para a fatura → Simples mostra banner com a contagem; Ultra mostra a seção com nome da conta e "Sem conta de pagamento" para cartão sem conta; sem pendências → nada renderizado. Cores via `context.colors`.
 
-### T-035 · Previsão: linha do tempo de vencimentos (Ultra) · `todo` · deps: T-033 · parallel: yes
+### T-035 · Previsão: linha do tempo de vencimentos (Ultra) · `done` · deps: T-033 · parallel: yes
 files: `lib/features/forecast/presentation/forecast_invoice_timeline.dart`, `lib/features/forecast/presentation/forecast_page.dart`, `test/features/forecast/forecast_page_test.dart`
 contrato: SPEC §7.3 linha "Linha do tempo de vencimentos". `class InvoiceTimelineSection extends StatelessWidget { const InvoiceTimelineSection({super.key, required List<InvoiceDue> items, required Map<String, Account> accounts}); }` no ramo Ultra de `ForecastPage`, antes de "Saldo diário".
 aceite: Ultra mostra cabeçalho por dia (`formatShortDate`), linha com nome do cartão, conta ou "Sem conta", valor e saldo-após (`danger` se < 0), badge "Vencida"; Simples não renderiza a seção; lista vazia → `EmptyState`.
 
-### T-036 · Previsão: parcelas já comprometidas (Ultra) · `todo` · deps: T-035
+### T-036 · Previsão: parcelas já comprometidas (Ultra) · `done` · deps: T-035
 files: `lib/features/forecast/presentation/forecast_installments.dart`, `lib/features/forecast/presentation/forecast_page.dart`, `test/features/forecast/forecast_page_test.dart`
 contrato: SPEC §7.3 linha "Compromisso de parcelas". `class InstallmentCommitmentsSection extends StatelessWidget { const InstallmentCommitmentsSection({super.key, required List<InstallmentCommitment> items, required Map<String, PaymentCard> cards}); }` após "Vencimentos (60 dias)", só Ultra.
 aceite: 12 linhas (`formatMonth`), coluna Total + uma coluna por cartão com algum valor no período (nome do cartão), valores com `MoneyText`; rolagem horizontal (`SingleChildScrollView(scrollDirection: Axis.horizontal)`); tudo zerado → `EmptyState` "Nenhuma parcela futura".
 
-### T-037 · Cartões: melhor cartão hoje e cartão sem conta · `todo` · deps: T-033 · parallel: yes
+### T-037 · Cartões: melhor cartão hoje e cartão sem conta · `done` · deps: T-033 · parallel: yes
 files: `lib/features/cards/presentation/best_card_panel.dart`, `lib/features/cards/presentation/cards_page.dart`, `lib/features/cards/presentation/card_tile.dart`, `test/features/cards/cards_page_test.dart`
 contrato: SPEC §7.3 linhas "Melhor cartão" e "Cartão sem conta". `class BestCardPanel extends StatelessWidget { const BestCardPanel({super.key, required List<CardPurchaseOption> options, required bool ultra}); }` no topo da lista de `CardsPage`. `CardTile` ganha `bool missingPaymentAccount` (padrão false) → `StatusBadge` com `colors.warning`.
 aceite: Simples mostra 1 linha com o 1º `hasLimit` e "vence em N dias"; Ultra mostra tabela com todos os cartões de crédito ativos na ordem do domínio; nenhum `hasLimit` → Simples oculta o painel; badge aparece só para cartões de `ledger.cardsWithoutPaymentAccount`.
 
-### T-038 · Form de cartão: mudança de ciclo com vigência · `todo` · deps: T-030, T-020b · parallel: yes
+### T-038 · Form de cartão: mudança de ciclo com vigência · `done` · deps: T-030, T-020b · parallel: yes
 files: `lib/features/cards/presentation/card_form.dart`, `test/features/cards/card_form_test.dart` (cria ou estende)
 contrato: SPEC §4.2 `withCycleChange`, §7.3 linha "Mudança de ciclo". Em `_save`: edição de cartão de crédito com `closingDay`/`dueDay` alterados **e** `s.transactions.all.any((t) => t.cardId == old.id)` → diálogo com `DateField` "Vale a partir de" (padrão `s.ledger.today`); salva `old.copyWith(<demais campos>).withCycleChange(closingDay:, dueDay:, effectiveFrom:)`; cancelar não salva; `ArgumentError` → mensagem no diálogo, sem fechar. Sem transações → só troca os dias (histórico intacto). Todo `copyWith` preserva `cycleHistory`.
 aceite: widget test: cartão com transação, muda vencimento, confirma data → cartão salvo tem `cycleHistory.length == 1` com os dias antigos; cartão sem transações → `cycleHistory` vazio; editar só o nome preserva `cycleHistory`.

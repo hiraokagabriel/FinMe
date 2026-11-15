@@ -7,6 +7,7 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/widgets.dart';
 import '../../recurring/domain/recurring_rule.dart';
 import '../domain/payment_card.dart';
+import 'best_card_panel.dart';
 import 'card_form.dart';
 import 'card_tile.dart';
 
@@ -35,6 +36,11 @@ class _CardsPageState extends State<CardsPage> {
           s.cards.all.where((c) => showArchived || !c.archived),
         );
         final subscriptions = _subscriptionCounts(s.recurring.all);
+        final options = s.ledger.bestCardsToday;
+        final noAccount = {
+          for (final c in s.ledger.cardsWithoutPaymentAccount)
+            if (c.kind == CardKind.credit) c.id,
+        };
         final inset = MediaQuery.sizeOf(context).width < 600
             ? AppSpace.lg
             : AppSpace.xl;
@@ -82,14 +88,21 @@ class _CardsPageState extends State<CardsPage> {
                         constraints: const BoxConstraints(maxWidth: 1200),
                         child: ListView.builder(
                           padding: EdgeInsets.all(inset),
-                          itemCount: groups.length,
+                          itemCount: groups.length + 1,
                           itemBuilder: (context, i) {
-                            final (bank, cards) = groups[i];
+                            if (i == 0) {
+                              return BestCardPanel(
+                                options: options,
+                                ultra: ultra,
+                              );
+                            }
+                            final (bank, cards) = groups[i - 1];
                             return _BankSection(
                               bank: bank,
                               cards: cards,
                               ultra: ultra,
                               subscriptions: subscriptions,
+                              missingAccount: noAccount,
                             );
                           },
                         ),
@@ -110,12 +123,16 @@ class _BankSection extends StatelessWidget {
     required this.cards,
     required this.ultra,
     required this.subscriptions,
+    required this.missingAccount,
   });
 
   final String bank;
   final List<PaymentCard> cards;
   final bool ultra;
   final Map<String, int> subscriptions;
+
+  /// Ids de cartões de crédito sem conta de pagamento ativa.
+  final Set<String> missingAccount;
 
   @override
   Widget build(BuildContext context) {
@@ -153,6 +170,7 @@ class _BankSection extends StatelessWidget {
                   card: card,
                   ultra: ultra,
                   subscriptions: subscriptions[card.id] ?? 0,
+                  missingPaymentAccount: missingAccount.contains(card.id),
                 ),
             ],
           ),

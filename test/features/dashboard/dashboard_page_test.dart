@@ -6,6 +6,7 @@ import 'package:finme/core/services/record_store.dart';
 import 'package:finme/core/theme/app_theme.dart';
 import 'package:finme/core/utils/formatters.dart';
 import 'package:finme/core/widgets/widgets.dart';
+import 'package:finme/features/cards/domain/payment_card.dart';
 import 'package:finme/features/dashboard/presentation/dashboard_page.dart';
 import 'package:finme/features/transactions/domain/transaction.dart';
 import 'package:flutter/material.dart';
@@ -16,6 +17,8 @@ Future<AppServices> _boot(
   WidgetTester tester, {
   required AppMode mode,
   bool negative = false,
+  bool cardSemConta = false,
+  bool contaSemSaldo = false,
 }) async {
   final s = (await tester.runAsync(() async {
     final s = await bootstrap(
@@ -34,6 +37,44 @@ Future<AppServices> _boot(
           date: DateTime(2026, 11, 14),
           description: 'Compra grande',
           accountId: 'acc_cash',
+        ),
+      );
+    }
+    if (cardSemConta) {
+      await s.cards.upsert(
+        const PaymentCard(
+          id: 'card_sem_conta',
+          name: 'Teste Sem Conta',
+          bankName: 'Banco Teste',
+          brand: CardBrand.visa,
+          kind: CardKind.credit,
+          last4: '9999',
+          limitCents: 300000,
+          closingDay: 5,
+          dueDay: 12,
+          colorValue: 0xFF999999,
+        ),
+      );
+      await s.transactions.upsert(
+        Transaction(
+          id: 'tx_sem_conta',
+          type: TransactionType.expense,
+          amountCents: 10000,
+          date: DateTime(2026, 11, 14),
+          description: 'Compra sem conta',
+          cardId: 'card_sem_conta',
+        ),
+      );
+    }
+    if (contaSemSaldo) {
+      await s.transactions.upsert(
+        Transaction(
+          id: 'tx_sem_saldo',
+          type: TransactionType.expense,
+          amountCents: 99999999,
+          date: DateTime(2026, 11, 14),
+          description: 'Gasto no Beta',
+          accountId: 'acc_beta',
         ),
       );
     }
@@ -128,5 +169,88 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Carteira: negativa em 14/11/2026'), findsOneWidget);
+  });
+
+  testWidgets('Cobertura Simples: banner com contagem e a mais próxima', (
+    tester,
+  ) async {
+    final s = await _boot(tester, mode: AppMode.simple, cardSemConta: true);
+    final nearest = s.ledger.invoiceTimeline.firstWhere(
+      (d) => d.needsAttention,
+    );
+    final n = s.ledger.invoiceTimeline.where((d) => d.needsAttention).length;
+    expect(n, greaterThan(0));
+    await _pump(tester, s, desktop);
+
+    expect(tester.takeException(), isNull);
+    final noun = n == 1 ? 'fatura' : 'faturas';
+    expect(
+      find.text(
+        '$n $noun nos próximos 60 dias sem saldo previsto na conta de pagamento',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.text(
+        'Mais próxima: ${nearest.invoice.card.name} em ${formatDate(nearest.date)}',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Cobertura de faturas'), findsNothing);
+  });
+
+  testWidgets('Cobertura Ultra: card com linhas, conta e sem conta', (
+    tester,
+  ) async {
+    final s = await _boot(
+      tester,
+      mode: AppMode.ultra,
+      cardSemConta: true,
+      contaSemSaldo: true,
+    );
+    await _pump(tester, s, desktop);
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('Cobertura de faturas'), findsOneWidget);
+    expect(find.text('Teste Sem Conta'), findsWidgets);
+    expect(find.text('Sem conta de pagamento'), findsWidgets);
+    expect(find.text('Conta corrente (Banco Beta)'), findsWidgets);
+    expect(find.text('Saldo após'), findsWidgets);
+  });
+
+  testWidgets('Cobertura: sem pendências não renderiza nada', (tester) async {
+    for (final mode in AppMode.values) {
+      final s = await _boot(tester, mode: mode);
+      // Demo já tem pendências; saldos altos cobrem todas as faturas.
+      await tester.runAsync(() async {
+        for (final a in s.accounts.all) {
+          await s.accounts.upsert(
+            a.copyWith(initialBalanceCents: 100000000000),
+          );
+        }
+      });
+      expect(
+        s.ledger.invoiceTimeline.where((d) => d.needsAttention),
+        isEmpty,
+        reason: mode.name,
+      );
+      await _pump(tester, s, desktop);
+      expect(tester.takeException(), isNull, reason: mode.name);
+      expect(find.text('Cobertura de faturas'), findsNothing);
+      expect(find.textContaining('sem saldo previsto'), findsNothing);
+    }
+  });
+
+  testWidgets('Cobertura em 390px sem overflow nos dois modos', (tester) async {
+    for (final mode in AppMode.values) {
+      final s = await _boot(
+        tester,
+        mode: mode,
+        cardSemConta: true,
+        contaSemSaldo: true,
+      );
+      await _pump(tester, s, mobile);
+      expect(tester.takeException(), isNull, reason: mode.name);
+    }
   });
 }

@@ -8,11 +8,13 @@ import '../core/services/settings_controller.dart';
 import '../core/utils/date_utils.dart';
 import '../features/accounts/domain/account.dart';
 import '../features/accounts/domain/balances.dart' as balances;
+import '../features/cards/domain/card_insights.dart' as insights;
 import '../features/cards/domain/invoice.dart';
 import '../features/cards/domain/payment_card.dart';
 import '../features/categories/domain/category_spending.dart';
 import '../features/categories/domain/transaction_category.dart';
 import '../features/forecast/domain/forecast.dart';
+import '../features/forecast/domain/invoice_timeline.dart' as timeline;
 import '../features/recurring/domain/recurrence.dart';
 import '../features/recurring/domain/recurring_rule.dart';
 import '../features/transactions/domain/transaction.dart';
@@ -59,6 +61,10 @@ class Ledger extends ChangeNotifier {
   final _invoices = <String, List<Invoice>>{};
   final _spending = <YearMonth, Map<String?, int>>{};
   final _upcoming = <int, List<Transaction>>{};
+  List<timeline.InvoiceDue>? _invoiceTimeline;
+  List<insights.CardPurchaseOption>? _bestCards;
+  List<insights.InstallmentCommitment>? _installments;
+  List<PaymentCard>? _cardsNoAccount;
 
   List<Listenable> get _sources => [
     accounts,
@@ -148,6 +154,50 @@ class Ledger extends ChangeNotifier {
     );
   }
 
+  /// Faturas de todos os cartões de crédito (inclui arquivados; ids batem com `forecast.events`).
+  List<Invoice> get _creditInvoices => [
+    for (final c in cards.all)
+      if (c.kind == CardKind.credit) ...invoicesFor(c.id),
+  ];
+
+  /// Vencimentos de fatura em 60 dias com saldo-após da conta de pagamento.
+  List<timeline.InvoiceDue> get invoiceTimeline {
+    _ensureFresh();
+    return _invoiceTimeline ??= timeline.invoiceTimeline(
+      forecast: forecast,
+      invoices: _creditInvoices,
+      days: 60,
+    );
+  }
+
+  /// Cartões de crédito ordenados por melhor opção de compra hoje.
+  List<insights.CardPurchaseOption> get bestCardsToday {
+    _ensureFresh();
+    return _bestCards ??= insights.bestCardsToBuy(
+      cards: cards.all,
+      usedLimitByCard: {for (final c in cards.all) c.id: usedLimitFor(c.id)},
+      today: today,
+    );
+  }
+
+  /// Parcelas comprometidas nos próximos 12 meses, a partir do mês seguinte.
+  List<insights.InstallmentCommitment> get installmentCommitments {
+    _ensureFresh();
+    return _installments ??= insights.installmentCommitments(
+      invoices: _creditInvoices,
+      from: YearMonth.fromDate(today).next(),
+    );
+  }
+
+  /// Cartões sem conta de pagamento ativa (null, inexistente ou arquivada).
+  List<PaymentCard> get cardsWithoutPaymentAccount {
+    _ensureFresh();
+    return _cardsNoAccount ??= insights.cardsWithoutPaymentAccount(cards.all, {
+      for (final a in accounts.all)
+        if (!a.archived) a.id,
+    });
+  }
+
   Map<String?, int> spendingFor(YearMonth month) {
     _ensureFresh();
     return _spending[month] ??= spendingByCategory(transactions.all, month);
@@ -229,6 +279,10 @@ class Ledger extends ChangeNotifier {
     _invoices.clear();
     _spending.clear();
     _upcoming.clear();
+    _invoiceTimeline = null;
+    _bestCards = null;
+    _installments = null;
+    _cardsNoAccount = null;
   }
 
   void _invalidate() {
