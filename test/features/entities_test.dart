@@ -187,6 +187,17 @@ void main() {
       expect(tx.status, TransactionStatus.paid);
     });
 
+    test('construtor normaliza date para meia-noite', () {
+      final tx = Transaction(
+        id: 't4',
+        type: TransactionType.expense,
+        amountCents: 1,
+        date: DateTime(2026, 11, 14, 18, 30),
+        description: '',
+      );
+      expect(tx.date, DateTime(2026, 11, 14));
+    });
+
     test('copyWith e ==/hashCode', () {
       final changed = full.copyWith(amountCents: 999);
       expect(changed.amountCents, 999);
@@ -231,6 +242,19 @@ void main() {
       expect(back.endDate, isNull);
       expect(RecurringRule.fromMap(back.toMap()), back);
       expect(back.copyWith(active: false) == back, isFalse);
+    });
+
+    test('materializedUntil: round-trip, normalização, copyWith e ==', () {
+      final marked = rule.copyWith(
+        materializedUntil: DateTime(2026, 11, 14, 9),
+      );
+      expect(marked.materializedUntil, DateTime(2026, 11, 14));
+      expect(marked.toMap()['materializedUntil'], '20261114');
+      expect(RecurringRule.fromMap(marked.toMap()), marked);
+      expect(rule.materializedUntil, isNull);
+      expect(RecurringRule.fromMap(rule.toMap()).materializedUntil, isNull);
+      expect(marked == rule, isFalse);
+      expect(marked.hashCode, RecurringRule.fromMap(marked.toMap()).hashCode);
     });
   });
 }

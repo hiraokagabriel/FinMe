@@ -80,6 +80,12 @@ void main() {
       expect(parseMoney('1,2,3'), isNull);
       expect(parseMoney('12,345'), isNull);
     });
+
+    test('parte inteira com mais de 13 dígitos é rejeitada', () {
+      expect(parseMoney('9.999.999.999.999'), 999999999999900);
+      expect(parseMoney('10.000.000.000.000'), isNull);
+      expect(parseMoney('12345678901234'), isNull);
+    });
   });
 
   group('formatDate e formatMonth', () {

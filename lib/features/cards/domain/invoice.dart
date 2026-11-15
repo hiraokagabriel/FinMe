@@ -70,24 +70,39 @@ class InvoiceService {
     if (card.kind != CardKind.credit) {
       return const [];
     }
+    final all = transactions.followedBy(projected);
+    // Parcelas: a data da 1ª parcela ancora o grupo; as demais avançam um mês por índice.
+    final firstInstallmentDate = <String, DateTime>{};
+    for (final t in all) {
+      final groupId = t.installmentGroupId;
+      if (groupId != null && t.cardId == card.id && t.installmentIndex == 1) {
+        firstInstallmentDate[groupId] = t.date;
+      }
+    }
     final groups = <YearMonth, _Group>{};
-    for (final t in [...transactions, ...projected]) {
+    for (final t in all) {
       if (t.cardId != card.id || t.type == TransactionType.transfer) {
         continue;
       }
       if (t.type == TransactionType.invoicePayment) {
-        final key = t.invoiceKey;
-        if (key == null) {
-          continue;
+        final month = _parseKey(t.invoiceKey);
+        if (month != null) {
+          groups.putIfAbsent(month, _Group.new).paid += t.amountCents;
         }
-        groups.putIfAbsent(YearMonth.fromKey(key), _Group.new).paid +=
-            t.amountCents;
         continue;
       }
-      final group = groups.putIfAbsent(
-        invoiceDueMonth(t.date, card),
-        _Group.new,
-      );
+      final groupId = t.installmentGroupId;
+      final index = t.installmentIndex;
+      final firstDate = groupId == null ? null : firstInstallmentDate[groupId];
+      final YearMonth month;
+      if (groupId != null && index != null) {
+        month = firstDate == null
+            ? invoiceDueMonth(t.date, card)
+            : invoiceDueMonth(firstDate, card).addMonths(index - 1);
+      } else {
+        month = invoiceDueMonth(t.date, card);
+      }
+      final group = groups.putIfAbsent(month, _Group.new);
       group.items.add(t);
       if (t.type == TransactionType.expense) {
         group.charges += t.amountCents;
@@ -125,6 +140,18 @@ class InvoiceService {
       }
     }
     return best;
+  }
+
+  /// `invoiceKey` malformado (ex.: "2026-13", "abc") → null; o pagamento é ignorado.
+  static YearMonth? _parseKey(String? key) {
+    if (key == null) {
+      return null;
+    }
+    try {
+      return YearMonth.fromKey(key);
+    } on FormatException {
+      return null;
+    }
   }
 
   static Invoice _toInvoice(PaymentCard card, YearMonth month, _Group group) {

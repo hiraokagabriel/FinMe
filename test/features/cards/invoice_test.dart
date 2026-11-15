@@ -2,6 +2,7 @@ import 'package:finme/core/models/year_month.dart';
 import 'package:finme/features/cards/domain/invoice.dart';
 import 'package:finme/features/cards/domain/invoice_cycle.dart';
 import 'package:finme/features/cards/domain/payment_card.dart';
+import 'package:finme/features/transactions/domain/installments.dart';
 import 'package:finme/features/transactions/domain/transaction.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -403,6 +404,77 @@ void main() {
         InvoiceService.currentInvoice(allPaid, DateTime(2026, 11, 14)),
         isNull,
       );
+    });
+  });
+
+  group('T-009b correções', () {
+    test('parcelas com fechamento 29 cruzando fev caem uma por fatura', () {
+      final card = creditCard(closing: 29, due: 10);
+      final parts = buildInstallments(
+        base: tx('base', TransactionType.expense, 9000, DateTime(2027, 1, 28)),
+        count: 3,
+        groupId: 'g',
+      );
+      final invoices = InvoiceService.build(card: card, transactions: parts);
+      // 1ª parcela (28/01) → fatura de fev; 2ª e 3ª avançam um mês por índice.
+      expect(invoices.map((i) => i.dueMonth), [
+        const YearMonth(2027, 2),
+        const YearMonth(2027, 3),
+        const YearMonth(2027, 4),
+      ]);
+      expect(invoices.map((i) => i.items.length), [1, 1, 1]);
+      expect(invoices.map((i) => i.chargesCents), [3000, 3000, 3000]);
+    });
+
+    test('fechamento 31 com compra em 30/03 em 3x: faturas consecutivas', () {
+      final card = creditCard(closing: 31, due: 10);
+      final parts = buildInstallments(
+        base: tx('base', TransactionType.expense, 9000, DateTime(2026, 3, 30)),
+        count: 3,
+        groupId: 'g',
+      );
+      final invoices = InvoiceService.build(card: card, transactions: parts);
+      expect(invoices.map((i) => i.dueMonth), [
+        const YearMonth(2026, 4),
+        const YearMonth(2026, 5),
+        const YearMonth(2026, 6),
+      ]);
+      expect(invoices.map((i) => i.items.length), [1, 1, 1]);
+    });
+
+    test('invoiceKey malformado é ignorado sem derrubar o build', () {
+      final card = creditCard(closing: 5, due: 12);
+      final transactions = [
+        tx('n', TransactionType.expense, 1000, DateTime(2026, 11, 4)),
+        tx(
+          'bad1',
+          TransactionType.invoicePayment,
+          500,
+          DateTime(2026, 11, 13),
+          invoiceKey: '2026-13',
+        ),
+        tx(
+          'bad2',
+          TransactionType.invoicePayment,
+          500,
+          DateTime(2026, 11, 13),
+          invoiceKey: 'abc',
+        ),
+        tx(
+          'ok',
+          TransactionType.invoicePayment,
+          200,
+          DateTime(2026, 11, 13),
+          invoiceKey: '2026-11',
+        ),
+      ];
+      final invoices = InvoiceService.build(
+        card: card,
+        transactions: transactions,
+      );
+      expect(invoices.length, 1);
+      expect(invoices.single.chargesCents, 1000);
+      expect(invoices.single.paidCents, 200);
     });
   });
 }

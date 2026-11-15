@@ -54,7 +54,12 @@ int? parseMoney(String input) {
   if (m == null) {
     return null;
   }
-  final reais = int.tryParse(m.group(1)!.replaceAll('.', ''));
+  final digits = m.group(1)!.replaceAll('.', '');
+  // Mais de 13 dígitos inteiros estouraria a faixa segura de centavos.
+  if (digits.length > 13) {
+    return null;
+  }
+  final reais = int.tryParse(digits);
   if (reais == null) {
     return null;
   }

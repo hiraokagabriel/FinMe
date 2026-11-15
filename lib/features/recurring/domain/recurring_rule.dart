@@ -7,27 +7,34 @@ enum Frequency { weekly, monthly, yearly }
 /// Regra de recorrência. `type` é `expense` ou `income`.
 /// Ocorrências são geradas por `recurrence.dart`; não são gravadas no futuro.
 class RecurringRule {
-  const RecurringRule({
+  RecurringRule({
     required this.id,
     required this.description,
     required this.type,
     required this.amountCents,
     required this.frequency,
-    required this.startDate,
+    required DateTime startDate,
     this.categoryId,
     this.accountId,
     this.cardId,
-    this.endDate,
+    DateTime? endDate,
     this.isSubscription = false,
     this.isBoleto = false,
     this.active = true,
+    DateTime? materializedUntil,
   }) : assert(
          type == TransactionType.expense || type == TransactionType.income,
          'RecurringRule aceita apenas expense ou income',
-       );
+       ),
+       startDate = dateOnly(startDate),
+       endDate = endDate == null ? null : dateOnly(endDate),
+       materializedUntil = materializedUntil == null
+           ? null
+           : dateOnly(materializedUntil);
 
   factory RecurringRule.fromMap(Map<String, dynamic> map) {
     final end = map['endDate'] as String?;
+    final until = map['materializedUntil'] as String?;
     return RecurringRule(
       id: map['id'] as String,
       description: map['description'] as String,
@@ -37,11 +44,12 @@ class RecurringRule {
       accountId: map['accountId'] as String?,
       cardId: map['cardId'] as String?,
       frequency: enumByName(Frequency.values, map['frequency']),
-      startDate: dateOnly(parseDateKey(map['startDate'] as String)),
-      endDate: end == null ? null : dateOnly(parseDateKey(end)),
+      startDate: parseDateKey(map['startDate'] as String),
+      endDate: end == null ? null : parseDateKey(end),
       isSubscription: map['isSubscription'] == true,
       isBoleto: map['isBoleto'] == true,
       active: map['active'] != false,
+      materializedUntil: until == null ? null : parseDateKey(until),
     );
   }
 
@@ -59,6 +67,9 @@ class RecurringRule {
   final bool isBoleto;
   final bool active;
 
+  /// Última data já materializada no boot (SPEC §4.5); evita ressuscitar ocorrência apagada.
+  final DateTime? materializedUntil;
+
   RecurringRule copyWith({
     String? description,
     TransactionType? type,
@@ -72,6 +83,7 @@ class RecurringRule {
     bool? isSubscription,
     bool? isBoleto,
     bool? active,
+    DateTime? materializedUntil,
   }) => RecurringRule(
     id: id,
     description: description ?? this.description,
@@ -86,6 +98,7 @@ class RecurringRule {
     isSubscription: isSubscription ?? this.isSubscription,
     isBoleto: isBoleto ?? this.isBoleto,
     active: active ?? this.active,
+    materializedUntil: materializedUntil ?? this.materializedUntil,
   );
 
   Map<String, dynamic> toMap() => {
@@ -102,6 +115,9 @@ class RecurringRule {
     'isSubscription': isSubscription,
     'isBoleto': isBoleto,
     'active': active,
+    'materializedUntil': materializedUntil == null
+        ? null
+        : dateKey(materializedUntil!),
   };
 
   @override
@@ -120,7 +136,8 @@ class RecurringRule {
           other.endDate == endDate &&
           other.isSubscription == isSubscription &&
           other.isBoleto == isBoleto &&
-          other.active == active;
+          other.active == active &&
+          other.materializedUntil == materializedUntil;
 
   @override
   int get hashCode => Object.hash(
@@ -137,5 +154,6 @@ class RecurringRule {
     isSubscription,
     isBoleto,
     active,
+    materializedUntil,
   );
 }

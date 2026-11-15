@@ -7,14 +7,13 @@ enum TransactionType { expense, income, transfer, invoicePayment }
 enum TransactionStatus { paid, planned }
 
 /// Lançamento. `amountCents` sempre > 0; o sentido vem do [type].
-/// [date] deve ser [dateOnly]: [Transaction.fromMap] garante; o construtor não
-/// força, para continuar const-friendly.
+/// [date] é normalizada por [dateOnly] no construtor.
 class Transaction {
-  const Transaction({
+  Transaction({
     required this.id,
     required this.type,
     required this.amountCents,
-    required this.date,
+    required DateTime date,
     required this.description,
     this.categoryId,
     this.accountId,
@@ -28,14 +27,14 @@ class Transaction {
     this.installmentCount,
     this.recurringId,
     this.notes,
-  });
+  }) : date = dateOnly(date);
 
   /// Data lida como `dateKey` e normalizada para meia-noite local.
   factory Transaction.fromMap(Map<String, dynamic> map) => Transaction(
     id: map['id'] as String,
     type: enumByName(TransactionType.values, map['type']),
     amountCents: (map['amountCents'] as num).toInt(),
-    date: dateOnly(parseDateKey(map['date'] as String)),
+    date: parseDateKey(map['date'] as String),
     description: map['description'] as String,
     categoryId: map['categoryId'] as String?,
     accountId: map['accountId'] as String?,

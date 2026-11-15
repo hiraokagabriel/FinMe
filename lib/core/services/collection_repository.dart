@@ -14,8 +14,12 @@ class CollectionRepository<T> extends ChangeNotifier {
        _toMap = toMap,
        _idOf = idOf {
     for (final data in store.loadAll()) {
-      final item = fromMap(data);
-      _items[idOf(item)] = item;
+      try {
+        final item = fromMap(data);
+        _items[idOf(item)] = item;
+      } catch (error) {
+        debugPrint('CollectionRepository: registro inválido pulado: $error');
+      }
     }
   }
 
@@ -38,15 +42,17 @@ class CollectionRepository<T> extends ChangeNotifier {
   Future<void> upsert(T item) => upsertAll([item]);
 
   Future<void> upsertAll(Iterable<T> items) async {
+    final byId = <String, T>{};
     final entries = <String, Map<String, dynamic>>{};
     for (final item in items) {
       final id = _idOf(item);
-      _items[id] = item;
+      byId[id] = item;
       entries[id] = _toMap(item);
     }
     if (entries.isEmpty) {
       return;
     }
+    _items.addAll(byId);
     _changed();
     await _store.putAll(entries);
   }
@@ -76,17 +82,22 @@ class CollectionRepository<T> extends ChangeNotifier {
   }
 
   /// Substitui tudo (ex.: import de backup).
+  /// Grava os novos antes de apagar os antigos: falha no meio não perde dados.
   Future<void> replaceAll(Iterable<T> items) async {
-    _items.clear();
+    final previousIds = _items.keys.toList();
+    final byId = <String, T>{};
     final entries = <String, Map<String, dynamic>>{};
     for (final item in items) {
       final id = _idOf(item);
-      _items[id] = item;
+      byId[id] = item;
       entries[id] = _toMap(item);
     }
+    _items
+      ..clear()
+      ..addAll(byId);
     _changed();
-    await _store.clear();
     await _store.putAll(entries);
+    await _store.deleteAll(previousIds.where((id) => !entries.containsKey(id)));
   }
 
   void _changed() {

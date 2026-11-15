@@ -1,3 +1,5 @@
+import '../utils/enum_utils.dart';
+
 enum AppMode { simple, ultra }
 
 enum ThemePreference { system, light, dark }
@@ -22,8 +24,8 @@ class AppSettings {
   factory AppSettings.fromMap(Map<String, dynamic> map) {
     final months = map['forecastMonths'];
     return AppSettings(
-      mode: _byName(AppMode.values, map['mode']),
-      theme: _byName(ThemePreference.values, map['theme']),
+      mode: enumByName(AppMode.values, map['mode']),
+      theme: enumByName(ThemePreference.values, map['theme']),
       hideValues: map['hideValues'] == true,
       forecastMonths: months is num && months.isFinite
           ? months.toInt()
@@ -61,13 +63,4 @@ class AppSettings {
     'forecastMonths': forecastMonths,
     'onboardingDone': onboardingDone,
   };
-}
-
-T _byName<T extends Enum>(List<T> values, Object? name) {
-  for (final value in values) {
-    if (value.name == name) {
-      return value;
-    }
-  }
-  return values.first;
 }

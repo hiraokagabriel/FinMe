@@ -19,6 +19,39 @@ class _Item {
   Map<String, dynamic> toMap() => {'id': id, 'name': name};
 }
 
+/// Registra a ordem das escritas; delega ao MemoryRecordStore.
+class _LogStore implements RecordStore {
+  final inner = MemoryRecordStore();
+  final log = <String>[];
+
+  @override
+  Iterable<Map<String, dynamic>> loadAll() => inner.loadAll();
+
+  @override
+  Future<void> put(String id, Map<String, dynamic> data) => inner.put(id, data);
+
+  @override
+  Future<void> putAll(Map<String, Map<String, dynamic>> entries) {
+    log.add('putAll');
+    return inner.putAll(entries);
+  }
+
+  @override
+  Future<void> delete(String id) => inner.delete(id);
+
+  @override
+  Future<void> deleteAll(Iterable<String> ids) {
+    log.add('deleteAll');
+    return inner.deleteAll(ids);
+  }
+
+  @override
+  Future<void> clear() {
+    log.add('clear');
+    return inner.clear();
+  }
+}
+
 CollectionRepository<_Item> _repo(RecordStore store) =>
     CollectionRepository<_Item>(
       store: store,
@@ -116,6 +149,27 @@ void main() {
       expect(repo.byId('old'), isNull);
       expect(repo.all.map((i) => i.id), ['n1', 'n2']);
       expect(store.loadAll().map((m) => m['id']), ['n1', 'n2']);
+    });
+
+    test('replaceAll grava os novos antes de apagar os antigos', () async {
+      final store = _LogStore();
+      final repo = _repo(store);
+      await repo.upsert(const _Item('old', 'Old'));
+      store.log.clear();
+
+      await repo.replaceAll(const [_Item('old', 'Keep'), _Item('n1', 'N1')]);
+      expect(store.log, ['putAll', 'deleteAll']);
+      expect(store.loadAll().map((m) => m['id']), ['old', 'n1']);
+    });
+
+    test('registro inválido é pulado no construtor', () async {
+      final store = MemoryRecordStore();
+      await store.put('a', {'id': 'a', 'name': 'A'});
+      await store.put('bad', {'id': 'bad'});
+
+      final repo = _repo(store);
+      expect(repo.all.map((i) => i.id), ['a']);
+      expect(repo.byId('bad'), isNull);
     });
 
     test('MemoryRecordStore guarda cópias isoladas do chamador', () async {

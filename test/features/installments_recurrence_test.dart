@@ -77,6 +77,31 @@ void main() {
     });
   });
 
+  group('buildInstallments validação', () {
+    test('count < 1 ou count > amountCents lança ArgumentError', () {
+      expect(
+        () => buildInstallments(base: _base(), count: 0, groupId: 'g'),
+        throwsArgumentError,
+      );
+      expect(
+        () => buildInstallments(
+          base: _base(amountCents: 2),
+          count: 3,
+          groupId: 'g',
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        buildInstallments(
+          base: _base(amountCents: 3),
+          count: 3,
+          groupId: 'g',
+        ).map((p) => p.amountCents),
+        [1, 1, 1],
+      );
+    });
+  });
+
   group('occurrencesBetween', () {
     test('monthly com início dia 31 → 31/01, 28/02, 31/03, 30/04', () {
       expect(

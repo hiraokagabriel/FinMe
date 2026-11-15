@@ -3,12 +3,19 @@ import 'transaction.dart';
 
 /// Divide [base] em [count] parcelas mensais. O resto da divisão vai para a 1ª parcela.
 /// Datas: `addMonthsClamped(base.date, i-1)`, então 31/01 → 28/02 → 31/03.
+/// Lança [ArgumentError] se `count < 1` ou `count > base.amountCents` (parcela de 0 centavos).
 List<Transaction> buildInstallments({
   required Transaction base,
   required int count,
   required String groupId,
 }) {
-  assert(count >= 1, 'count deve ser >= 1');
+  if (count < 1 || count > base.amountCents) {
+    throw ArgumentError.value(
+      count,
+      'count',
+      'deve estar em 1..${base.amountCents}',
+    );
+  }
   final each = base.amountCents ~/ count;
   final rest = base.amountCents - each * count;
   return [
