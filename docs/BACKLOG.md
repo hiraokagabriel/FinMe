@@ -9,24 +9,24 @@
 ### T-001 · Limpeza e base · `done`
 Remove `lib/` e `test/` antigos, ajusta `pubspec.yaml`, `analysis_options.yaml` (exclui `FinMe/**`, `build/**`), cria `tool/check.sh`.
 
-### T-002 · Utilitários core · `todo` · deps: T-001 · parallel: yes
+### T-002 · Utilitários core · `done` · deps: T-001 · parallel: yes
 files: `lib/core/models/year_month.dart`, `lib/core/utils/date_utils.dart`, `lib/core/utils/formatters.dart`, `lib/core/utils/id.dart`, `test/core/year_month_test.dart`, `test/core/utils_test.dart`
 contrato: SPEC §3.1–3.4
 aceite: virada de ano (`2026-12 + 1 = 2027-01`, `2026-01 - 1 = 2025-12`), `dateAt(31)` em fev bissexto/não, `addMonthsClamped(31/01/2026, 1) = 28/02/2026`, `formatMoney(123456) = "R$ 1.234,56"`, `formatMoney(-5) = "-R$ 0,05"`, `parseMoney` nos 5 formatos do SPEC + inválido, `newId` 10.000 ids únicos.
 
-### T-003 · Tema e tokens · `todo` · deps: T-001 · parallel: yes
+### T-003 · Tema e tokens · `done` · deps: T-001 · parallel: yes
 files: `lib/core/theme/app_colors.dart`, `lib/core/theme/app_spacing.dart`, `lib/core/theme/app_palettes.dart`, `lib/core/theme/app_theme.dart`
 contrato: SPEC §7.1 + paletas do `CLAUDE.md`
 aceite: `AppColors.lerp`/`copyWith` implementados; `AppTheme.light().extension<AppColors>()` não nulo.
 
-### T-004 · Persistência e configurações · `todo` · deps: T-001 · parallel: yes
+### T-004 · Persistência e configurações · `done` · deps: T-001 · parallel: yes
 files: `lib/core/services/record_store.dart`, `lib/core/services/collection_repository.dart`, `lib/core/models/app_settings.dart`, `lib/core/services/settings_controller.dart`, `test/core/collection_repository_test.dart`
 contrato: SPEC §3.5–3.6
 aceite: testes com `MemoryRecordStore`: upsert/byId/delete/deleteWhere/replaceAll, `version` incrementa, `all` cacheado (mesma instância entre leituras sem mudança), notifica uma vez em `upsertAll`; `AppSettings.fromMap({})` = padrões; `HiveRecordStore` converte mapas aninhados para `Map<String,dynamic>`.
 
 ## Fase 1 — Domínio
 
-### T-005 · Entidades · `todo` · deps: T-002
+### T-005 · Entidades · `done` · deps: T-002
 files: `lib/features/accounts/domain/account.dart`, `lib/features/cards/domain/payment_card.dart`, `lib/features/categories/domain/transaction_category.dart`, `lib/features/transactions/domain/transaction.dart`, `lib/features/recurring/domain/recurring_rule.dart`, `test/features/entities_test.dart`
 contrato: SPEC §4
 aceite: round-trip `fromMap(toMap(x)) == x` (implemente `==`/`hashCode`) para cada entidade; enum desconhecido → primeiro valor; campos opcionais ausentes → null.

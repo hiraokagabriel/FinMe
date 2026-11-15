@@ -17,7 +17,7 @@ Você implementa exatamente uma tarefa do `docs/BACKLOG.md` do FinMe.
 - Flutter/Dart, Dart 3 (records, pattern matching, `switch` expressions permitidos).
 - Dinheiro: `int` centavos. Formatação só via `lib/core/utils/formatters.dart`.
 - Cores: só via tokens de `lib/core/theme/` (`context.colors.*`). Nunca hex em widget.
-- Domínio em `lib/features/<f>/domain/` e `lib/core/` sem importar `package:flutter`.
+- `lib/features/<f>/domain/`, `lib/core/models/` e `lib/core/utils/` sem importar `package:flutter` (tema, widgets e services podem).
 - Sem `withOpacity` (use `withValues(alpha: x)`), sem `DropdownButtonFormField.value` (use `initialValue`).
 - `if` sempre com chaves. Checar `mounted`/`context.mounted` após `await`.
 - Widgets pequenos; listas longas com `ListView.builder`.
