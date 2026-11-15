@@ -1,5 +1,8 @@
 import '../../../core/utils/enum_utils.dart';
 
+/// Sentinela de `copyWith`: parâmetro omitido mantém o valor; `null` explícito limpa.
+const Object _keep = Object();
+
 enum CategoryKind { expense, income }
 
 /// Categoria de despesa ou receita. `monthlyBudgetCents` null = sem orçamento.
@@ -35,14 +38,16 @@ class TransactionCategory {
     CategoryKind? kind,
     int? iconCodePoint,
     int? colorValue,
-    int? monthlyBudgetCents,
+    Object? monthlyBudgetCents = _keep,
   }) => TransactionCategory(
     id: id,
     name: name ?? this.name,
     kind: kind ?? this.kind,
     iconCodePoint: iconCodePoint ?? this.iconCodePoint,
     colorValue: colorValue ?? this.colorValue,
-    monthlyBudgetCents: monthlyBudgetCents ?? this.monthlyBudgetCents,
+    monthlyBudgetCents: monthlyBudgetCents == _keep
+        ? this.monthlyBudgetCents
+        : monthlyBudgetCents as int?,
   );
 
   Map<String, dynamic> toMap() => {

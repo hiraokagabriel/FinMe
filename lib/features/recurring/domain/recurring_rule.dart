@@ -2,6 +2,9 @@ import '../../../core/utils/date_utils.dart';
 import '../../../core/utils/enum_utils.dart';
 import '../../transactions/domain/transaction.dart';
 
+/// Sentinela de `copyWith`: parâmetro omitido mantém o campo; `null` limpa; valor troca.
+const Object _keep = Object();
+
 enum Frequency { weekly, monthly, yearly }
 
 /// Regra de recorrência. `type` é `expense` ou `income`.
@@ -74,31 +77,33 @@ class RecurringRule {
     String? description,
     TransactionType? type,
     int? amountCents,
-    String? categoryId,
-    String? accountId,
-    String? cardId,
+    Object? categoryId = _keep,
+    Object? accountId = _keep,
+    Object? cardId = _keep,
     Frequency? frequency,
     DateTime? startDate,
-    DateTime? endDate,
+    Object? endDate = _keep,
     bool? isSubscription,
     bool? isBoleto,
     bool? active,
-    DateTime? materializedUntil,
+    Object? materializedUntil = _keep,
   }) => RecurringRule(
     id: id,
     description: description ?? this.description,
     type: type ?? this.type,
     amountCents: amountCents ?? this.amountCents,
-    categoryId: categoryId ?? this.categoryId,
-    accountId: accountId ?? this.accountId,
-    cardId: cardId ?? this.cardId,
+    categoryId: categoryId == _keep ? this.categoryId : categoryId as String?,
+    accountId: accountId == _keep ? this.accountId : accountId as String?,
+    cardId: cardId == _keep ? this.cardId : cardId as String?,
     frequency: frequency ?? this.frequency,
     startDate: startDate ?? this.startDate,
-    endDate: endDate ?? this.endDate,
+    endDate: endDate == _keep ? this.endDate : endDate as DateTime?,
     isSubscription: isSubscription ?? this.isSubscription,
     isBoleto: isBoleto ?? this.isBoleto,
     active: active ?? this.active,
-    materializedUntil: materializedUntil ?? this.materializedUntil,
+    materializedUntil: materializedUntil == _keep
+        ? this.materializedUntil
+        : materializedUntil as DateTime?,
   );
 
   Map<String, dynamic> toMap() => {

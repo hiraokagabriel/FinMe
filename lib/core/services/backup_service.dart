@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:csv/csv.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../app/app_scope.dart';
 import '../../app/bootstrap.dart';
@@ -46,6 +47,7 @@ class BackupService {
 
   /// Lê tudo antes de gravar: JSON ou registro inválido lança [FormatException] e nada muda.
   /// Depois de gravar, materializa as recorrências até ontem (como no boot).
+  /// Falha na gravação restaura o retrato anterior (Hive não tem transação entre boxes) e relança.
   static Future<void> importJson(AppServices s, String json) async {
     final data = jsonDecode(json);
     if (data is! Map<String, dynamic> ||
@@ -54,13 +56,41 @@ class BackupService {
       throw const FormatException('Arquivo não é um backup do FinMe');
     }
     final b = _parse(data);
-    await s.accounts.replaceAll(b.accounts);
-    await s.cards.replaceAll(b.cards);
-    await s.categories.replaceAll(b.categories);
-    await s.transactions.replaceAll(b.transactions);
-    await s.recurring.replaceAll(b.recurring);
-    await s.settings.update((_) => b.settings);
-    await materializeRecurring(s);
+    final retrato = (
+      accounts: s.accounts.all,
+      cards: s.cards.all,
+      categories: s.categories.all,
+      transactions: s.transactions.all,
+      recurring: s.recurring.all,
+      settings: s.settings.value,
+    );
+    try {
+      await s.accounts.replaceAll(b.accounts);
+      await s.cards.replaceAll(b.cards);
+      await s.categories.replaceAll(b.categories);
+      await s.transactions.replaceAll(b.transactions);
+      await s.recurring.replaceAll(b.recurring);
+      await s.settings.update((_) => b.settings);
+      await materializeRecurring(s);
+    } catch (e, st) {
+      // Cada restauração tem try próprio: uma falha não impede as demais.
+      final restores = <Future<void> Function()>[
+        () => s.accounts.replaceAll(retrato.accounts),
+        () => s.cards.replaceAll(retrato.cards),
+        () => s.categories.replaceAll(retrato.categories),
+        () => s.transactions.replaceAll(retrato.transactions),
+        () => s.recurring.replaceAll(retrato.recurring),
+        () => s.settings.update((_) => retrato.settings),
+      ];
+      for (final restore in restores) {
+        try {
+          await restore();
+        } catch (restoreError) {
+          debugPrint('BackupService: falha ao restaurar: $restoreError');
+        }
+      }
+      Error.throwWithStackTrace(e, st);
+    }
   }
 
   /// Lançamentos (ordenados por data) em CSV com `;`. Valor com sinal: saídas negativas.

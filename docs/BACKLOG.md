@@ -164,3 +164,58 @@ aceite: Simples mostra 1 linha com o 1º `hasLimit` e "vence em N dias"; Ultra m
 files: `lib/features/cards/presentation/card_form.dart`, `test/features/cards/card_form_test.dart` (cria ou estende)
 contrato: SPEC §4.2 `withCycleChange`, §7.3 linha "Mudança de ciclo". Em `_save`: edição de cartão de crédito com `closingDay`/`dueDay` alterados **e** `s.transactions.all.any((t) => t.cardId == old.id)` → diálogo com `DateField` "Vale a partir de" (padrão `s.ledger.today`); salva `old.copyWith(<demais campos>).withCycleChange(closingDay:, dueDay:, effectiveFrom:)`; cancelar não salva; `ArgumentError` → mensagem no diálogo, sem fechar. Sem transações → só troca os dias (histórico intacto). Todo `copyWith` preserva `cycleHistory`.
 aceite: widget test: cartão com transação, muda vencimento, confirma data → cartão salvo tem `cycleHistory.length == 1` com os dias antigos; cartão sem transações → `cycleHistory` vazio; editar só o nome preserva `cycleHistory`.
+
+## Fase 6 — Pendências conhecidas
+
+> Origem: CONTEXT.md §12. T-040..T-044 não têm arquivos em comum: todas `parallel: yes`.
+> Contratos: SPEC §3.5 (import tudo-ou-nada), §4 (`copyWith` com sentinela), §5.1–5.2 (linha de fechamentos), §5.7, §5.9, §6.2.
+
+### T-040 · Import de backup tudo-ou-nada · `done` · deps: — · parallel: yes
+files: `lib/core/services/backup_service.dart`, `test/core/backup_service_test.dart`
+contrato: SPEC §3.5 "Import de backup tudo-ou-nada". Assinatura inalterada: `static Future<void> importJson(AppServices s, String json)`. Retrato (`s.accounts.all`, `s.cards.all`, `s.categories.all`, `s.transactions.all`, `s.recurring.all`, `s.settings.value`) tirado depois de `_parse` e antes da 1ª gravação. Gravações + `materializeRecurring(s)` dentro de `try`; no `catch (e, st)`: `replaceAll(retrato)` em cada repositório e `settings.update((_) => retrato)`, cada um em `try` próprio, depois `Error.throwWithStackTrace(e, st)`. Sem mudar `CollectionRepository`/`RecordStore`.
+aceite:
+- Teste com `storeFactory` que devolve, para `fm_transactions`, um `MemoryRecordStore` cujo `putAll` lança **uma vez** (flag `failNext`): `importJson` de um backup válido lança; depois disso `accounts/cards/categories/transactions/recurring.all` (comparar ids e `toMap`) e `settings.value` são iguais aos de antes do import.
+- Mesmo cenário falhando em `fm_settings` (`put` lança uma vez) → tudo restaurado.
+- Testes existentes de `backup_service_test.dart` passam sem alteração (round-trip, órfãos, JSON inválido, campo inválido, CSV).
+
+### T-041 · Previsão cobre os 60 dias da linha do tempo · `done` · deps: — · parallel: yes
+files: `lib/features/forecast/domain/forecast.dart`, `test/features/forecast_test.dart`, `lib/app/ledger.dart`, `test/app/ledger_insights_test.dart`
+contrato: SPEC §5.7 (`ForecastService.compute({..., int months = 6, int minDays = 0})`, passo 2), §5.9 (nota final), §6.2 (`static const int invoiceTimelineDays = 60;`; `forecast` passa `minDays: invoiceTimelineDays`; `invoiceTimeline` usa `days: invoiceTimelineDays`). Remover o comentário de "59 dias no pior caso" em `ledger.dart`.
+aceite:
+- `forecast_test.dart`: hoje 31/01/2027, `months: 3` → `minDays: 0` dá `daily.last.date == 31/03/2027`; `minDays: 60` dá `daily.last.date == 01/04/2027` e `months.length == 3`; fatura com vencimento 01/04/2027 gera evento só com `minDays: 60`.
+- `ledger_insights_test.dart`: clock 31/01/2027, `forecastMonths: 3`, cartão com fatura vencendo 01/04/2027 → aparece em `ledger.invoiceTimeline`; `ledger.forecast.months.length == 3`.
+- Demais testes de previsão, Ledger e telas passam sem alteração.
+
+### T-042 · `copyWith` limpa anuláveis: `Transaction` e `RecurringRule` · `done` · deps: — · parallel: yes
+files: `lib/features/transactions/domain/transaction.dart`, `lib/features/recurring/domain/recurring_rule.dart`, `test/features/copy_with_clear_test.dart` (novo)
+contrato: SPEC §4 "`copyWith` e campos anuláveis". Por arquivo: `const Object _keep = Object();`. `Transaction.copyWith`: `categoryId`, `accountId`, `cardId`, `toAccountId`, `invoiceKey`, `installmentGroupId`, `installmentIndex`, `installmentCount`, `recurringId`, `notes` viram `Object? x = _keep`. `RecurringRule.copyWith`: `categoryId`, `accountId`, `cardId`, `endDate`, `materializedUntil` idem. Demais parâmetros inalterados. Não alterar chamadores.
+aceite:
+- Para cada campo anulável listado: `copyWith()` mantém o valor; `copyWith(campo: null)` → `null`; `copyWith(campo: v)` → `v`.
+- `RecurringRule.copyWith(endDate: DateTime(2026, 12, 1, 9))` normaliza para `DateTime(2026, 12, 1)` (vai pelo construtor).
+- `Transaction.copyWith(notes: null)` sobre transação com notas → `toMap()` sem notas e `fromMap(toMap())` igual.
+- `test/features/entities_test.dart` e todo o resto passam sem alteração; `flutter analyze` sem avisos.
+
+### T-043 · `copyWith` limpa anuláveis: `PaymentCard` e `TransactionCategory` · `done` · deps: — · parallel: yes
+files: `lib/features/cards/domain/payment_card.dart`, `lib/features/categories/domain/transaction_category.dart`, `test/features/copy_with_clear_card_category_test.dart` (novo)
+contrato: SPEC §4 "`copyWith` e campos anuláveis". `PaymentCard.copyWith({..., Object? paymentAccountId = _keep, ...})`; `TransactionCategory.copyWith({..., Object? monthlyBudgetCents = _keep})`. `withCycleChange` e `cycleHistory` intactos. Não alterar chamadores.
+aceite:
+- `card.copyWith(paymentAccountId: null).paymentAccountId == null`; `copyWith()` mantém; `copyWith(paymentAccountId: 'acc_x')` troca; `cycleHistory` preservado em todos os casos.
+- `category.copyWith(monthlyBudgetCents: null)` remove o orçamento; `copyWith()` mantém; valor troca.
+- `card_form_test.dart`, `card_cycle_test.dart`, `entities_test.dart` e `categories_page_test.dart` passam sem alteração.
+
+### T-044 · Fatura de transição na mudança de ciclo (sem fusão) · `done` · deps: — · parallel: yes
+files: `lib/features/cards/domain/invoice_cycle.dart`, `lib/features/cards/domain/invoice.dart`, `test/features/cards/card_cycle_test.dart`
+contrato: SPEC §5.1 "Linha de fechamentos e fatura de transição" (regras 1–10) e §5.2. Em `invoice_cycle.dart`: `invoiceDueMonth`, `invoiceClosingDate`, `invoiceDueDate`, `purchaseDueDate` com as mesmas assinaturas e novo comportamento com histórico; nova função pública `YearMonth installmentDueMonth(DateTime firstDate, int index, PaymentCard card)`. Helper privado de sequência de fechamentos (ex.: `List<({DateTime closing, YearMonth dueMonth, int dueDay})> _closings(PaymentCard card, YearMonth from, YearMonth to)`). Histórico vazio → atalho com as fórmulas originais. Em `invoice.dart`: parcelas usam `installmentDueMonth(firstDate, index, card)` no lugar de `invoiceDueMonth(firstDate, card).addMonths(index - 1)`; `_toInvoice` segue passando `cycleDate` (usado só no fallback). `PaymentCard.cycleOn` não muda.
+aceite (substituir os testes do grupo "transição de ciclo" e o grupo "fatura fundida (regressão)" pelos exemplos do SPEC §5.1):
+- Fecha 5/vence 12 → fecha 25/vence 5 a partir de 01/12/2026: compra 04/11 → `2026-11` vence 12/11; compras 20/11 e 02/12 → `2027-01` vence 05/01/2027 e fecha 25/12/2026; `InvoiceService.build` não gera fatura `2026-12`; parcelado 3x com 1ª em 15/10 → `2026-11`, `2027-01`, `2027-02`; pagamento `invoiceKey` `2026-11` feito antes da mudança quita nov.
+- Fecha 5/vence 12 → fecha 20/vence 27 a partir de 15/11/2026: compras 10/11 e 16/11 → `2026-12`, `closingDate` 20/12, `dueDate` 27/12; fatura `2026-12` com só um item do ciclo antigo tem as mesmas datas (independe dos itens); compra 04/11 → nov (12/11).
+- Fecha 25/vence 5 → fecha 5/vence 12 a partir de 01/12/2026: compra 24/11 → `2026-12` (05/12); compra 28/11 → `2027-01` (fecha 05/01/2027, vence 12/01/2027).
+- Para toda compra dos cenários acima: `purchaseDueDate(d, card) == dueDate` da fatura de `InvoiceService.build` que contém a compra.
+- Duas mudanças seguidas (histórico com 2 ciclos) → `dueMonth` das faturas estritamente crescente e sem fatura duplicada.
+- Sem histórico: `installmentDueMonth(d1, i, card) == invoiceDueMonth(d1, card).addMonths(i - 1)` para i = 1..12.
+- `test/features/cards/invoice_test.dart`, `card_insights_test.dart`, `entities_test.dart` e `card_form_test.dart` passam **sem alteração**.
+
+### T-045 · Teste em dispositivo Android real · `todo` · **manual — usuário** (agentes NÃO executam) · deps: T-040..T-044
+files: — (nenhum código; registrar resultado em `CONTEXT.md` §12)
+passos: `flutter build apk` (ou `flutter run -d <id>`) em aparelho físico; rodar onboarding com dados de exemplo; navegar pelas 8 páginas nos modos Simples e Ultra; criar compra parcelada, pagar fatura, mudar ciclo de um cartão; exportar e importar backup (seletor de arquivo do Android); girar a tela e testar o drawer.
+aceite: sem exceção nem overflow visível; backup exportado reimporta no mesmo aparelho; dados persistem após fechar e reabrir o app. Usuário marca `done` e remove o item de CONTEXT.md §12.

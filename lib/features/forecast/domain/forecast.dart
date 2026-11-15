@@ -88,7 +88,9 @@ class Forecast {
 }
 
 class ForecastService {
-  /// Previsão de [months] meses a partir de [today] (mês atual incluso).
+  /// Previsão de [months] meses a partir de [today] (mês atual incluso). O horizonte
+  /// vai até o último dia desses meses ou até `today + minDays`, o que for mais tarde;
+  /// `months` continua com exatamente [months] entradas.
   static Forecast compute({
     required List<Account> accounts,
     required List<PaymentCard> cards,
@@ -96,10 +98,14 @@ class ForecastService {
     required List<RecurringRule> recurring,
     required DateTime today,
     int months = 6,
+    int minDays = 0,
   }) {
     assert(months >= 1, 'months deve ser >= 1');
+    assert(minDays >= 0, 'minDays deve ser >= 0');
     final day = dateOnly(today);
-    final end = YearMonth.fromDate(day).addMonths(months - 1).lastDay;
+    final monthsEnd = YearMonth.fromDate(day).addMonths(months - 1).lastDay;
+    final minEnd = DateTime(day.year, day.month, day.day + minDays);
+    final end = monthsEnd.isAfter(minEnd) ? monthsEnd : minEnd;
     final activeAccounts = accounts.where((a) => !a.archived).toList();
     final activeIds = {for (final a in activeAccounts) a.id};
     final currentBalances = accountBalances(

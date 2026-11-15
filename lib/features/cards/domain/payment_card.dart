@@ -1,6 +1,9 @@
 import '../../../core/utils/date_utils.dart';
 import '../../../core/utils/enum_utils.dart';
 
+/// Sentinela de `copyWith`: parâmetro omitido mantém o valor; `null` explícito limpa.
+const Object _keep = Object();
+
 enum CardBrand { visa, mastercard, elo, amex, hipercard, other }
 
 enum CardKind { credit, debit }
@@ -142,7 +145,7 @@ class PaymentCard {
     int? limitCents,
     int? closingDay,
     int? dueDay,
-    String? paymentAccountId,
+    Object? paymentAccountId = _keep,
     int? colorValue,
     bool? archived,
     List<CardCycle>? cycleHistory,
@@ -156,7 +159,9 @@ class PaymentCard {
     limitCents: limitCents ?? this.limitCents,
     closingDay: closingDay ?? this.closingDay,
     dueDay: dueDay ?? this.dueDay,
-    paymentAccountId: paymentAccountId ?? this.paymentAccountId,
+    paymentAccountId: paymentAccountId == _keep
+        ? this.paymentAccountId
+        : paymentAccountId as String?,
     colorValue: colorValue ?? this.colorValue,
     archived: archived ?? this.archived,
     cycleHistory: cycleHistory ?? this.cycleHistory,

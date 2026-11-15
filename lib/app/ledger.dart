@@ -169,6 +169,9 @@ class Ledger extends ChangeNotifier {
   Invoice? currentInvoiceFor(String cardId) =>
       InvoiceService.currentInvoice(invoicesFor(cardId), today);
 
+  /// Horizonte mínimo (dias) da linha do tempo de faturas; a previsão sempre cobre.
+  static const int invoiceTimelineDays = 60;
+
   Forecast get forecast {
     _ensureFresh();
     return _forecast ??= ForecastService.compute(
@@ -178,6 +181,7 @@ class Ledger extends ChangeNotifier {
       recurring: recurring.all,
       today: today,
       months: settings.value.forecastMonths,
+      minDays: invoiceTimelineDays,
     );
   }
 
@@ -190,12 +194,10 @@ class Ledger extends ChangeNotifier {
   /// Vencimentos de fatura em 60 dias com saldo-após da conta de pagamento.
   List<timeline.InvoiceDue> get invoiceTimeline {
     _ensureFresh();
-    // forecastMonths >= 3 (clamp em AppSettings) dá 59 dias no pior caso (hoje 31/jan):
-    // o 60º dia pode ficar de fora. Subir o mínimo para 4 cobriria sempre.
     return _invoiceTimeline ??= timeline.invoiceTimeline(
       forecast: forecast,
       invoices: _creditInvoices,
-      days: 60,
+      days: invoiceTimelineDays,
     );
   }
 

@@ -1,6 +1,9 @@
 import '../../../core/utils/date_utils.dart';
 import '../../../core/utils/enum_utils.dart';
 
+/// Sentinela de `copyWith`: parâmetro omitido mantém o campo; `null` limpa; valor troca.
+const Object _keep = Object();
+
 enum TransactionType { expense, income, transfer, invoicePayment }
 
 /// `planned` = provisionado (ainda não saiu); `paid` = lançado.
@@ -79,36 +82,46 @@ class Transaction {
     int? amountCents,
     DateTime? date,
     String? description,
-    String? categoryId,
-    String? accountId,
-    String? cardId,
-    String? toAccountId,
+    Object? categoryId = _keep,
+    Object? accountId = _keep,
+    Object? cardId = _keep,
+    Object? toAccountId = _keep,
     TransactionStatus? status,
     bool? isBoleto,
-    String? invoiceKey,
-    String? installmentGroupId,
-    int? installmentIndex,
-    int? installmentCount,
-    String? recurringId,
-    String? notes,
+    Object? invoiceKey = _keep,
+    Object? installmentGroupId = _keep,
+    Object? installmentIndex = _keep,
+    Object? installmentCount = _keep,
+    Object? recurringId = _keep,
+    Object? notes = _keep,
   }) => Transaction(
     id: id,
     type: type ?? this.type,
     amountCents: amountCents ?? this.amountCents,
     date: date ?? this.date,
     description: description ?? this.description,
-    categoryId: categoryId ?? this.categoryId,
-    accountId: accountId ?? this.accountId,
-    cardId: cardId ?? this.cardId,
-    toAccountId: toAccountId ?? this.toAccountId,
+    categoryId: categoryId == _keep ? this.categoryId : categoryId as String?,
+    accountId: accountId == _keep ? this.accountId : accountId as String?,
+    cardId: cardId == _keep ? this.cardId : cardId as String?,
+    toAccountId: toAccountId == _keep
+        ? this.toAccountId
+        : toAccountId as String?,
     status: status ?? this.status,
     isBoleto: isBoleto ?? this.isBoleto,
-    invoiceKey: invoiceKey ?? this.invoiceKey,
-    installmentGroupId: installmentGroupId ?? this.installmentGroupId,
-    installmentIndex: installmentIndex ?? this.installmentIndex,
-    installmentCount: installmentCount ?? this.installmentCount,
-    recurringId: recurringId ?? this.recurringId,
-    notes: notes ?? this.notes,
+    invoiceKey: invoiceKey == _keep ? this.invoiceKey : invoiceKey as String?,
+    installmentGroupId: installmentGroupId == _keep
+        ? this.installmentGroupId
+        : installmentGroupId as String?,
+    installmentIndex: installmentIndex == _keep
+        ? this.installmentIndex
+        : installmentIndex as int?,
+    installmentCount: installmentCount == _keep
+        ? this.installmentCount
+        : installmentCount as int?,
+    recurringId: recurringId == _keep
+        ? this.recurringId
+        : recurringId as String?,
+    notes: notes == _keep ? this.notes : notes as String?,
   );
 
   Map<String, dynamic> toMap() => {

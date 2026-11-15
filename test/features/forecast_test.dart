@@ -23,6 +23,8 @@ PaymentCard card(
   String id, {
   CardKind kind = CardKind.credit,
   String? paymentAccountId,
+  int closingDay = 5,
+  int dueDay = 12,
 }) => PaymentCard(
   id: id,
   name: 'Cartão $id',
@@ -30,8 +32,8 @@ PaymentCard card(
   brand: CardBrand.visa,
   kind: kind,
   last4: '0000',
-  closingDay: 5,
-  dueDay: 12,
+  closingDay: closingDay,
+  dueDay: dueDay,
   colorValue: 0xFF000000,
   paymentAccountId: paymentAccountId,
 );
@@ -461,5 +463,50 @@ void main() {
     expect(f.daily.last.date, DateTime(2026, 11, 30));
     expect(f.months.single.expenseCents, 100);
     expect(f.months.single.endBalanceCents, 900);
+  });
+
+  test('minDays estende o horizonte diário sem mudar o número de meses', () {
+    final jan31 = DateTime(2027, 1, 31);
+    Forecast run(int minDays) => ForecastService.compute(
+      accounts: [acc('A', initial: 1000)],
+      cards: const [],
+      transactions: const [],
+      recurring: const [],
+      today: jan31,
+      months: 3,
+      minDays: minDays,
+    );
+
+    expect(run(0).daily.last.date, DateTime(2027, 3, 31));
+    final ext = run(60);
+    expect(ext.daily.last.date, DateTime(2027, 4, 1));
+    expect(ext.months, hasLength(3));
+    expect(ext.months.last.month.key, '2027-03');
+  });
+
+  test('fatura que vence após o fim dos meses entra só com minDays', () {
+    Forecast run(int minDays) => ForecastService.compute(
+      accounts: [acc('A', initial: 1000)],
+      cards: [card('X', paymentAccountId: 'A', closingDay: 25, dueDay: 1)],
+      transactions: [
+        tx(
+          'c',
+          TransactionType.expense,
+          4000,
+          DateTime(2027, 3, 10),
+          cardId: 'X',
+        ),
+      ],
+      recurring: const [],
+      today: DateTime(2027, 1, 31),
+      months: 3,
+      minDays: minDays,
+    );
+
+    expect(run(0).events.any((e) => e.sourceId == 'X_2027-04'), isFalse);
+    final e = only(run(60), 'X_2027-04');
+    expect(e.date, DateTime(2027, 4, 1));
+    expect(e.amountCents, -4000);
+    expect(e.accountId, 'A');
   });
 }

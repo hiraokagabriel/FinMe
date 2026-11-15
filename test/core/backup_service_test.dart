@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:finme/app/app_scope.dart';
 import 'package:finme/app/bootstrap.dart';
 import 'package:finme/app/seed.dart';
+import 'package:finme/core/models/app_settings.dart';
 import 'package:finme/core/models/year_month.dart';
 import 'package:finme/core/services/backup_service.dart';
 import 'package:finme/core/services/record_store.dart';
@@ -12,9 +13,46 @@ import 'package:flutter_test/flutter_test.dart';
 
 DateTime _now() => DateTime(2026, 11, 14);
 
-Future<AppServices> _bootstrap({bool demo = true}) async {
+/// Falha uma vez na próxima gravação (put ou putAll), depois volta ao normal.
+class _FlakyStore extends MemoryRecordStore {
+  bool failNext = false;
+
+  void _check() {
+    if (failNext) {
+      failNext = false;
+      throw StateError('disco cheio');
+    }
+  }
+
+  @override
+  Future<void> put(String id, Map<String, dynamic> data) async {
+    _check();
+    return super.put(id, data);
+  }
+
+  @override
+  Future<void> putAll(Map<String, Map<String, dynamic>> entries) async {
+    _check();
+    return super.putAll(entries);
+  }
+}
+
+/// Estado comparável de todos os repositórios e das configurações.
+List<Object?> _state(AppServices s) => [
+  [for (final a in s.accounts.all) a.toMap()],
+  [for (final c in s.cards.all) c.toMap()],
+  [for (final c in s.categories.all) c.toMap()],
+  [for (final t in s.transactions.all) t.toMap()],
+  [for (final r in s.recurring.all) r.toMap()],
+  s.settings.value.toMap(),
+];
+
+Future<AppServices> _bootstrap({
+  bool demo = true,
+  Map<String, RecordStore> stores = const {},
+}) async {
   final s = await bootstrap(
-    storeFactory: (_) => MemoryRecordStore(),
+    storeFactory: (box) => stores[box] ?? MemoryRecordStore(),
     clock: _now,
   );
   if (demo) {
@@ -237,4 +275,36 @@ void main() {
       );
     },
   );
+
+  for (final box in ['fm_transactions', 'fm_settings']) {
+    test('import com falha em $box restaura tudo (tudo-ou-nada)', () async {
+      final src = await _bootstrap();
+      final flaky = _FlakyStore();
+      final dst = await _bootstrap(stores: {box: flaky});
+      // Estado local diferente do backup, para a restauração ser observável.
+      await dst.transactions.upsert(
+        Transaction(
+          id: 'local',
+          type: TransactionType.expense,
+          amountCents: 900,
+          date: _now(),
+          description: 'Só neste aparelho',
+          accountId: dst.accounts.all.first.id,
+        ),
+      );
+      await dst.settings.update((s) => s.copyWith(mode: AppMode.ultra));
+      final json = BackupService.exportJson(src);
+      final before = _state(dst);
+
+      flaky.failNext = true;
+      await expectLater(
+        BackupService.importJson(dst, json),
+        throwsA(isA<StateError>()),
+      );
+
+      expect(_state(dst), before);
+      expect(dst.transactions.byId('local'), isNotNull);
+      expect(dst.settings.value.mode, AppMode.ultra);
+    });
+  }
 }

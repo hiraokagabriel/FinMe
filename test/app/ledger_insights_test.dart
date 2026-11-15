@@ -4,8 +4,10 @@ import 'package:finme/app/seed.dart';
 import 'package:finme/core/models/year_month.dart';
 import 'package:finme/core/services/record_store.dart';
 import 'package:finme/core/theme/app_palettes.dart';
+import 'package:finme/features/accounts/domain/account.dart';
 import 'package:finme/features/cards/domain/payment_card.dart';
 import 'package:finme/features/forecast/domain/forecast.dart';
+import 'package:finme/features/transactions/domain/transaction.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 DateTime _now() => DateTime(2026, 11, 14);
@@ -84,5 +86,56 @@ void main() {
     expect(list.length, 12);
     expect(list.first.month, const YearMonth(2026, 12));
     expect(list.last.month, const YearMonth(2027, 11));
+  });
+
+  test('invoiceTimeline cobre 60 dias com forecastMonths 3 em 31/01', () async {
+    final s31 = await bootstrap(
+      storeFactory: (_) => MemoryRecordStore(),
+      clock: () => DateTime(2027, 1, 31),
+    );
+    await s31.settings.update((x) => x.copyWith(forecastMonths: 3));
+    await s31.accounts.upsert(
+      const Account(
+        id: 'acc_a',
+        name: 'Conta',
+        bankName: 'Banco',
+        type: AccountType.checking,
+        initialBalanceCents: 100000,
+        colorValue: 0xFF000000,
+      ),
+    );
+    await s31.cards.upsert(
+      PaymentCard(
+        id: 'card_x',
+        name: 'X',
+        bankName: 'Banco',
+        brand: CardBrand.visa,
+        kind: CardKind.credit,
+        last4: '0001',
+        closingDay: 25,
+        dueDay: 1,
+        colorValue: kEntityColors[0],
+        paymentAccountId: 'acc_a',
+      ),
+    );
+    await s31.transactions.upsert(
+      Transaction(
+        id: 'compra',
+        type: TransactionType.expense,
+        amountCents: 4000,
+        date: DateTime(2027, 3, 10),
+        description: 'Compra',
+        cardId: 'card_x',
+      ),
+    );
+
+    final ledger = s31.ledger;
+    expect(ledger.forecast.months, hasLength(3));
+    final due = ledger.invoiceTimeline.singleWhere(
+      (d) => d.invoice.card.id == 'card_x',
+    );
+    expect(due.date, DateTime(2027, 4, 1));
+    expect(due.amountCents, 4000);
+    expect(due.accountBalanceAfterCents, 96000);
   });
 }

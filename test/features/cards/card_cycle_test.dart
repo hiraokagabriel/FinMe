@@ -174,30 +174,51 @@ void main() {
     });
   });
 
-  group('transição de ciclo', () {
+  group('transição de ciclo (SPEC §5.1)', () {
+    // Fecha 5/vence 12 até 30/11; fecha 25/vence 5 a partir de 01/12.
     final c = changedCard();
 
-    test('compra 20/11 → fatura 2026-12 vence 12/12/2026', () {
+    test('compra antes da 1ª fronteira usa o ciclo antigo', () {
+      final jun = invoiceOf(
+        InvoiceService.build(
+          card: c,
+          transactions: [
+            tx('j', TransactionType.expense, 1000, DateTime(2026, 6, 4)),
+          ],
+        ),
+        '2026-06',
+      );
+      expect(jun.dueDate, DateTime(2026, 6, 12));
+      expect(jun.closingDate, DateTime(2026, 6, 5));
+    });
+
+    test('compra 04/11 fica em nov e vence 12/11', () {
+      final nov = invoiceOf(
+        InvoiceService.build(
+          card: c,
+          transactions: [
+            tx('a', TransactionType.expense, 1000, DateTime(2026, 11, 4)),
+          ],
+        ),
+        '2026-11',
+      );
+      expect(nov.dueDate, DateTime(2026, 11, 12));
+      expect(nov.closingDate, DateTime(2026, 11, 5));
+    });
+
+    test('compras 20/11 e 02/12 viram 2027-01 (fecha 25/12, vence 05/01)', () {
       final invoices = InvoiceService.build(
         card: c,
         transactions: [
           tx('a', TransactionType.expense, 1000, DateTime(2026, 11, 20)),
-        ],
-      );
-      final dec = invoiceOf(invoices, '2026-12');
-      expect(dec.dueDate, DateTime(2026, 12, 12));
-      expect(dec.closingDate, DateTime(2026, 12, 5));
-    });
-
-    test('compra 02/12 → fatura 2027-01 vence 05/01/2027', () {
-      final invoices = InvoiceService.build(
-        card: c,
-        transactions: [
           tx('b', TransactionType.expense, 1000, DateTime(2026, 12, 2)),
         ],
       );
-      final jan = invoiceOf(invoices, '2027-01');
+      expect(invoices.map((i) => i.dueMonth.key), ['2027-01']);
+      final jan = invoices.single;
       expect(jan.dueDate, DateTime(2027, 1, 5));
+      expect(jan.closingDate, DateTime(2026, 12, 25));
+      expect(jan.items, hasLength(2));
     });
 
     test('pagamento de nov feito antes da mudança quita a fatura de nov', () {
@@ -220,90 +241,219 @@ void main() {
       expect(nov.statusOn(DateTime(2026, 11, 14)), InvoiceStatus.paid);
     });
 
-    test('parcelado 3x comprado 15/10/2026 cai em nov, dez e jan', () {
-      final installments = buildInstallments(
-        base: tx('p', TransactionType.expense, 9000, DateTime(2026, 10, 15)),
-        count: 3,
-        groupId: 'g',
-      );
+    test('parcelado 3x com 1ª em 15/10 cai em 2026-11, 2027-01 e 2027-02', () {
       final invoices = InvoiceService.build(
         card: c,
-        transactions: installments,
+        transactions: buildInstallments(
+          base: tx('p', TransactionType.expense, 9000, DateTime(2026, 10, 15)),
+          count: 3,
+          groupId: 'g',
+        ),
       );
       expect(invoices.map((i) => i.dueMonth.key), [
         '2026-11',
-        '2026-12',
         '2027-01',
+        '2027-02',
       ]);
       expect(invoiceOf(invoices, '2027-01').dueDate, DateTime(2027, 1, 5));
     });
 
-    test('purchaseDueDate(14/11/2026) com fecha 5/vence 12 → 12/12/2026', () {
+    test('purchaseDueDate(04/11/2026) segue o ciclo antigo → 12/11/2026', () {
+      expect(purchaseDueDate(DateTime(2026, 11, 4), c), DateTime(2026, 11, 12));
+    });
+  });
+
+  group('transição para fecha 20/vence 27 a partir de 15/11 (SPEC §5.1)', () {
+    final c = card().withCycleChange(
+      closingDay: 20,
+      dueDay: 27,
+      effectiveFrom: DateTime(2026, 11, 15),
+    );
+
+    test('compra 04/11 fica em nov (vence 12/11)', () {
+      final nov = invoiceOf(
+        InvoiceService.build(
+          card: c,
+          transactions: [
+            tx('a', TransactionType.expense, 1000, DateTime(2026, 11, 4)),
+          ],
+        ),
+        '2026-11',
+      );
+      expect(nov.dueDate, DateTime(2026, 11, 12));
+    });
+
+    test('compras 10/11 e 16/11 viram 2026-12 (fecha 20/12, vence 27/12)', () {
+      final invoices = InvoiceService.build(
+        card: c,
+        transactions: [
+          tx('a', TransactionType.expense, 1000, DateTime(2026, 11, 10)),
+          tx('b', TransactionType.expense, 1000, DateTime(2026, 11, 16)),
+        ],
+      );
+      expect(invoices.map((i) => i.dueMonth.key), ['2026-12']);
+      final dec = invoiceOf(invoices, '2026-12');
+      expect(dec.closingDate, DateTime(2026, 12, 20));
+      expect(dec.dueDate, DateTime(2026, 12, 27));
+    });
+
+    test(
+      'fatura 2026-12 com só um item do ciclo antigo tem as mesmas datas',
+      () {
+        final dec = invoiceOf(
+          InvoiceService.build(
+            card: c,
+            transactions: [
+              tx('a', TransactionType.expense, 1000, DateTime(2026, 11, 10)),
+            ],
+          ),
+          '2026-12',
+        );
+        expect(dec.closingDate, DateTime(2026, 12, 20));
+        expect(dec.dueDate, DateTime(2026, 12, 27));
+      },
+    );
+  });
+
+  group('transição para fecha 5/vence 12 a partir de 01/12 (SPEC §5.1)', () {
+    final c = card(closing: 25, due: 5).withCycleChange(
+      closingDay: 5,
+      dueDay: 12,
+      effectiveFrom: DateTime(2026, 12, 1),
+    );
+
+    test('compra 24/11 vai para 2026-12 (vence 05/12)', () {
+      final dec = invoiceOf(
+        InvoiceService.build(
+          card: c,
+          transactions: [
+            tx('a', TransactionType.expense, 1000, DateTime(2026, 11, 24)),
+          ],
+        ),
+        '2026-12',
+      );
+      expect(dec.dueDate, DateTime(2026, 12, 5));
+    });
+
+    test('compra 28/11 vai para 2027-01 (fecha 05/01, vence 12/01)', () {
+      final jan = invoiceOf(
+        InvoiceService.build(
+          card: c,
+          transactions: [
+            tx('a', TransactionType.expense, 1000, DateTime(2026, 11, 28)),
+          ],
+        ),
+        '2027-01',
+      );
+      expect(jan.closingDate, DateTime(2027, 1, 5));
+      expect(jan.dueDate, DateTime(2027, 1, 12));
+    });
+
+    test(
+      'dois descartes seguidos na fronteira: compra 06/12 vai para 2027-02',
+      () {
+        // Fecha 5/vence 3 até 20/12; fecha 25/vence 28 a partir de 20/12.
+        // Fechamentos 25/12 e 25/01 repetem vencimento já usado → descartados.
+        final odd = card(closing: 5, due: 3).withCycleChange(
+          closingDay: 25,
+          dueDay: 28,
+          effectiveFrom: DateTime(2026, 12, 20),
+        );
+        final invoices = InvoiceService.build(
+          card: odd,
+          transactions: [
+            tx('a', TransactionType.expense, 1000, DateTime(2026, 12, 6)),
+          ],
+        );
+        expect(invoices.map((i) => i.dueMonth.key), ['2027-02']);
+        expect(invoices.single.dueDate, DateTime(2027, 2, 28));
+        expect(
+          installmentDueMonth(DateTime(2026, 12, 6), 2, odd),
+          const YearMonth(2027, 3),
+        );
+      },
+    );
+  });
+
+  group('purchaseDueDate e vencimento da fatura', () {
+    final cards = {
+      'sem mudança': card(),
+      'fecha 25/vence 5 → 5/12': card(closing: 25, due: 5).withCycleChange(
+        closingDay: 5,
+        dueDay: 12,
+        effectiveFrom: DateTime(2026, 12, 1),
+      ),
+      'fecha 5/vence 12 → 20/27': card().withCycleChange(
+        closingDay: 20,
+        dueDay: 27,
+        effectiveFrom: DateTime(2026, 11, 15),
+      ),
+      'duas mudanças': card(closing: 25, due: 5)
+          .withCycleChange(
+            closingDay: 5,
+            dueDay: 12,
+            effectiveFrom: DateTime(2026, 12, 1),
+          )
+          .withCycleChange(
+            closingDay: 10,
+            dueDay: 20,
+            effectiveFrom: DateTime(2027, 2, 1),
+          ),
+    };
+
+    for (final entry in cards.entries) {
+      test('${entry.key}: vencimento da compra = vencimento da fatura', () {
+        final c = entry.value;
+        final purchases = [
+          for (var i = 0; i < 200; i += 3)
+            tx('t$i', TransactionType.expense, 100, DateTime(2026, 10, 1 + i)),
+        ];
+        final invoices = InvoiceService.build(card: c, transactions: purchases);
+        for (final p in purchases) {
+          final owner = invoices.firstWhere(
+            (inv) => inv.items.any((item) => item.id == p.id),
+          );
+          expect(purchaseDueDate(p.date, c), owner.dueDate, reason: p.id);
+        }
+      });
+    }
+
+    test('duas mudanças seguidas: dueMonth crescente, sem duplicata', () {
+      final c = changedCard().withCycleChange(
+        closingDay: 10,
+        dueDay: 20,
+        effectiveFrom: DateTime(2027, 2, 1),
+      );
+      final invoices = InvoiceService.build(
+        card: c,
+        transactions: [
+          for (var i = 0; i < 300; i += 2)
+            tx('t$i', TransactionType.expense, 100, DateTime(2026, 9, 1 + i)),
+        ],
+      );
+      for (var i = 1; i < invoices.length; i++) {
+        expect(invoices[i].dueMonth > invoices[i - 1].dueMonth, isTrue);
+      }
       expect(
-        purchaseDueDate(DateTime(2026, 11, 14), card()),
-        DateTime(2026, 12, 12),
+        invoices.map((i) => i.dueMonth).toSet(),
+        hasLength(invoices.length),
       );
     });
   });
 
-  group('fatura fundida (regressão)', () {
-    // Fecha 5/vence 12 até 30/11; fecha 10/vence 20 a partir de 01/12. Ambas caem em dez/2026.
-    final c = card().withCycleChange(
-      closingDay: 10,
-      dueDay: 20,
-      effectiveFrom: DateTime(2026, 12, 1),
-    );
-    final oldPurchase = tx(
-      'old',
-      TransactionType.expense,
-      1000,
-      DateTime(2026, 11, 20),
-    );
-    final newPurchase = tx(
-      'new',
-      TransactionType.expense,
-      2000,
-      DateTime(2026, 12, 2),
-    );
-
-    test(
-      'só com a compra do ciclo antigo: fatura vence 12/12, fecha 05/12',
-      () {
-        final dec = invoiceOf(
-          InvoiceService.build(card: c, transactions: [oldPurchase]),
-          '2026-12',
-        );
-        expect(dec.dueDate, DateTime(2026, 12, 12));
-        expect(dec.closingDate, DateTime(2026, 12, 5));
-      },
-    );
-
-    test(
-      'entra a 1ª compra do ciclo novo: fatura fundida passa a vencer 20/12, fecha 10/12',
-      () {
-        final invoices = InvoiceService.build(
-          card: c,
-          transactions: [oldPurchase, newPurchase],
-        );
-        expect(invoices, hasLength(1));
-        expect(invoices.single.items, hasLength(2));
-        expect(invoices.single.dueDate, DateTime(2026, 12, 20));
-        expect(invoices.single.closingDate, DateTime(2026, 12, 10));
-      },
-    );
-
-    test(
-      'purchaseDueDate segue o ciclo da compra, não o da fatura fundida',
-      () {
-        expect(
-          purchaseDueDate(DateTime(2026, 11, 20), c),
-          DateTime(2026, 12, 12),
-        );
-        expect(
-          purchaseDueDate(DateTime(2026, 12, 2), c),
-          DateTime(2026, 12, 20),
-        );
-      },
-    );
+  group('installmentDueMonth', () {
+    test('sem histórico: igual a invoiceDueMonth(d1) + (i - 1) meses', () {
+      for (final c in [card(), card(closing: 25, due: 5)]) {
+        for (final d1 in [DateTime(2026, 11, 4), DateTime(2027, 1, 31)]) {
+          for (var i = 1; i <= 12; i++) {
+            expect(
+              installmentDueMonth(d1, i, c),
+              invoiceDueMonth(d1, c).addMonths(i - 1),
+              reason: '$d1 parcela $i',
+            );
+          }
+        }
+      }
+    });
   });
 }

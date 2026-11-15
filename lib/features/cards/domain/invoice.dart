@@ -98,7 +98,7 @@ class InvoiceService {
       if (groupId != null && index != null) {
         month = firstDate == null
             ? invoiceDueMonth(t.date, card)
-            : invoiceDueMonth(firstDate, card).addMonths(index - 1);
+            : installmentDueMonth(firstDate, index, card);
       } else {
         month = invoiceDueMonth(t.date, card);
       }

@@ -130,6 +130,15 @@ class CollectionRepository<T> extends ChangeNotifier {
   Future<void> replaceAll(Iterable<T> items);  // import de backup
 }
 ```
+**Import de backup tudo-ou-nada (Fase 6, T-040).** Hive não tem transação entre boxes; o import usa compensação:
+1. Valida e converte tudo antes de gravar (`_parse`); erro → `FormatException`, nada muda (já era assim).
+2. Tira um retrato do estado atual: `all` de cada repositório (listas imutáveis) e `settings.value`.
+3. Grava coleções, configurações e roda `materializeRecurring` dentro de `try`.
+4. Qualquer exceção → restaura cada repositório com `replaceAll(retrato)` e `settings.update((_) => retrato)`,
+   cada restauração no seu próprio `try` (uma falha não impede as outras), e relança o erro original (`Error.throwWithStackTrace`).
+Memória e disco voltam ao estado anterior. Limite: se o próprio disco falhar também na restauração, o estado pode ficar
+parcial; o erro original sobe para a UI ("Erro ao importar").
+
 Boxes Hive (nomes novos, ignoram dados antigos): `fm_accounts`, `fm_cards`, `fm_categories`, `fm_transactions`, `fm_recurring`, `fm_settings`.
 
 ### 3.6 Configurações
@@ -155,7 +164,16 @@ class SettingsController extends ChangeNotifier {
 
 ## 4. Entidades de domínio
 
-Todas imutáveis, com `copyWith`, `toMap`, `factory fromMap`. Enums serializados por `name`;
+Todas imutáveis, com `copyWith`, `toMap`, `factory fromMap`.
+**`copyWith` e campos anuláveis (Fase 6, T-042/T-043):** todo parâmetro de campo anulável usa sentinela privada
+`const Object _keep = Object();` por arquivo, com assinatura `Object? campo = _keep`. Omitido → mantém;
+`campo: null` → limpa; valor → troca (`campo == _keep ? this.campo : campo as Tipo?`). Campos não anuláveis seguem `Tipo? campo` + `??`.
+Nenhuma chamada existente passa `null` explícito, então o comportamento atual não muda. Vale para `PaymentCard.paymentAccountId`,
+`TransactionCategory.monthlyBudgetCents`, os 10 anuláveis de `Transaction` (`categoryId`, `accountId`, `cardId`, `toAccountId`,
+`invoiceKey`, `installmentGroupId`, `installmentIndex`, `installmentCount`, `recurringId`, `notes`) e `RecurringRule`
+(`categoryId`, `accountId`, `cardId`, `endDate`, `materializedUntil`). `Account` e `AppSettings` não têm anuláveis.
+Os formulários continuam recriando pelo construtor (sem mudança obrigatória).
+Enums serializados por `name`;
 datas por `dateKey` (`"20261114"`); campos opcionais ausentes no mapa → `null`/padrão.
 `fromMap` tolera enum desconhecido usando o primeiro valor.
 
@@ -267,16 +285,55 @@ Fecha 25, vence 5. Compra 24/11 → vence 05/12. Compra 25/11 → vence 05/01.
 Assinaturas finais:
 ```dart
 YearMonth invoiceDueMonth(DateTime purchase, PaymentCard card);
-  // c = card.cycleOn(purchase); mesma regra acima com c.closingDay / c.dueDay
+  // sem histórico: regra acima. Com histórico: linha de fechamentos (abaixo, Fase 6)
 DateTime invoiceClosingDate(YearMonth dueMonth, PaymentCard card, {DateTime? cycleDate});
 DateTime invoiceDueDate(YearMonth dueMonth, PaymentCard card, {DateTime? cycleDate});
-  // c = card.cycleOn(cycleDate ?? dueMonth.firstDay); mesma regra acima com c
+  // com histórico: datas do fechamento do mês (regra 7 abaixo); fallback c = card.cycleOn(cycleDate ?? dueMonth.firstDay)
 DateTime purchaseDueDate(DateTime purchase, PaymentCard card);
-  // invoiceDueDate(invoiceDueMonth(purchase, card), card, cycleDate: purchase)
+  // vencimento do fechamento que recebe a compra (regra 8 abaixo)
 ```
 Sem histórico, `cycleOn` devolve sempre o ciclo atual → comportamento idêntico ao anterior (testes de T-006 passam sem mudança).
-Transição: duas faturas que caem no mesmo `dueMonth` (ciclo antigo + novo) **se fundem** numa só (id e `invoiceKey` estáveis).
-Na fatura fundida, as datas vêm do ciclo do item mais recente (`_toInvoice`): a 1ª compra do ciclo novo muda vencimento e fechamento. `purchaseDueDate` usa o ciclo da própria compra, então pode divergir do vencimento final da fatura fundida.
+
+**Linha de fechamentos e fatura de transição (Fase 6, T-044 — substitui a fusão de faturas).**
+Com `cycleHistory` não vazio, a fatura é o período entre dois fechamentos consecutivos, como no banco.
+A data efetiva (`until`) de uma mudança significa "o primeiro fechamento no dia novo é o primeiro em ou após esta data".
+1. **Segmentos.** `cycleHistory[i]` vale em `[cycleHistory[i-1].until, cycleHistory[i].until)` (o 1º, desde sempre);
+   o ciclo atual (`closingDay`/`dueDay`) vale em `[último until, ∞)`.
+2. **Fechamentos de um segmento** `(cl, du)`: para cada mês `m`, `C = m.dateAt(cl)`, mantido se `from <= C < until`.
+   Vencimento de `C`: `dueMonth = du > cl ? YearMonth.fromDate(C) : YearMonth.fromDate(C).next()`, `dueDate = dueMonth.dateAt(du)`.
+3. **Sequência.** Fechamentos de todos os segmentos em ordem crescente de data. **Descarta** o fechamento cujo
+   `dueMonth` seja `<=` o `dueMonth` do último fechamento mantido. Assim cada `dueMonth` tem no máximo um fechamento:
+   não existe fusão. A fatura de transição só fica com um período mais longo.
+4. **Compra/estorno** com data `d` → primeiro fechamento mantido `C` com `d < C` (compra no dia do fechamento vai para o próximo).
+   `invoiceDueMonth(d, card)` = `dueMonth` de `C`.
+5. **Fatura de transição** = a do primeiro fechamento mantido do segmento novo. Período: do último fechamento antigo
+   (exclusivo) até esse fechamento (exclusivo, pela regra 4). Os itens dela têm todos o mesmo vencimento.
+6. **Parcelas.** Parcela `i` de um grupo cuja 1ª parcela tem data `d1` → o fechamento mantido `i - 1` posições depois
+   do fechamento de `d1`. Sem histórico, equivale a `invoiceDueMonth(d1, card).addMonths(i - 1)`.
+7. **Datas da fatura.** `invoiceClosingDate`/`invoiceDueDate(M, card, {cycleDate})`: se existe fechamento mantido com
+   `dueMonth == M` → sua data / seu vencimento (independem dos itens). Senão (mês sem fechamento, ex.: fatura só com
+   pagamento antigo) → regra anterior com `card.cycleOn(cycleDate ?? M.firstDay)`.
+8. `purchaseDueDate(d, card)` = vencimento do fechamento da regra 4 → sempre igual ao `dueDate` da fatura que recebe a compra.
+9. **Atalho:** histórico vazio → fórmulas originais (sem gerar sequência).
+10. **Janela de cálculo:** gere fechamentos de `min(mês(d), mês(cycleHistory.first.until)).addMonths(-1)` até
+    `mês(d).addMonths(n + 2)` (`n` = parcelas à frente; 0 para compra simples). A janela começa antes da primeira
+    fronteira, então contém todas as fronteiras anteriores a `d`; dentro de um segmento os `dueMonth` só crescem, logo o
+    descarte dá o mesmo resultado que a sequência completa.
+
+Exemplos (todas as datas de 2026, salvo indicação):
+- Fecha 5/vence 12 → fecha 25/vence 5 a partir de 01/12. Fechamentos: …05/11 (nov), 25/12 (jan/2027), 25/01/2027 (fev).
+  Compra 04/11 → `2026-11`, vence 12/11. Compras 20/11 e 02/12 → `2027-01`, vence 05/01/2027 (fatura de transição 05/11–25/12).
+  Não existe fatura `2026-12`. Parcelado 3x com 1ª em 15/10 → `2026-11`, `2027-01`, `2027-02`.
+  Pagamento com `invoiceKey` `2026-11` continua quitando nov.
+- Fecha 5/vence 12 → fecha 20/vence 27 a partir de 15/11. Fechamento 20/11 venceria em nov (= nov do 05/11) → descartado.
+  Compras 04/11 → nov (12/11). Compras 10/11 e 16/11 → `2026-12`, fecha 20/12, vence 27/12 (transição 05/11–20/12).
+  `invoiceDueDate(2026-12)` = 27/12 com ou sem itens.
+- Fecha 25/vence 5 → fecha 5/vence 12 a partir de 01/12. 25/11 → dez (05/12). 05/12 venceria em dez → descartado.
+  Compra 24/11 → `2026-12` (05/12). Compra 28/11 → `2027-01`, fecha 05/01/2027, vence 12/01/2027.
+
+Limite conhecido: pagamento antigo com `invoiceKey` de um mês que deixou de ter fechamento vira fatura só de pagamento
+(`remaining == 0`, status `paid`) e não abate a fatura de transição. Aceitável: a mudança de ciclo é da Fase 5 e não havia
+dados reais com a regra de fusão.
 
 ### 5.2 Fatura — `features/cards/domain/invoice.dart`
 ```dart
@@ -304,9 +361,12 @@ class InvoiceService {
 }
 ```
 Só cartões `credit` têm faturas.
-Datas da fatura com histórico de ciclo: `closingDate`/`dueDate` usam `cycleDate` = maior `t.date` entre os `items`
-(data própria do item, inclusive parcelas); fatura sem itens (só pagamento) usa `dueMonth.firstDay`.
-O mês das parcelas continua `invoiceDueMonth(dataDa1ª, card).addMonths(index - 1)`.
+Datas da fatura com histórico de ciclo (Fase 6): `closingDate`/`dueDate` = `invoiceClosingDate`/`invoiceDueDate(dueMonth, card, cycleDate: …)`
+pela regra 7 do §5.1. `cycleDate` (maior `t.date` dos itens; sem itens, `dueMonth.firstDay`) só é usado quando o mês não tem fechamento.
+Mês das parcelas: `installmentDueMonth(dataDa1ª, index, card)` (§5.1 regra 6), exposto em `invoice_cycle.dart`:
+```dart
+YearMonth installmentDueMonth(DateTime firstDate, int index, PaymentCard card); // index 1-based
+```
 
 ### 5.3 Parcelas — `features/transactions/domain/installments.dart`
 ```dart
@@ -383,12 +443,15 @@ class ForecastService {
     required List<Account> accounts, required List<PaymentCard> cards,
     required List<Transaction> transactions, required List<RecurringRule> recurring,
     required DateTime today, int months = 6,
+    int minDays = 0, // Fase 6 (T-041): horizonte cobre pelo menos today + minDays
   });
 }
 ```
 Algoritmo:
 1. `currentBalances` = `accountBalances(...)` (contas não arquivadas); `currentTotal` = soma.
-2. Horizonte: `today` até `YearMonth.fromDate(today).addMonths(months - 1).lastDay`.
+2. Horizonte: `today` até `end` = o mais tarde entre `YearMonth.fromDate(today).addMonths(months - 1).lastDay` e
+   `DateTime(today.year, today.month, today.day + minDays)`. `months` continua com exatamente `months` entradas
+   (eventos após o último mês entram em `events`/`daily`, mas não em `months`). `minDays = 0` → comportamento anterior.
 3. Eventos:
    - Transações `planned` de conta (income/expense/transfer, inclusive débito) com data ≤ fim. Atrasadas (data < today) entram **em today**. `isBoleto` → kind `boleto`.
    - Recorrências: `occurrenceTransactions(r, today, fim, idsExistentes, forProjection: true)`. De conta → evento (`isProjected: true`). De cartão de crédito → vão para `projected` da fatura.
@@ -467,7 +530,8 @@ Algoritmo (uma passada, O(eventos)):
    com `accountBalanceAfterCents = saldo[accountId]`. Para ao passar de `limit`.
 3. Evento cujo `sourceId` não está em `invoices` é ignorado. Saída na ordem dos eventos.
 Duas faturas no mesmo dia na mesma conta têm o mesmo saldo-após (fim do dia).
-O horizonte da previsão é ≥ 3 meses (`forecastMonths` mín. 3) → sempre cobre 60 dias.
+`forecastMonths = 3` com hoje em 31/01 dá horizonte até 31/03 (59 dias): por isso o Ledger chama a previsão com
+`minDays: Ledger.invoiceTimelineDays` (60), garantindo que o limite inclusivo `today + 60` esteja no horizonte (Fase 6, T-041).
 
 ## 6. Camada de app
 
@@ -499,7 +563,8 @@ class Ledger extends ChangeNotifier {
   List<Invoice> invoicesFor(String cardId);   // inclui projeção de recorrências
   int usedLimitFor(String cardId);
   Invoice? currentInvoiceFor(String cardId);
-  Forecast get forecast;                      // horizonte = settings.forecastMonths
+  static const int invoiceTimelineDays = 60;
+  Forecast get forecast;                      // months: settings.forecastMonths, minDays: invoiceTimelineDays
   Map<String?, int> spendingFor(YearMonth m);
   List<Transaction> upcoming({int days = 30}); // planned + ocorrências projetadas no período, ordenado
   // Fase 5 (memoizados como os demais):
