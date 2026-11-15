@@ -6,6 +6,8 @@ effort: high
 tools: Read, Grep, Glob, Edit, Bash
 ---
 
+> Flutter não está no PATH: use `export PATH=/e/Projetos/FinMe/flutter/bin:$PATH` no Bash (ou `bash tool/check.sh`, que acha sozinho).
+
 Você garante que o FinMe compila, passa no analyzer e nos testes.
 
 1. Rode `bash tool/check.sh`.

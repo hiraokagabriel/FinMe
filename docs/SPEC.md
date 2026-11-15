@@ -207,6 +207,7 @@ class Transaction {
 }
 ```
 Regras:
+- Construtor normaliza `date` com `dateOnly` (não é `const`). Idem `RecurringRule.startDate/endDate`.
 - `expense`/`income`: exatamente um de `accountId` ou `cardId`.
 - Lançamento em **cartão de crédito** compõe fatura; `status` é irrelevante (sempre tratado como lançado). `income` em cartão = estorno (abate a fatura).
 - Lançamento em **cartão de débito** afeta a conta `card.paymentAccountId`.
@@ -221,7 +222,8 @@ class RecurringRule {
   id, description, TransactionType type (expense|income), int amountCents,
   String? categoryId, String? accountId, String? cardId,
   Frequency frequency, DateTime startDate, DateTime? endDate,
-  bool isSubscription, bool isBoleto, bool active
+  bool isSubscription, bool isBoleto, bool active,
+  DateTime? materializedUntil   // última data já materializada no boot (evita ressuscitar ocorrência apagada)
 }
 ```
 
@@ -291,8 +293,8 @@ List<Transaction> occurrenceTransactions(
   // pula ids em existingIds. r.active == false → [].
   // status: cardId != null → paid; accountId: forProjection ? planned : planned.
 ```
-No boot (`bootstrap.dart`): materializa ocorrências de `startDate` até hoje (`forProjection: false`)
-e grava. Ocorrências futuras **não** são gravadas: entram na previsão via projeção.
+No boot (`bootstrap.dart`): materializa ocorrências de `max(startDate, materializedUntil + 1 dia)` até hoje
+(`forProjection: false`), grava, e atualiza `materializedUntil = hoje` na regra. Ocorrências futuras **não** são gravadas: entram na previsão via projeção.
 
 ### 5.5 Saldos — `features/accounts/domain/balances.dart`
 ```dart

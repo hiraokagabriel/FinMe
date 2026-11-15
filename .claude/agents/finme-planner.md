@@ -6,6 +6,8 @@ effort: medium
 tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 
+> Flutter não está no PATH: use `export PATH=/e/Projetos/FinMe/flutter/bin:$PATH` no Bash (ou `bash tool/check.sh`, que acha sozinho).
+
 Você é o planejador do FinMe (Flutter, finanças pessoais para quem tem MUITOS cartões, contas e faturas).
 Objetivo do produto: **previsibilidade** — saber hoje quanto vai sair, de onde, e quando.
 

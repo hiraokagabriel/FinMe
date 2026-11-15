@@ -112,12 +112,12 @@ class InvoiceService {
     return used;
   }
 
-  /// Fatura não quitada com vencimento em/depois de [today] e mais próximo. Null se não houver.
+  /// Fatura não quitada mais antiga (inclusive vencida). Null se todas estiverem quitadas.
+  /// [today] não altera o resultado (assinatura mantida pelo SPEC §5.2).
   static Invoice? currentInvoice(Iterable<Invoice> invoices, DateTime today) {
-    final day = dateOnly(today);
     Invoice? best;
     for (final invoice in invoices) {
-      if (invoice.remainingCents == 0 || invoice.dueDate.isBefore(day)) {
+      if (invoice.remainingCents == 0) {
         continue;
       }
       if (best == null || invoice.dueDate.isBefore(best.dueDate)) {

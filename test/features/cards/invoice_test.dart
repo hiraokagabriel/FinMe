@@ -333,7 +333,7 @@ void main() {
       );
     });
 
-    test('currentInvoice: primeira não quitada com vencimento >= hoje', () {
+    test('currentInvoice: fatura não paga mais antiga, inclusive vencida', () {
       final invoices = InvoiceService.build(
         card: card,
         transactions: [
@@ -342,17 +342,65 @@ void main() {
           tx('j', TransactionType.expense, 3000, DateTime(2027, 1, 4)),
         ],
       );
-      // Nov vencida (12/11) não conta; Dez vence 12/12.
+      // Nov vencida (12/11) e não paga: é a atual.
       expect(
         InvoiceService.currentInvoice(
           invoices,
           DateTime(2026, 11, 14),
         )?.dueMonth,
+        const YearMonth(2026, 11),
+      );
+      // Mesmo após todos os vencimentos, a mais antiga não paga continua sendo Nov.
+      expect(
+        InvoiceService.currentInvoice(invoices, DateTime(2027, 3, 1))?.dueMonth,
+        const YearMonth(2026, 11),
+      );
+    });
+
+    test('currentInvoice: pula quitadas e é null se todas quitadas', () {
+      final purchases = [
+        tx('n', TransactionType.expense, 1000, DateTime(2026, 11, 4)),
+        tx('d', TransactionType.expense, 2000, DateTime(2026, 12, 4)),
+        tx('j', TransactionType.expense, 3000, DateTime(2027, 1, 4)),
+      ];
+      final payNov = tx(
+        'pagN',
+        TransactionType.invoicePayment,
+        1000,
+        DateTime(2026, 11, 13),
+        invoiceKey: '2026-11',
+      );
+      final payDec = tx(
+        'pagD',
+        TransactionType.invoicePayment,
+        2000,
+        DateTime(2026, 12, 13),
+        invoiceKey: '2026-12',
+      );
+      final payJan = tx(
+        'pagJ',
+        TransactionType.invoicePayment,
+        3000,
+        DateTime(2027, 1, 13),
+        invoiceKey: '2027-01',
+      );
+      final partial = InvoiceService.build(
+        card: card,
+        transactions: [...purchases, payNov],
+      );
+      expect(
+        InvoiceService.currentInvoice(
+          partial,
+          DateTime(2026, 11, 14),
+        )?.dueMonth,
         const YearMonth(2026, 12),
       );
-      // Depois de todos os vencimentos não há fatura atual.
+      final allPaid = InvoiceService.build(
+        card: card,
+        transactions: [...purchases, payNov, payDec, payJan],
+      );
       expect(
-        InvoiceService.currentInvoice(invoices, DateTime(2027, 3, 1)),
+        InvoiceService.currentInvoice(allPaid, DateTime(2026, 11, 14)),
         isNull,
       );
     });
