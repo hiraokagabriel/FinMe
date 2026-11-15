@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'app_colors.dart';
 import 'app_spacing.dart';
+import 'app_text.dart';
 
 abstract final class AppTheme {
   static ThemeData light() => _build(AppColors.light, Brightness.light);
@@ -21,7 +22,17 @@ abstract final class AppTheme {
       colorScheme: scheme,
       visualDensity: VisualDensity.compact,
       scaffoldBackgroundColor: c.background,
+      fontFamily: AppFonts.sans,
       extensions: [c],
+      tooltipTheme: TooltipThemeData(
+        decoration: BoxDecoration(
+          color: c.surface,
+          border: Border.all(color: c.border),
+          borderRadius: AppRadius.chipBorder,
+        ),
+        textStyle: TextStyle(fontSize: 12, color: c.textPrimary),
+        waitDuration: const Duration(milliseconds: 300),
+      ),
       cardTheme: CardThemeData(
         elevation: 0,
         color: c.surface,
@@ -37,6 +48,7 @@ abstract final class AppTheme {
       dividerTheme: DividerThemeData(color: c.border, thickness: 1, space: 1),
       textTheme: TextTheme(
         titleLarge: TextStyle(
+          fontFamily: AppFonts.serif,
           fontSize: 20,
           fontWeight: FontWeight.w600,
           color: c.textPrimary,

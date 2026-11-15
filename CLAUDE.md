@@ -20,8 +20,7 @@ Ao editar o código, priorize clareza de domínio (termos como cartão, fatura, 
 
 - **Framework:** Flutter
 - **Linguagem:** Dart
-- **Plataformas alvo atuais:** Windows (desktop) e Android (mobile)
-- **Plataformas futuras:** iOS / iPadOS / macOS (sem implementação obrigatória por enquanto)
+- **Plataforma alvo:** só Windows (desktop). Outras plataformas foram removidas do projeto (`docs/V3_DIRECTION.md`).
 
 ---
 
@@ -43,23 +42,10 @@ Assuma que os comandos são executados na raiz do repositório (onde está `pubs
   flutter run -d windows
   ```
 
-- Listar dispositivos disponíveis:
-
-  ```bash
-  flutter devices
-  ```
-
-- Rodar em Android (quando um dispositivo/emulador estiver disponível):
-
-  ```bash
-  flutter run -d <id_do_dispositivo>
-  ```
-
-- Build de release (exemplo, ajustar conforme necessário futuramente):
+- Build de release:
 
   ```bash
   flutter build windows
-  flutter build apk
   ```
 
 Ao sugerir comandos, mantenha esse fluxo básico, evitando setups muito complexos a menos que o repositório seja atualizado com scripts específicos.
@@ -72,15 +58,15 @@ Esta seção define a identidade visual do FinMe. **Toda adição de UI deve seg
 
 ### Personalidade visual
 
-O FinMe é um app **desktop-first de alta densidade de dados**. O visual é **clean, funcional e confiável** — próximo de ferramentas como Linear ou apps de gestão financeira profissional. Sem gradientes decorativos, sem sombras excessivas, sem elementos puramente ornamentais.
+O FinMe é um app **desktop de alta densidade de dados**. O tom é **sóbrio, entre sério e wabi-sabi**: neutros quentes de papel e pedra, tipografia cuidada, poucos acentos de cor, nada que pareça enfeite. Funcional e confiável como uma ferramenta profissional de gestão financeira. Sem gradientes decorativos, sem sombras excessivas, sem elementos puramente ornamentais, sem estética genérica de "template de IA". Microanimações discretas (150–200 ms) são bem-vindas quando informam mudança de estado.
 
 ### Paleta — Modo Claro
 
 | Categoria | Token sugerido | Hex | Uso |
 |---|---|---|---|
-| Superfície | `colorBackground` | `#F5F7FA` | Fundo geral da janela |
+| Superfície | `colorBackground` | `#F6F5F2` | Fundo geral da janela (papel, neutro quente) |
 | Superfície | `colorSurface` | `#FFFFFF` | Fundo de cartão / widget |
-| Superfície | `colorSidebar` | `#E9EDF2` | Fundo da sidebar / navegação |
+| Superfície | `colorSidebar` | `#ECEAE5` | Fundo da sidebar / navegação (pedra clara) |
 | Marca | `colorPrimary` | `#42A5F5` | Ícones ativos, botões, barras de gráfico, links |
 | Marca | `colorPrimarySubtle` | `#D3EAFD` | Fundo do item de navegação ativo |
 | Conteúdo | `colorTextPrimary` | `#202124` | Títulos e textos densos |
@@ -93,9 +79,9 @@ O FinMe é um app **desktop-first de alta densidade de dados**. O visual é **cl
 
 | Categoria | Token sugerido | Hex | Uso |
 |---|---|---|---|
-| Superfície | `colorBackground` | `#121212` | Fundo geral — cinza-preto profundo, não preto puro |
-| Superfície | `colorSurface` | `#1E1E1E` | Fundo de cartão / widget |
-| Superfície | `colorSidebar` | `#2C2C2C` | Fundo da sidebar |
+| Superfície | `colorBackground` | `#161514` | Fundo geral — pedra escura quente, não preto puro |
+| Superfície | `colorSurface` | `#1F1E1C` | Fundo de cartão / widget |
+| Superfície | `colorSidebar` | `#2A2826` | Fundo da sidebar |
 | Marca | `colorPrimary` | `#81D4FA` | Azul mais claro e brilhante para contraste |
 | Marca | `colorPrimarySubtle` | `#1A2D40` | Azul-escuro saturado para item ativo |
 | Conteúdo | `colorTextPrimary` | `#E8EAED` | Títulos e textos — off-white suave |
@@ -106,14 +92,18 @@ O FinMe é um app **desktop-first de alta densidade de dados**. O visual é **cl
 
 ### Tipografia
 
-- **Fonte:** use a fonte padrão do sistema (`SystemChrome` / `defaultTextStyle`). Não adicione fontes externas sem necessidade explícita.
+- **Fontes embutidas** em `assets/fonts/` (licença OFL, arquivos `OFL-*.txt` junto), declaradas no `pubspec.yaml`. Sem pacote de fontes (nada de `google_fonts`).
+  - **IBM Plex Sans** (família `IBMPlexSans`, pesos 400/500/600): toda a interface. É a fonte padrão do `ThemeData`.
+  - **Source Serif 4** (família `SourceSerif4`, pesos 400/600): **só** títulos de tela e números de KPI. Consuma via `AppText.screenTitle(context)` / `AppText.kpi(context)` em `lib/core/theme/app_text.dart`; nunca escreva o nome da família em widget.
+  - **Algarismos tabulares** em todo valor monetário, coluna numérica e data de tabela: `FontFeature.tabularFigures()` (helper `AppText.tabular(style)`). `MoneyText` já aplica.
 - **Hierarquia de tamanhos (aproximado):**
-  - Título de tela: `18–20px`, `FontWeight.w600`
+  - Título de tela: `20px`, `FontWeight.w600`, Source Serif 4
+  - Número de KPI: `22px`, `FontWeight.w600`, Source Serif 4, tabular
   - Rótulo de seção / cabeçalho de widget: `14px`, `FontWeight.w600`, `colorTextPrimary`
   - Corpo / linha de tabela: `13–14px`, `FontWeight.w400`, `colorTextPrimary`
   - Informações de apoio (datas, categorias): `12px`, `FontWeight.w400`, `colorTextSecondary`
   - Badge / chip: `11px`, `FontWeight.w500`
-- **Regra geral:** não use mais de 3 tamanhos de fonte distintos em uma mesma tela.
+- **Regra geral:** não use mais de 3 tamanhos de fonte distintos em uma mesma tela (título de tela e KPI não contam).
 
 ### Espaçamento e bordas
 
@@ -145,7 +135,7 @@ As descrições abaixo servem como **referência de intenção visual** para ori
 - **Layout:** sidebar estreita à esquerda + painel principal dividido em widgets.
 - **Sidebar:** ícone de perfil no topo; botões de navegação (Dashboard, Cartões, Transações, Configurações); no rodapé, toggle proeminente com legenda "Modo: Ultra".
 - **Cabeçalho:** título "FinMe — Visão Geral", seletor de período rápido ("Este Mês", "15 dias", "Personalizado"), indicador de "Saldo Consolidado Disponível".
-- **Widget "Resumo de Faturas":** lista densa com logotipo pequeno do banco, nome do cartão, data de vencimento, valor atual da fatura e barra de progresso sutil do limite. Deve suportar 10+ linhas sem scroll interno.
+- **Widget "Resumo de Faturas":** lista densa com avatar do banco (cor derivada do nome + iniciais; nunca logotipo real), nome do cartão, data de vencimento, valor atual da fatura e barra de progresso sutil do limite. Deve suportar 10+ linhas sem scroll interno.
 - **Widget "Provisionamento de Boletos":** seção "Próximos Boletos a Vencer" com descrição, valor, data e ícone diferenciando boleto provisionado (futuro) de registrado (pago/efetivado).
 - **Widget "Visão por Categoria":** gráfico de barras horizontais simples com as categorias de maior gasto no período.
 
@@ -161,7 +151,7 @@ As descrições abaixo servem como **referência de intenção visual** para ori
 
 - **Estilo:** tabela de dados de alta densidade.
 - **Barra de ferramentas:** filtros por banco, cartão, categoria, tipo (Receita/Despesa/Boleto); campo de busca global; toggle "Mostrar Provisionados".
-- **Colunas da tabela:** Data, Descrição (com ícone de categoria), Banco/Cartão (com logotipo pequeno), Valor.
+- **Colunas da tabela:** Data, Descrição (com ícone de categoria), Banco/Cartão (com avatar do banco), Valor.
 - **Diferenciação visual de linhas:**
   - Transações passadas: cinza sutil.
   - Transações recentes: cor normal.
@@ -172,11 +162,11 @@ As descrições abaixo servem como **referência de intenção visual** para ori
 
 ## Estrutura de código (v2)
 
-Fontes da verdade: `docs/SPEC.md` (domínio e arquitetura) e `docs/BACKLOG.md` (tarefas). `CONTEXT.md` descreve o estado implementado.
+Fontes da verdade: `docs/V3_DIRECTION.md` (decisões de direção da v3; vence docs antigos em conflito), `docs/SPEC.md` (domínio e arquitetura) e `docs/BACKLOG.md` (tarefas). `CONTEXT.md` descreve o estado implementado.
 
 - `lib/main.dart`: `runApp(bootstrap)`.
-- `lib/app/`: `bootstrap.dart` (boxes `fm_*`, repositórios, seed, recorrências), `app.dart` (`FinMeApp`), `app_scope.dart` (`AppServices` + `AppScope`), `ledger.dart` (visões derivadas memoizadas), `home_shell.dart` (sidebar/drawer e páginas), `seed.dart` (dados fictícios).
-- `lib/core/`: `models/` (`YearMonth`, `AppSettings`), `services/` (`RecordStore`, `CollectionRepository`, `SettingsController`, `BackupService`), `theme/` (`AppColors`, `AppTheme`, `AppSpace`/`AppRadius`, paletas), `utils/` (formatters, date_utils, id), `widgets/` (widgets compartilhados).
+- `lib/app/`: `bootstrap.dart` (boxes `fm_*`, repositórios, seed, recorrências), `app.dart` (`FinMeApp`), `app_scope.dart` (`AppServices` + `AppScope`), `ledger.dart` (visões derivadas memoizadas), `home_shell.dart` (sidebar desktop e páginas), `seed.dart` (dados fictícios).
+- `lib/core/`: `models/` (`YearMonth`, `AppSettings`), `services/` (`RecordStore`, `CollectionRepository`, `SettingsController`, `BackupService`), `theme/` (`AppColors`, `AppTheme`, `AppText`, `AppSpace`/`AppRadius`/`AppMotion`, paletas), `utils/` (formatters, date_utils, id), `widgets/` (widgets compartilhados).
 - `lib/features/<f>/`: `accounts`, `cards`, `categories`, `transactions`, `recurring`, `forecast` com `domain/` e `presentation/`; `dashboard`, `settings` e `onboarding` só com `presentation/`.
 
 Ao adicionar código:
@@ -201,7 +191,7 @@ Ao adicionar código:
 - `copyWith` de entidade com campo anulável: parâmetro `Object? x = _keep` e `identical(x, _keep)` (SPEC §4). Omitido mantém, `null` limpa.
 - Worktree: novos worktrees saem de `origin/main` (v1 antiga). Rode `git reset --hard main` no branch novo antes de trabalhar.
 - Coders em paralelo: arquivos disjuntos por tarefa. O portão final roda depois que todos terminam (o `check.sh` formata a árvore inteira).
-- `pubspec.lock` e registrantes gerados de plugins (`linux/`, `macos/`, `windows/flutter/`) mudam com o `pub get`; não entram em commit de tarefa.
+- `pubspec.lock` e registrantes gerados de plugins (`windows/flutter/`) mudam com o `pub get`; não entram em commit de tarefa.
 
 ---
 

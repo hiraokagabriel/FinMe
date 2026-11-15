@@ -16,8 +16,9 @@ import '../features/transactions/presentation/transaction_form.dart';
 import '../features/transactions/presentation/transactions_page.dart';
 import 'app_scope.dart';
 
-const _wideBreakpoint = 900.0;
+const _collapseBreakpoint = 900.0;
 const _sidebarWidth = 220.0;
+const _railWidth = 64.0;
 
 const _navItems = <({String label, IconData icon})>[
   (label: 'Painel', icon: Icons.dashboard_outlined),
@@ -30,8 +31,8 @@ const _navItems = <({String label, IconData icon})>[
   (label: 'Ajustes', icon: Icons.settings_outlined),
 ];
 
-/// Casca do app: sidebar fixa em telas largas, `Drawer` em telas estreitas.
-/// Só a página ativa é construída.
+/// Casca do app: sidebar sempre visível, 220 px com rótulos ou 64 px só com ícones
+/// (abaixo de 900 px de largura). Só a página ativa é construída.
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
 
@@ -41,7 +42,6 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
-  final _scaffoldKey = GlobalKey<ScaffoldState>();
 
   @override
   Widget build(BuildContext context) {
@@ -50,42 +50,42 @@ class _HomeShellState extends State<HomeShell> {
       listenable: services.ledger,
       builder: (context, _) {
         final ultra = services.settings.value.mode == AppMode.ultra;
-        final wide = MediaQuery.sizeOf(context).width >= _wideBreakpoint;
-        final sidebar = _Sidebar(
-          index: _index,
-          badges: _badges(services, ultra),
-          ultra: ultra,
-          onSelect: (i) {
-            _scaffoldKey.currentState?.closeDrawer();
-            setState(() => _index = i);
-          },
-          onToggleMode: (on) => services.settings.update(
-            (s) => s.copyWith(mode: on ? AppMode.ultra : AppMode.simple),
-          ),
-        );
+        final collapsed =
+            MediaQuery.sizeOf(context).width < _collapseBreakpoint;
+        final width = collapsed ? _railWidth : _sidebarWidth;
         return Scaffold(
-          key: _scaffoldKey,
-          appBar: wide ? null : AppBar(title: Text(_navItems[_index].label)),
-          drawer: wide
-              ? null
-              : Drawer(
-                  backgroundColor: context.colors.sidebar,
-                  child: SafeArea(child: sidebar),
-                ),
-          body: wide
-              ? Row(
-                  children: [
-                    SizedBox(
-                      width: _sidebarWidth,
-                      child: ColoredBox(
-                        color: context.colors.sidebar,
-                        child: sidebar,
+          body: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              AnimatedContainer(
+                width: width,
+                duration: AppMotion.normal,
+                curve: AppMotion.curve,
+                color: context.colors.sidebar,
+                // Conteúdo já em largura final; o ClipRect corta enquanto a sidebar anima.
+                child: ClipRect(
+                  child: OverflowBox(
+                    alignment: Alignment.topLeft,
+                    minWidth: width,
+                    maxWidth: width,
+                    child: _Sidebar(
+                      index: _index,
+                      badges: _badges(services, ultra),
+                      ultra: ultra,
+                      collapsed: collapsed,
+                      onSelect: (i) => setState(() => _index = i),
+                      onToggleMode: (on) => services.settings.update(
+                        (s) => s.copyWith(
+                          mode: on ? AppMode.ultra : AppMode.simple,
+                        ),
                       ),
                     ),
-                    Expanded(child: _pageFor(_index)),
-                  ],
-                )
-              : _pageFor(_index),
+                  ),
+                ),
+              ),
+              Expanded(child: _pageFor(_index)),
+            ],
+          ),
           floatingActionButton: FloatingActionButton.extended(
             onPressed: () => showTransactionForm(context),
             icon: const Icon(Icons.add),
@@ -137,6 +137,7 @@ class _Sidebar extends StatelessWidget {
     required this.index,
     required this.badges,
     required this.ultra,
+    required this.collapsed,
     required this.onSelect,
     required this.onToggleMode,
   });
@@ -144,6 +145,7 @@ class _Sidebar extends StatelessWidget {
   final int index;
   final List<int> badges;
   final bool ultra;
+  final bool collapsed;
   final ValueChanged<int> onSelect;
   final ValueChanged<bool> onToggleMode;
 
@@ -155,7 +157,9 @@ class _Sidebar extends StatelessWidget {
       children: [
         Padding(
           padding: const EdgeInsets.all(AppSpace.lg),
-          child: Text('FinMe', style: textTheme.titleLarge),
+          child: collapsed
+              ? Center(child: Text('F', style: textTheme.titleLarge))
+              : Text('FinMe', style: textTheme.titleLarge),
         ),
         Expanded(
           child: ListView.builder(
@@ -165,21 +169,31 @@ class _Sidebar extends StatelessWidget {
               icon: _navItems[i].icon,
               selected: i == index,
               badge: badges[i],
+              collapsed: collapsed,
               onTap: () => onSelect(i),
             ),
           ),
         ),
         const Divider(height: 1),
-        SwitchListTile(
-          dense: true,
-          value: ultra,
-          onChanged: onToggleMode,
-          contentPadding: const EdgeInsets.symmetric(horizontal: AppSpace.lg),
-          title: Text(
-            ultra ? 'Modo: Ultra' : 'Modo: Simples',
-            style: textTheme.bodyMedium,
+        if (collapsed)
+          Center(
+            child: IconButton(
+              tooltip: ultra ? 'Modo: Ultra' : 'Modo: Simples',
+              icon: Icon(ultra ? Icons.bolt : Icons.bolt_outlined),
+              onPressed: () => onToggleMode(!ultra),
+            ),
+          )
+        else
+          SwitchListTile(
+            dense: true,
+            value: ultra,
+            onChanged: onToggleMode,
+            contentPadding: const EdgeInsets.symmetric(horizontal: AppSpace.lg),
+            title: Text(
+              ultra ? 'Modo: Ultra' : 'Modo: Simples',
+              style: textTheme.bodyMedium,
+            ),
           ),
-        ),
       ],
     );
   }
@@ -191,6 +205,7 @@ class _NavTile extends StatelessWidget {
     required this.icon,
     required this.selected,
     required this.badge,
+    required this.collapsed,
     required this.onTap,
   });
 
@@ -198,33 +213,43 @@ class _NavTile extends StatelessWidget {
   final IconData icon;
   final bool selected;
   final int badge;
+  final bool collapsed;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     final textTheme = Theme.of(context).textTheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: AppSpace.sm, vertical: 2),
-      child: InkWell(
-        borderRadius: AppRadius.cardBorder,
-        onTap: onTap,
-        child: Container(
-          decoration: BoxDecoration(
-            color: selected ? colors.primarySubtle : null,
-            borderRadius: AppRadius.cardBorder,
-          ),
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpace.md,
-            vertical: AppSpace.sm,
-          ),
-          child: Row(
+    final iconWidget = Icon(
+      icon,
+      size: 20,
+      color: selected ? colors.primary : colors.textSecondary,
+    );
+    final content = collapsed
+        ? Center(
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                iconWidget,
+                if (badge > 0)
+                  Positioned(
+                    top: 0,
+                    right: 0,
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: colors.danger,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          )
+        : Row(
             children: [
-              Icon(
-                icon,
-                size: 20,
-                color: selected ? colors.primary : colors.textSecondary,
-              ),
+              iconWidget,
               const SizedBox(width: AppSpace.md),
               Expanded(
                 child: Text(
@@ -236,9 +261,29 @@ class _NavTile extends StatelessWidget {
               ),
               if (badge > 0) _CountBadge(count: badge),
             ],
-          ),
+          );
+    Widget tile = InkWell(
+      borderRadius: AppRadius.cardBorder,
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: AppMotion.fast,
+        decoration: BoxDecoration(
+          color: selected ? colors.primarySubtle : null,
+          borderRadius: AppRadius.cardBorder,
         ),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpace.md,
+          vertical: AppSpace.sm,
+        ),
+        child: content,
       ),
+    );
+    if (collapsed) {
+      tile = Tooltip(message: label, child: tile);
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpace.sm, vertical: 2),
+      child: tile,
     );
   }
 }

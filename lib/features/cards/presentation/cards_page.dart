@@ -145,6 +145,10 @@ class _BankSection extends StatelessWidget {
         children: [
           Row(
             children: [
+              if (ultra) ...[
+                BankAvatar(bankName: bank == _noBank ? '' : bank, size: 20),
+                const SizedBox(width: AppSpace.sm),
+              ],
               Text(
                 bank,
                 style: TextStyle(

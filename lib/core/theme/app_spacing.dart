@@ -1,4 +1,5 @@
-import 'package:flutter/widgets.dart';
+import 'package:flutter/animation.dart';
+import 'package:flutter/painting.dart';
 
 abstract final class AppSpace {
   static const double xs = 4;
@@ -19,4 +20,11 @@ abstract final class AppRadius {
   static const BorderRadius chipBorder = BorderRadius.all(
     Radius.circular(chip),
   );
+}
+
+/// Durações e curva de microanimações. Toda animação do app usa estes valores.
+abstract final class AppMotion {
+  static const fast = Duration(milliseconds: 150);
+  static const normal = Duration(milliseconds: 200);
+  static const Curve curve = Curves.easeOutCubic;
 }

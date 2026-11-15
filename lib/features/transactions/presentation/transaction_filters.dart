@@ -65,6 +65,14 @@ class TransactionFilter {
     showPlanned: showPlanned ?? this.showPlanned,
   );
 
+  /// Algum critério ativo além do mês (usado para decidir "Limpar filtros").
+  bool get hasCriteria =>
+      origin != null ||
+      categoryId != null ||
+      kinds.isNotEmpty ||
+      query.trim().isNotEmpty ||
+      !showPlanned;
+
   bool matches(Transaction t) {
     if (!showPlanned && isProvisioned(t)) {
       return false;
@@ -115,6 +123,61 @@ List<Transaction> visibleTransactions(
   ];
   list.sort((a, b) => b.date.compareTo(a.date));
   return list;
+}
+
+enum TxSortColumn { date, description, origin, category, value }
+
+typedef TxSort = ({TxSortColumn column, bool ascending});
+
+const TxSort kDefaultTxSort = (column: TxSortColumn.date, ascending: false);
+
+/// Mesma coluna inverte a ordem; coluna nova começa em A→Z para texto e em data/valor decrescente.
+TxSort toggleTxSort(TxSort current, TxSortColumn column) {
+  if (current.column == column) {
+    return (column: column, ascending: !current.ascending);
+  }
+  final textual = switch (column) {
+    TxSortColumn.description ||
+    TxSortColumn.origin ||
+    TxSortColumn.category => true,
+    _ => false,
+  };
+  return (column: column, ascending: textual);
+}
+
+/// Nova lista ordenada pela coluna; empate desfeito por data desc e depois id asc.
+List<Transaction> sortTransactions(
+  List<Transaction> rows,
+  TxSort sort, {
+  required String Function(Transaction t) originName,
+  required String Function(Transaction t) categoryName,
+}) {
+  // shortcut: compara lowercase sem colação de acento ("Água" fica depois de "Z"); trocar se incomodar.
+  final keys = switch (sort.column) {
+    TxSortColumn.description => {
+      for (final t in rows) t.id: t.description.toLowerCase(),
+    },
+    TxSortColumn.origin => {
+      for (final t in rows) t.id: originName(t).toLowerCase(),
+    },
+    TxSortColumn.category => {
+      for (final t in rows) t.id: categoryName(t).toLowerCase(),
+    },
+    TxSortColumn.date || TxSortColumn.value => const <String, String>{},
+  };
+  int primary(Transaction a, Transaction b) => switch (sort.column) {
+    TxSortColumn.date => a.date.compareTo(b.date),
+    TxSortColumn.value => a.amountCents.compareTo(b.amountCents),
+    _ => keys[a.id]!.compareTo(keys[b.id]!),
+  };
+  return [...rows]..sort((a, b) {
+    final c = primary(a, b);
+    if (c != 0) {
+      return sort.ascending ? c : -c;
+    }
+    final byDate = b.date.compareTo(a.date);
+    return byDate != 0 ? byDate : a.id.compareTo(b.id);
+  });
 }
 
 typedef TxTotals = ({int expenses, int provisioned, int income});

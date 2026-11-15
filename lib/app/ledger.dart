@@ -8,6 +8,7 @@ import '../core/services/settings_controller.dart';
 import '../core/utils/date_utils.dart';
 import '../features/accounts/domain/account.dart';
 import '../features/accounts/domain/balances.dart' as balances;
+import '../features/accounts/domain/monthly_history.dart' as history;
 import '../features/cards/domain/card_insights.dart' as insights;
 import '../features/cards/domain/invoice.dart';
 import '../features/cards/domain/payment_card.dart';
@@ -74,6 +75,8 @@ class Ledger extends ChangeNotifier {
   List<insights.CardPurchaseOption>? _bestCards;
   List<insights.InstallmentCommitment>? _installments;
   List<PaymentCard>? _cardsNoAccount;
+  List<history.MonthSnapshot>? _history;
+  ({int current, int previous})? _expenseMtd;
 
   List<Listenable> get _sources => [
     accounts,
@@ -229,6 +232,31 @@ class Ledger extends ChangeNotifier {
     });
   }
 
+  /// Últimos 6 meses até hoje (SPEC §5.10). Alimenta sparklines e deltas do Painel Ultra.
+  List<history.MonthSnapshot> get monthlyHistory {
+    _ensureFresh();
+    return _history ??= history.monthlyHistory(
+      accounts: accounts.all,
+      cards: cards.all,
+      transactions: transactions.all,
+      today: today,
+      months: 6,
+    );
+  }
+
+  /// Gasto do mês até hoje e o mesmo período (até o mesmo dia) do mês anterior.
+  ({int current, int previous}) get expenseMonthToDate {
+    _ensureFresh();
+    return _expenseMtd ??= (
+      current: monthlyHistory.last.expenseCents,
+      previous: history.expenseUntilDay(
+        transactions.all,
+        YearMonth.fromDate(today).prev(),
+        today.day,
+      ),
+    );
+  }
+
   Map<String?, int> spendingFor(YearMonth month) {
     _ensureFresh();
     return _spending[month] ??= spendingByCategory(transactions.all, month);
@@ -316,6 +344,8 @@ class Ledger extends ChangeNotifier {
     _bestCards = null;
     _installments = null;
     _cardsNoAccount = null;
+    _history = null;
+    _expenseMtd = null;
   }
 
   void _invalidate() {

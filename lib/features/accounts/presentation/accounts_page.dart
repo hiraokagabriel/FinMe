@@ -145,7 +145,10 @@ class _AccountsPageState extends State<AccountsPage> {
                                   itemCount: items.length,
                                   itemBuilder: (context, i) =>
                                       switch (items[i]) {
-                                        final String bank => _BankHeader(bank),
+                                        final String bank => _BankHeader(
+                                          bank,
+                                          ultra: ultra,
+                                        ),
                                         final Account a => _AccountRow(
                                           account: a,
                                           balanceCents: balances[a.id] ?? 0,
@@ -242,18 +245,27 @@ List<Object> _groupByBank(List<Account> accounts) {
 }
 
 class _BankHeader extends StatelessWidget {
-  const _BankHeader(this.bank);
+  const _BankHeader(this.bank, {required this.ultra});
 
   final String bank;
+  final bool ultra;
 
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(top: AppSpace.lg, bottom: AppSpace.xs),
-    child: Text(
-      bank,
-      style: Theme.of(
-        context,
-      ).textTheme.titleSmall?.copyWith(color: context.colors.textSecondary),
+    child: Row(
+      children: [
+        if (ultra) ...[
+          BankAvatar(bankName: bank == _noBank ? '' : bank, size: 20),
+          const SizedBox(width: AppSpace.sm),
+        ],
+        Text(
+          bank,
+          style: Theme.of(
+            context,
+          ).textTheme.titleSmall?.copyWith(color: context.colors.textSecondary),
+        ),
+      ],
     ),
   );
 }

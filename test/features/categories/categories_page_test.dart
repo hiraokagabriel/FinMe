@@ -4,6 +4,7 @@ import 'package:finme/app/seed.dart';
 import 'package:finme/core/models/app_settings.dart';
 import 'package:finme/core/services/record_store.dart';
 import 'package:finme/core/theme/app_theme.dart';
+import 'package:finme/core/widgets/widgets.dart';
 import 'package:finme/features/categories/domain/transaction_category.dart';
 import 'package:finme/features/categories/presentation/categories_page.dart';
 import 'package:flutter/material.dart';
@@ -42,7 +43,66 @@ Future<void> _pump(
   await tester.pump();
 }
 
+/// Sem categorias: bootstrap cria as padrão, então são removidas. A página mostra o estado vazio.
+Future<AppServices> _setupEmpty(WidgetTester tester, AppMode mode) async {
+  return (await tester.runAsync(() async {
+    final s = await bootstrap(
+      storeFactory: (_) => MemoryRecordStore(),
+      clock: () => DateTime(2026, 11, 14),
+    );
+    await s.categories.replaceAll(const []);
+    await s.settings.update((c) => c.copyWith(mode: mode));
+    return s;
+  }))!;
+}
+
 void main() {
+  for (final mode in AppMode.values) {
+    testWidgets('estado vazio (${mode.name}): botão abre o form de despesa', (
+      tester,
+    ) async {
+      final s = await _setupEmpty(tester, mode);
+      await _pump(tester, s);
+
+      expect(find.byType(EmptyState), findsOneWidget);
+      await tester.tap(
+        find.descendant(
+          of: find.byType(EmptyState),
+          matching: find.text('Nova categoria'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final kind = tester.widget<SegmentedButton<CategoryKind>>(
+        find.byType(SegmentedButton<CategoryKind>).last,
+      );
+      expect(kind.selected, {CategoryKind.expense});
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('estado vazio na aba Receitas abre o form com tipo receita', (
+    tester,
+  ) async {
+    final s = await _setupEmpty(tester, AppMode.simple);
+    await _pump(tester, s);
+
+    await tester.tap(find.text('Receitas'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byType(EmptyState),
+        matching: find.text('Nova categoria'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final kind = tester.widget<SegmentedButton<CategoryKind>>(
+      find.byType(SegmentedButton<CategoryKind>).last,
+    );
+    expect(kind.selected, {CategoryKind.income});
+  });
+
   testWidgets('modo Simples: lista de despesas sem bloco de orçamentos', (
     tester,
   ) async {

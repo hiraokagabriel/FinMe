@@ -178,4 +178,59 @@ void main() {
       expect(items.any((t) => t.date == DateTime(2027, 4, 1)), isTrue);
     },
   );
+
+  test('monthlyHistory é memoizado e recalcula após upsert', () async {
+    final before = s.ledger.monthlyHistory;
+    expect(identical(s.ledger.monthlyHistory, before), isTrue);
+
+    await s.transactions.upsert(
+      _expense('hist_extra', DateTime(2026, 11, 5), 700),
+    );
+
+    expect(identical(s.ledger.monthlyHistory, before), isFalse);
+    expect(
+      s.ledger.monthlyHistory.last.expenseCents,
+      before.last.expenseCents + 700,
+    );
+  });
+
+  test('último endBalanceCents do histórico bate com o saldo consolidado', () {
+    final ledger = s.ledger;
+    final activeTotal = ledger.accounts.all
+        .where((a) => !a.archived)
+        .fold(0, (sum, a) => sum + ledger.accountBalances[a.id]!);
+
+    expect(ledger.monthlyHistory.last.endBalanceCents, activeTotal);
+    expect(
+      ledger.monthlyHistory.last.endBalanceCents,
+      ledger.forecast.currentTotalCents,
+    );
+  });
+
+  test('expenseMonthToDate compara com o mesmo dia do mês anterior', () async {
+    final s14 = await bootstrap(
+      storeFactory: (_) => MemoryRecordStore(),
+      clock: _now,
+    );
+    await s14.transactions.upsert(
+      _expense('out_10', DateTime(2026, 10, 10), 1000),
+    );
+    await s14.transactions.upsert(
+      _expense('out_20', DateTime(2026, 10, 20), 2000),
+    );
+    await s14.transactions.upsert(
+      _expense('nov_05', DateTime(2026, 11, 5), 500),
+    );
+
+    expect(s14.ledger.expenseMonthToDate, (current: 500, previous: 1000));
+  });
 }
+
+Transaction _expense(String id, DateTime date, int cents) => Transaction(
+  id: id,
+  type: TransactionType.expense,
+  amountCents: cents,
+  date: date,
+  description: id,
+  accountId: 'acc_alfa',
+);

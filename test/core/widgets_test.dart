@@ -3,6 +3,7 @@ import 'package:finme/app/bootstrap.dart';
 import 'package:finme/core/models/year_month.dart';
 import 'package:finme/core/services/record_store.dart';
 import 'package:finme/core/theme/app_colors.dart';
+import 'package:finme/core/theme/app_text.dart';
 import 'package:finme/core/theme/app_theme.dart';
 import 'package:finme/core/widgets/widgets.dart';
 import 'package:flutter/material.dart';
@@ -248,5 +249,60 @@ void main() {
     await tester.tap(find.text('Cancelar'));
     await tester.pumpAndSettle();
     expect(result, isFalse);
+  });
+
+  testWidgets('MoneyText usa algarismos tabulares', (tester) async {
+    await pumpWith(tester, const MoneyText(100));
+    expect(
+      tester.widget<Text>(find.text('R\$ 1,00')).style?.fontFeatures,
+      contains(const FontFeature.tabularFigures()),
+    );
+  });
+
+  testWidgets('KpiTile usa serif, mostra trend e troca o valor', (
+    tester,
+  ) async {
+    final cents = ValueNotifier<int>(100);
+    addTearDown(cents.dispose);
+    await pumpWith(
+      tester,
+      ValueListenableBuilder<int>(
+        valueListenable: cents,
+        builder: (context, value, child) =>
+            KpiTile(label: 'Saldo', cents: value, trend: const Text('X')),
+      ),
+    );
+    expect(find.text('X'), findsOneWidget);
+    expect(
+      tester.widget<Text>(find.text('R\$ 1,00')).style?.fontFamily,
+      AppFonts.serif,
+    );
+
+    cents.value = 2000;
+    await tester.pumpAndSettle();
+    expect(find.text('R\$ 20,00'), findsOneWidget);
+    expect(find.text('R\$ 1,00'), findsNothing);
+  });
+
+  testWidgets('LimitBar tem tooltip com percentual e respeita hideValues', (
+    tester,
+  ) async {
+    final services = await pumpWith(
+      tester,
+      const LimitBar(usedCents: 5000, limitCents: 10000),
+    );
+    expect(
+      find.byTooltip('Usado R\$ 50,00 de R\$ 100,00 (50%)'),
+      findsOneWidget,
+    );
+
+    await tester.runAsync(
+      () => services.settings.update((s) => s.copyWith(hideValues: true)),
+    );
+    await tester.pump();
+    expect(find.byTooltip('Usado R\$ •••• de R\$ •••• (50%)'), findsOneWidget);
+
+    await pumpWith(tester, const LimitBar(usedCents: 5000, limitCents: 0));
+    expect(find.byTooltip('Usado R\$ 50,00 de R\$ 0,00 (0%)'), findsOneWidget);
   });
 }

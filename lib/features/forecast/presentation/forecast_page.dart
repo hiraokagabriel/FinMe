@@ -81,7 +81,11 @@ class ForecastPage extends StatelessWidget {
                         const SizedBox(height: AppSpace.lg),
                         SectionCard(
                           title: 'Saldo diário',
-                          child: ForecastDailyChart(daily: forecast.daily),
+                          child: ForecastDailyChart(
+                            daily: forecast.daily,
+                            events: forecast.events,
+                            hideValues: settings.hideValues,
+                          ),
                         ),
                         const SizedBox(height: AppSpace.lg),
                         SectionCard(

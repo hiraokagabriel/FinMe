@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/app_scope.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
+import '../theme/app_text.dart';
 import '../utils/formatters.dart';
 
 /// Valor monetário em centavos. Respeita `hideValues` (mostra "R$ ••••").
@@ -37,7 +38,7 @@ class MoneyText extends StatelessWidget {
             : (style ?? const TextStyle()).copyWith(color: signColor);
         return Text(
           formatMoney(cents, hidden: settings.value.hideValues, signed: signed),
-          style: resolved,
+          style: AppText.tabular(resolved ?? const TextStyle()),
         );
       },
     );
@@ -76,7 +77,7 @@ class MoneyField extends StatelessWidget {
   }
 }
 
-/// Indicador compacto: rótulo + valor grande (+ legenda opcional).
+/// Indicador compacto: rótulo + valor grande (+ variação e legenda opcionais).
 class KpiTile extends StatelessWidget {
   const KpiTile({
     super.key,
@@ -84,16 +85,19 @@ class KpiTile extends StatelessWidget {
     required this.cents,
     this.color,
     this.caption,
+    this.trend,
   });
 
   final String label;
   final int cents;
   final Color? color;
   final String? caption;
+  final Widget? trend;
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    final kpi = AppText.kpi(context);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(AppSpace.lg),
@@ -103,14 +107,20 @@ class KpiTile extends StatelessWidget {
           children: [
             Text(label, style: textTheme.bodySmall),
             const SizedBox(height: AppSpace.xs),
-            MoneyText(
-              cents,
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: color ?? context.colors.textPrimary,
+            AnimatedSwitcher(
+              duration: AppMotion.fast,
+              // Padrão centraliza o Stack da troca; aqui o valor é alinhado à esquerda.
+              layoutBuilder: (current, previous) => Stack(
+                alignment: Alignment.centerLeft,
+                children: [...previous, ?current],
+              ),
+              child: MoneyText(
+                cents,
+                key: ValueKey(cents),
+                style: color == null ? kpi : kpi.copyWith(color: color),
               ),
             ),
+            if (trend != null) ...[const SizedBox(height: AppSpace.xs), trend!],
             if (caption != null) ...[
               const SizedBox(height: AppSpace.xs),
               Text(caption!, style: textTheme.bodySmall),

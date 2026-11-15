@@ -4,6 +4,7 @@ import 'package:finme/app/seed.dart';
 import 'package:finme/core/models/app_settings.dart';
 import 'package:finme/core/services/record_store.dart';
 import 'package:finme/core/theme/app_theme.dart';
+import 'package:finme/core/widgets/widgets.dart';
 import 'package:finme/features/recurring/domain/recurring_rule.dart';
 import 'package:finme/features/recurring/presentation/recurring_page.dart';
 import 'package:finme/features/transactions/domain/transaction.dart';
@@ -187,4 +188,34 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('Recorrentes'), findsOneWidget);
   });
+
+  for (final ultra in [false, true]) {
+    testWidgets(
+      'estado vazio (${ultra ? 'Ultra' : 'Simples'}): botão abre o form',
+      (tester) async {
+        final s = (await tester.runAsync(() async {
+          final s = await bootstrap(
+            storeFactory: (_) => MemoryRecordStore(),
+            clock: () => DateTime(2026, 11, 14),
+          );
+          if (ultra) {
+            await s.settings.update((x) => x.copyWith(mode: AppMode.ultra));
+          }
+          return s;
+        }))!;
+        await pump(tester, s, const Size(1400, 900));
+
+        expect(find.byType(EmptyState), findsOneWidget);
+        await tester.tap(
+          find.descendant(
+            of: find.byType(EmptyState),
+            matching: find.text('Nova recorrência'),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(AlertDialog), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 }

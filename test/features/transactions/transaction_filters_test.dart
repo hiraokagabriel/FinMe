@@ -119,4 +119,130 @@ void main() {
     expect(totals.provisioned, 300);
     expect(totals.income, 900);
   });
+
+  group('ordenação', () {
+    // a: "Banana" 300 dia 2, b: "abacate" 100 dia 3, c: "Cenoura" 200 dia 1.
+    final rows = [
+      _tx(
+        'a',
+        description: 'Banana',
+        cents: 300,
+        date: DateTime(2026, 11, 2),
+        accountId: 'acc_b',
+        categoryId: 'cat_z',
+      ),
+      _tx(
+        'b',
+        description: 'abacate',
+        cents: 100,
+        date: DateTime(2026, 11, 3),
+        accountId: 'acc_a',
+        categoryId: 'cat_m',
+      ),
+      _tx(
+        'c',
+        description: 'Cenoura',
+        cents: 200,
+        date: DateTime(2026, 11, 1),
+        accountId: 'acc_c',
+        categoryId: 'cat_a',
+      ),
+    ];
+
+    List<String> ids(TxSortColumn column, {required bool ascending}) =>
+        sortTransactions(
+          rows,
+          (column: column, ascending: ascending),
+          originName: (t) => t.accountId ?? '',
+          categoryName: (t) => t.categoryId ?? '',
+        ).map((t) => t.id).toList();
+
+    test('kDefaultTxSort coincide com visibleTransactions', () {
+      final sorted = sortTransactions(
+        rows,
+        kDefaultTxSort,
+        originName: (t) => '',
+        categoryName: (t) => '',
+      ).map((t) => t.id);
+      final visible = visibleTransactions(
+        rows,
+        nov,
+        const TransactionFilter(),
+      ).map((t) => t.id);
+      expect(sorted, visible);
+    });
+
+    test('cada coluna em asc e desc', () {
+      expect(ids(TxSortColumn.date, ascending: true), ['c', 'a', 'b']);
+      expect(ids(TxSortColumn.date, ascending: false), ['b', 'a', 'c']);
+      expect(ids(TxSortColumn.description, ascending: true), ['b', 'a', 'c']);
+      expect(ids(TxSortColumn.description, ascending: false), ['c', 'a', 'b']);
+      expect(ids(TxSortColumn.origin, ascending: true), ['b', 'a', 'c']);
+      expect(ids(TxSortColumn.origin, ascending: false), ['c', 'a', 'b']);
+      expect(ids(TxSortColumn.category, ascending: true), ['c', 'b', 'a']);
+      expect(ids(TxSortColumn.category, ascending: false), ['a', 'b', 'c']);
+      expect(ids(TxSortColumn.value, ascending: true), ['b', 'c', 'a']);
+      expect(ids(TxSortColumn.value, ascending: false), ['a', 'c', 'b']);
+    });
+
+    test(
+      'empate de valor resolvido por data desc; empate total por id asc',
+      () {
+        final tied = [
+          _tx('x', cents: 500, date: DateTime(2026, 11, 5)),
+          _tx('y', cents: 500, date: DateTime(2026, 11, 9)),
+          _tx('z', cents: 100, date: DateTime(2026, 11, 1)),
+          _tx('w', cents: 900, date: DateTime(2026, 11, 1)),
+          _tx('v', cents: 900, date: DateTime(2026, 11, 1)),
+        ];
+        final sorted = sortTransactions(
+          tied,
+          (column: TxSortColumn.value, ascending: true),
+          originName: (t) => '',
+          categoryName: (t) => '',
+        ).map((t) => t.id).toList();
+        expect(sorted, ['z', 'y', 'x', 'v', 'w']);
+      },
+    );
+
+    test('não altera a lista de entrada', () {
+      final before = rows.map((t) => t.id).toList();
+      sortTransactions(
+        rows,
+        (column: TxSortColumn.value, ascending: true),
+        originName: (t) => '',
+        categoryName: (t) => '',
+      );
+      expect(rows.map((t) => t.id).toList(), before);
+    });
+
+    test('toggleTxSort alterna ou troca de coluna', () {
+      expect(toggleTxSort(kDefaultTxSort, TxSortColumn.date), (
+        column: TxSortColumn.date,
+        ascending: true,
+      ));
+      expect(toggleTxSort(kDefaultTxSort, TxSortColumn.description), (
+        column: TxSortColumn.description,
+        ascending: true,
+      ));
+      expect(toggleTxSort(kDefaultTxSort, TxSortColumn.value), (
+        column: TxSortColumn.value,
+        ascending: false,
+      ));
+      expect(
+        toggleTxSort((
+          column: TxSortColumn.value,
+          ascending: false,
+        ), TxSortColumn.value),
+        (column: TxSortColumn.value, ascending: true),
+      );
+    });
+  });
+
+  test('hasCriteria só com algum filtro ativo', () {
+    expect(const TransactionFilter().hasCriteria, isFalse);
+    expect(const TransactionFilter(query: '  ').hasCriteria, isFalse);
+    expect(const TransactionFilter(categoryId: 'x').hasCriteria, isTrue);
+    expect(const TransactionFilter(showPlanned: false).hasCriteria, isTrue);
+  });
 }

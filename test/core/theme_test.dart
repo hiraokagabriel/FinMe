@@ -1,5 +1,6 @@
 import 'package:finme/core/theme/app_colors.dart';
 import 'package:finme/core/theme/app_palettes.dart';
+import 'package:finme/core/theme/app_spacing.dart';
 import 'package:finme/core/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -70,5 +71,25 @@ void main() {
       ),
     );
     expect(captured.primary, AppColors.dark.primary);
+  });
+
+  test('neutros quentes e superfícies novos (claro e escuro)', () {
+    expect(AppColors.light.background, const Color(0xFFF6F5F2));
+    expect(AppColors.light.sidebar, const Color(0xFFECEAE5));
+    expect(AppColors.light.surface, const Color(0xFFFFFFFF));
+    expect(AppColors.dark.background, const Color(0xFF161514));
+    expect(AppColors.dark.surface, const Color(0xFF1F1E1C));
+    expect(AppColors.dark.sidebar, const Color(0xFF2A2826));
+  });
+
+  test('primary permanece inalterado', () {
+    expect(AppColors.light.primary, const Color(0xFF42A5F5));
+    expect(AppColors.dark.primary, const Color(0xFF81D4FA));
+  });
+
+  test('AppMotion expõe durações de microanimação', () {
+    expect(AppMotion.fast.inMilliseconds, 150);
+    expect(AppMotion.normal.inMilliseconds, 200);
+    expect(AppMotion.curve, Curves.easeOutCubic);
   });
 }

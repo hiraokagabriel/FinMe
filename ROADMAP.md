@@ -16,12 +16,17 @@ Direção do produto e próximos passos. Tarefas detalhadas e status: `docs/BACK
 - **Fase 5 — Previsibilidade avançada**: cobertura de faturas, linha do tempo de vencimentos (60 dias), parcelas comprometidas, melhor cartão para comprar hoje e mudança de ciclo com vigência.
 - **Fase 6 — Pendências conhecidas**: import de backup tudo-ou-nada, previsão cobre os 60 dias da linha do tempo, `copyWith` limpa anuláveis e fatura de transição sem fusão na mudança de ciclo (T-040..T-046).
 
+## v3 — em andamento (`docs/V3_DIRECTION.md`)
+
+- **Fase 7 — Identidade visual e polimento**: tipografia Plex + Source Serif 4, neutros quentes, deltas/sparklines, avatar de banco, ordenação, estados vazios, shell só desktop (T-050..T-068).
+
 ## Próximos passos sugeridos
 
-1. Build e teste em Android real (T-045, manual; hoje validado só em Windows).
-2. Memoizar a linha de fechamentos do cartão (T-047, desempenho em volume Ultra).
-3. Importação de extrato CSV/OFX, manual (o usuário escolhe o arquivo).
-4. Metas de economia.
-5. Auditoria rápida de gastos: essencial × supérfluo.
-6. Detecção automática de assinaturas a partir do histórico de transações.
-7. Distribuição do Windows: `.exe` e instalador.
+Direção da v3 (Fases 7–12): `docs/V3_DIRECTION.md`. Fase 7 (identidade visual e polimento) está no `docs/BACKLOG.md`.
+
+1. Memoizar a linha de fechamentos do cartão (T-047, desempenho em volume Ultra).
+2. Importação de extrato CSV/OFX, manual (o usuário escolhe o arquivo).
+3. Metas de economia.
+4. Auditoria rápida de gastos: essencial × supérfluo.
+5. Detecção automática de assinaturas a partir do histórico de transações.
+6. Distribuição do Windows: `.exe` e instalador.

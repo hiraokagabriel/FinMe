@@ -40,17 +40,10 @@ flutter pub get
 flutter run -d windows
 ```
 
-Para Android, conecte um dispositivo ou emulador e use `flutter devices` para pegar o id:
-
-```bash
-flutter run -d <id_do_dispositivo>
-```
-
 ## Build
 
 ```bash
 flutter build windows
-flutter build apk
 ```
 
 ## Testes
@@ -79,6 +72,7 @@ lib/
 test/              espelha lib/
 docs/
   SPEC.md          especificação de domínio, arquitetura e telas
+  V3_DIRECTION.md  decisões de direção da v3 (vence docs antigos)
   BACKLOG.md       tarefas e status
   legacy/          documentos da v1 (descontinuada)
 ```
@@ -91,10 +85,8 @@ O contrato de domínio e de arquitetura está em [docs/SPEC.md](docs/SPEC.md). M
 
 ## Plataformas
 
-- Windows (desktop): alvo principal.
-- Android: alvo mobile (ainda sem teste em dispositivo real).
-- iOS, iPadOS e macOS: fora do escopo atual.
+Só Windows (desktop). Outras plataformas foram removidas do projeto (ver `docs/V3_DIRECTION.md`).
 
 ## Privacidade
 
-Os dados ficam no dispositivo (Hive). Os exemplos e o modo de dados de exemplo usam nomes fictícios ("Banco Alfa", "Banco Beta"). Nenhum dado bancário real é incluído no repositório.
+Os dados ficam no computador (Hive). Os exemplos e o modo de dados de exemplo usam nomes fictícios ("Banco Alfa", "Banco Beta"). Nenhum dado bancário real é incluído no repositório.

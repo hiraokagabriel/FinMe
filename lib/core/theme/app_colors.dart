@@ -34,9 +34,9 @@ class AppColors extends ThemeExtension<AppColors> {
   static const _darkTextSecondary = Color(0xFF9AA0A6);
 
   static final AppColors light = AppColors(
-    background: const Color(0xFFF5F7FA),
+    background: const Color(0xFFF6F5F2),
     surface: const Color(0xFFFFFFFF),
-    sidebar: const Color(0xFFE9EDF2),
+    sidebar: const Color(0xFFECEAE5),
     primary: const Color(0xFF42A5F5),
     primarySubtle: const Color(0xFFD3EAFD),
     textPrimary: const Color(0xFF202124),
@@ -49,9 +49,9 @@ class AppColors extends ThemeExtension<AppColors> {
   );
 
   static final AppColors dark = AppColors(
-    background: const Color(0xFF121212),
-    surface: const Color(0xFF1E1E1E),
-    sidebar: const Color(0xFF2C2C2C),
+    background: const Color(0xFF161514),
+    surface: const Color(0xFF1F1E1C),
+    sidebar: const Color(0xFF2A2826),
     primary: const Color(0xFF81D4FA),
     primarySubtle: const Color(0xFF1A2D40),
     textPrimary: const Color(0xFFE8EAED),

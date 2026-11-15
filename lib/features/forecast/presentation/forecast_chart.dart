@@ -33,11 +33,63 @@ List<int> sampleIndices(
   return indices;
 }
 
+/// Fluxo do dia [day]: entradas, saídas (positivas) e nº de eventos. Transferências não contam.
+/// Calculada só no toque do gráfico, nunca no build.
+({int income, int expense, int count}) dayFlow(
+  List<ForecastEvent> events,
+  DateTime day,
+) {
+  var income = 0;
+  var expense = 0;
+  var count = 0;
+  for (final e in events) {
+    final d = e.date;
+    if (e.kind == ForecastEventKind.transfer ||
+        d.year != day.year ||
+        d.month != day.month ||
+        d.day != day.day) {
+      continue;
+    }
+    count++;
+    if (e.amountCents > 0) {
+      income += e.amountCents;
+    } else if (e.amountCents < 0) {
+      expense -= e.amountCents;
+    }
+  }
+  return (income: income, expense: expense, count: count);
+}
+
+String _tooltipText(
+  DailyBalance d,
+  List<ForecastEvent> events,
+  bool hideValues,
+) {
+  final flow = dayFlow(events, d.date);
+  return [
+    formatDate(d.date),
+    'Saldo ${formatMoney(d.balanceCents, hidden: hideValues)}',
+    if (flow.income > 0)
+      'Entradas ${formatMoney(flow.income, hidden: hideValues)}',
+    if (flow.expense > 0)
+      'Saídas ${formatMoney(flow.expense, hidden: hideValues)}',
+    if (flow.count == 1) '1 evento',
+    if (flow.count > 1) '${flow.count} eventos',
+  ].join('\n');
+}
+
 /// Linha do saldo diário. x = índice em [daily]; y = reais (só para o gráfico).
 class ForecastDailyChart extends StatelessWidget {
-  const ForecastDailyChart({super.key, required this.daily});
+  const ForecastDailyChart({
+    super.key,
+    required this.daily,
+    this.events = const [],
+    this.hideValues = false,
+  });
 
   final List<DailyBalance> daily;
+  final List<ForecastEvent> events;
+  final bool hideValues;
 
   @override
   Widget build(BuildContext context) {
@@ -78,11 +130,12 @@ class ForecastDailyChart extends StatelessWidget {
           ),
           lineTouchData: LineTouchData(
             touchTooltipData: LineTouchTooltipData(
+              getTooltipColor: (_) => c.surface,
+              tooltipBorder: BorderSide(color: c.border),
               getTooltipItems: (touched) => [
                 for (final s in touched)
                   LineTooltipItem(
-                    '${formatDate(daily[s.x.toInt()].date)}\n'
-                    '${formatMoney(daily[s.x.toInt()].balanceCents)}',
+                    _tooltipText(daily[s.x.toInt()], events, hideValues),
                     TextStyle(color: c.textPrimary, fontSize: 12),
                   ),
               ],

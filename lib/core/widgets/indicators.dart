@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 
+import '../../app/app_scope.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
+import '../utils/formatters.dart';
 
 /// Barra de consumo do limite. <70% primary, <90% warning, senão danger.
+/// Tooltip com usado, limite e percentual; respeita `hideValues`.
 class LimitBar extends StatelessWidget {
   const LimitBar({
     super.key,
@@ -19,6 +22,7 @@ class LimitBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final settings = AppScope.of(context).settings;
     // Razão sem limite: sem limite não há consumo (barra vazia).
     final ratio = limitCents <= 0 ? 0.0 : usedCents / limitCents;
     final color = ratio < 0.7
@@ -26,14 +30,26 @@ class LimitBar extends StatelessWidget {
         : ratio < 0.9
         ? c.warning
         : c.danger;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(height / 2),
-      child: LinearProgressIndicator(
-        value: ratio.clamp(0.0, 1.0).toDouble(),
-        minHeight: height,
-        color: color,
-        backgroundColor: c.border,
-      ),
+    final pct = limitCents <= 0 ? 0 : (usedCents * 100 / limitCents).round();
+    return ListenableBuilder(
+      listenable: settings,
+      builder: (context, _) {
+        final hidden = settings.value.hideValues;
+        return Tooltip(
+          message:
+              'Usado ${formatMoney(usedCents, hidden: hidden)} de '
+              '${formatMoney(limitCents, hidden: hidden)} ($pct%)',
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(height / 2),
+            child: LinearProgressIndicator(
+              value: ratio.clamp(0.0, 1.0).toDouble(),
+              minHeight: height,
+              color: color,
+              backgroundColor: c.border,
+            ),
+          ),
+        );
+      },
     );
   }
 }

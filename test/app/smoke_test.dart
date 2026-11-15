@@ -79,25 +79,39 @@ void main() {
     });
   }
 
-  testWidgets('mobile 390x800 (Ultra): navega 8 páginas pelo Drawer', (
+  testWidgets('estreito 800x700 (Ultra): sidebar colapsada navega 8 páginas', (
     tester,
   ) async {
     final s = await _boot(tester, AppMode.ultra);
-    await _pumpApp(tester, s, size: const Size(390, 800));
+    await _pumpApp(tester, s, size: const Size(800, 700));
+
+    expect(find.byType(Drawer), findsNothing);
+    expect(find.byType(AppBar), findsNothing);
 
     for (final label in _pages) {
-      await tester.tap(find.byTooltip('Open navigation menu'));
-      await tester.pumpAndSettle();
-      await tester.tap(
-        find.descendant(
-          of: find.byType(Drawer),
-          matching: find.widgetWithText(InkWell, label),
-        ),
-      );
+      await tester.tap(find.byTooltip(label));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull, reason: label);
     }
 
+    await tester.tap(find.byTooltip('Modo: Ultra'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Modo: Simples'), findsOneWidget);
+    expect(s.settings.value.mode, AppMode.simple);
+
     await _openAndCancelTransactionForm(tester);
+  });
+
+  testWidgets('redimensionar 1400 -> 800 não causa overflow', (tester) async {
+    final s = await _boot(tester, AppMode.ultra);
+    await _pumpApp(tester, s, size: const Size(1400, 900));
+
+    tester.view.physicalSize = const Size(800, 700);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    tester.view.physicalSize = const Size(1400, 900);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
   });
 }

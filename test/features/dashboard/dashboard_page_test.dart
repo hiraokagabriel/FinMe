@@ -8,6 +8,7 @@ import 'package:finme/core/utils/formatters.dart';
 import 'package:finme/core/widgets/widgets.dart';
 import 'package:finme/features/cards/domain/payment_card.dart';
 import 'package:finme/features/dashboard/presentation/dashboard_page.dart';
+import 'package:finme/features/dashboard/presentation/dashboard_summary.dart';
 import 'package:finme/features/transactions/domain/transaction.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -253,5 +254,48 @@ void main() {
       await _pump(tester, s, mobile);
       expect(tester.takeException(), isNull, reason: mode.name);
     }
+  });
+
+  testWidgets('Ultra: KPIs com delta, sparkline e Gasto no mês', (
+    tester,
+  ) async {
+    final s = await _boot(tester, mode: AppMode.ultra);
+    final summary = DashboardSummary.of(s.ledger, ultra: true);
+    expect(summary.balanceTrend, hasLength(6));
+    expect(summary.expenseTrend, hasLength(6));
+    expect(summary.monthExpenseCents, s.ledger.expenseMonthToDate.current);
+    await _pump(tester, s, desktop);
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('Gasto no mês'), findsOneWidget);
+    expect(find.byType(Sparkline), findsNWidgets(2));
+    expect(find.byType(DeltaBadge), findsNWidgets(2));
+    final withDelta = tester
+        .widgetList<DeltaBadge>(find.byType(DeltaBadge))
+        .where((b) => b.ratio != null)
+        .length;
+    expect(
+      withDelta,
+      [
+        summary.balanceDelta,
+        summary.monthExpenseDelta,
+      ].whereType<double>().length,
+    );
+  });
+
+  testWidgets('Simples: sem delta, sparkline nem Gasto no mês', (tester) async {
+    final s = await _boot(tester, mode: AppMode.simple);
+    final summary = DashboardSummary.of(s.ledger, ultra: false);
+    expect(summary.balanceTrend, isNull);
+    expect(summary.balanceDelta, isNull);
+    expect(summary.monthExpenseCents, isNull);
+    expect(summary.monthExpenseDelta, isNull);
+    expect(summary.expenseTrend, isNull);
+    await _pump(tester, s, desktop);
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(Sparkline), findsNothing);
+    expect(find.byType(DeltaBadge), findsNothing);
+    expect(find.text('Gasto no mês'), findsNothing);
   });
 }

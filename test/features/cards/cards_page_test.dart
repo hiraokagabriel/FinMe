@@ -166,4 +166,32 @@ void main() {
     expect(find.text('Sem conta de pagamento'), findsNWidgets(2));
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('Ultra: avatar por banco; grupo sem banco mostra "?"', (
+    tester,
+  ) async {
+    final s = await seeded(tester, mode: AppMode.ultra);
+    final alfaVisa = s.cards.byId('card_alfa_visa')!;
+    await tester.runAsync(
+      () => s.cards.upsert(alfaVisa.copyWith(bankName: '')),
+    );
+    // Altura para o ListView.builder construir o último grupo (Outros).
+    await pumpIn(
+      tester,
+      s,
+      const Scaffold(body: CardsPage()),
+      size: const Size(1400, 2400),
+    );
+    // Grupos: Banco Alfa (débito), Banco Beta, Cooperativa Gama e Outros.
+    expect(find.byType(BankAvatar), findsNWidgets(4));
+    expect(find.text('?'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Simples: sem avatar de banco', (tester) async {
+    final s = await seeded(tester);
+    await pumpIn(tester, s, const Scaffold(body: CardsPage()));
+    expect(find.byType(BankAvatar), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 }

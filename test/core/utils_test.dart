@@ -104,6 +104,21 @@ void main() {
     });
   });
 
+  group('formatPercent', () {
+    test('arredonda meio-para-cima com vírgula decimal', () {
+      expect(formatPercent(0.1234), '12,3%');
+      expect(formatPercent(-0.05), '-5,0%');
+      expect(formatPercent(0), '0,0%');
+      expect(formatPercent(1.0), '100,0%');
+      expect(formatPercent(0.00049), '0,0%');
+      expect(formatPercent(0.5, decimals: 0), '50%');
+    });
+
+    test('zero arredondado nunca sai com sinal', () {
+      expect(formatPercent(-0.00049), '0,0%');
+    });
+  });
+
   group('newId', () {
     test('10.000 ids únicos', () {
       final ids = <String>{};

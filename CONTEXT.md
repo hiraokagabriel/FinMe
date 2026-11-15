@@ -14,7 +14,7 @@ Pergunta central: *"quanto vai sair, de onde e quando — e meu saldo aguenta?"*
 - Categorias e orçamento mensal.
 - Dois modos sobre o mesmo domínio: **Simples** (enxuto) e **Ultra** (denso). Alternância em Ajustes e no rodapé da sidebar.
 
-Plataformas: Windows (desktop) e Android. Esta é a v2, um rewrite na branch `rewrite/v2`; a v1 foi apagada (ver ROADMAP).
+Plataforma: só Windows (desktop); as demais foram removidas na v3 (`docs/V3_DIRECTION.md`). Esta é a v2, um rewrite na branch `rewrite/v2`; a v1 foi apagada (ver ROADMAP).
 
 ## 2. Stack
 
@@ -28,8 +28,8 @@ Plataformas: Windows (desktop) e Android. Esta é a v2, um rewrite na branch `re
 
 - SDK Flutter: `E:\Projetos\FinMe\flutter\bin` (fora do PATH). No Git Bash: `export PATH=/e/Projetos/FinMe/flutter/bin:$PATH`.
 - Dependências: `flutter pub get`.
-- Rodar: `flutter run -d windows` (ou `flutter run -d <id>` para Android).
-- Build: `flutter build windows`, `flutter build apk`.
+- Rodar: `flutter run -d windows`.
+- Build: `flutter build windows`.
 - Testes: `flutter test`.
 - **Portão obrigatório:** `bash tool/check.sh` (format + analyze + test). Termina com `CHECK OK`. O script acha o SDK sozinho.
 
@@ -45,7 +45,7 @@ lib/
     bootstrap.dart                abre boxes fm_*, cria repositórios, seed, materializa recorrências
     app_scope.dart                AppServices + AppScope (InheritedWidget, estável)
     ledger.dart                   visões derivadas memoizadas por versão (faturas, saldos, previsão, Fase 5)
-    home_shell.dart               sidebar (>= 900px) / drawer; índice de 8 páginas; modo Simples/Ultra
+    home_shell.dart               sidebar desktop (colapsa para ícones < 900px); índice de 8 páginas; modo Simples/Ultra
     seed.dart                     categorias padrão + dados de exemplo fictícios (Banco Alfa, Banco Beta)
   core/
     models/                       year_month.dart (YearMonth), app_settings.dart (AppSettings, AppMode)
@@ -136,7 +136,7 @@ Detalhes completos em `docs/SPEC.md` §5. Resumo:
   - `finme-verifier` (haiku, effort high): roda format/analyze/test e corrige erros mecânicos.
   - `finme-reviewer` (opus, effort medium, somente leitura): revisa corretude financeira, aderência ao SPEC e desempenho.
 - `.claude/skills/finme-auto/SKILL.md` (`/finme-auto [T-XXX|feature]`): orquestra planner → coders → verifier → reviewer → commit. Thread principal em opus.
-- Lições da Fase 6: (1) worktrees novos saem de `origin/main`, que ainda aponta para a v1; reapontar o branch para a `main` local antes de trabalhar. (2) Coders em paralelo compartilham a árvore: o `check.sh` roda `dart format lib test` em tudo e pode falhar por arquivo pela metade de outro coder; o portão final é rodado pelo orquestrador depois de todos terminarem. (3) `pubspec.lock` e registrantes gerados (`linux/`, `macos/`, `windows/`) mudam com o `pub get` implícito; ficam fora dos commits de tarefa.
+- Lições da Fase 6: (1) worktrees novos saem de `origin/main`, que ainda aponta para a v1; reapontar o branch para a `main` local antes de trabalhar. (2) Coders em paralelo compartilham a árvore: o `check.sh` roda `dart format lib test` em tudo e pode falhar por arquivo pela metade de outro coder; o portão final é rodado pelo orquestrador depois de todos terminarem. (3) `pubspec.lock` e registrantes gerados (`windows/flutter/`) mudam com o `pub get` implícito; ficam fora dos commits de tarefa.
 
 ## 10. Histórico do rewrite (v2)
 
@@ -157,12 +157,12 @@ Detalhes completos em `docs/SPEC.md` §5. Resumo:
 
 ## 11. Status
 
-- Fases 0–6 concluídas (`docs/BACKLOG.md`), exceto T-045 (manual) e T-047 (`todo`).
+- Fases 0–6 concluídas (`docs/BACKLOG.md`), exceto T-047 (`todo`). T-045 (Android) cancelada: plataforma removida.
+- v3 em andamento na branch `feat/v3-densidade` (direção em `docs/V3_DIRECTION.md`). Fase 7 (identidade visual e polimento) concluída: IBM Plex Sans + Source Serif 4 (títulos/KPIs, `AppText`), algarismos tabulares, neutros quentes, `AppMotion`; widgets `DeltaBadge`/`Sparkline`, `BankAvatar`, skeleton + `BootScreen`/`BootErrorScreen`, `SortableHeaderLabel`; shell só desktop com sidebar colapsável (<900px); Painel Ultra com delta e sparkline (`Ledger.monthlyHistory`, `expenseMonthToDate`, SPEC §5.10); transações ordenáveis no Ultra; estados vazios com ação; tooltip rico no saldo diário. 373 testes.
 - Fase 6: import de backup tudo-ou-nada (restaura o estado anterior em falha), previsão cobre os 60 dias da linha do tempo (`Ledger.invoiceTimelineDays`, `ForecastService.horizonEnd`), `copyWith` limpa anuláveis (sentinela `_keep`), fatura de transição sem fusão na mudança de ciclo (`installmentDueMonth`, `invoiceMonthForKey`; SPEC §5.1).
 - Próximos passos sugeridos: ver ROADMAP.md.
 
 ## 12. Pendências conhecidas
 
-- Sem teste em dispositivo Android real (T-045, manual — usuário).
 - Linha de fechamentos do cartão é recalculada a cada chamada; memoização pendente (T-047).
 - Rollback do import de backup não é atômico se o disco também falhar durante a restauração (SPEC §3.5).

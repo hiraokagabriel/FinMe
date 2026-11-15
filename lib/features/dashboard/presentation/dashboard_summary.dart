@@ -1,6 +1,7 @@
 import '../../../app/ledger.dart';
 import '../../../core/models/year_month.dart';
 import '../../accounts/domain/account.dart';
+import '../../accounts/domain/monthly_history.dart';
 import '../../cards/domain/invoice.dart';
 import '../../cards/domain/payment_card.dart';
 import '../../forecast/domain/forecast.dart';
@@ -49,6 +50,11 @@ class DashboardSummary {
     required this.upcoming,
     required this.categories,
     required this.attention,
+    this.balanceTrend,
+    this.balanceDelta,
+    this.monthExpenseCents,
+    this.monthExpenseDelta,
+    this.expenseTrend,
   });
 
   final int currentCents;
@@ -65,6 +71,16 @@ class DashboardSummary {
 
   /// Faturas dos próximos 60 dias sem saldo previsto na conta de pagamento (§5.9).
   final List<InvoiceDue> attention;
+
+  /// Ultra: saldo fim de mês dos últimos 6 meses (sparkline) e variação vs. mês anterior.
+  /// Simples: `null` (sem delta nem sparkline).
+  final List<int>? balanceTrend;
+  final double? balanceDelta;
+
+  /// Ultra: gasto do mês até hoje, variação vs. mesmo período do mês anterior e gasto dos 6 meses.
+  final int? monthExpenseCents;
+  final double? monthExpenseDelta;
+  final List<int>? expenseTrend;
 
   /// Simples: 8 vencimentos e 3 categorias. Ultra: 15 e 8.
   factory DashboardSummary.of(Ledger ledger, {required bool ultra}) {
@@ -111,6 +127,9 @@ class DashboardSummary {
         ),
     ]..sort((a, b) => a.date.compareTo(b.date));
 
+    final history = ultra ? ledger.monthlyHistory : null;
+    final mtd = ultra ? ledger.expenseMonthToDate : null;
+
     final spending =
         ledger
             .spendingFor(YearMonth.fromDate(today))
@@ -136,6 +155,18 @@ class DashboardSummary {
         for (final d in ledger.invoiceTimeline)
           if (d.needsAttention) d,
       ],
+      balanceTrend: history?.map((m) => m.endBalanceCents).toList(),
+      balanceDelta: history == null
+          ? null
+          : deltaRatio(
+              history[history.length - 2].endBalanceCents,
+              history.last.endBalanceCents,
+            ),
+      monthExpenseCents: mtd?.current,
+      monthExpenseDelta: mtd == null
+          ? null
+          : deltaRatio(mtd.previous, mtd.current),
+      expenseTrend: history?.map((m) => m.expenseCents).toList(),
     );
   }
 

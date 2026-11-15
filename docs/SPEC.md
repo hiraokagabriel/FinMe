@@ -2,6 +2,7 @@
 
 > Fonte da verdade de domínio e arquitetura. Coders seguem os contratos daqui à risca.
 > Mudou o domínio? Atualize este arquivo primeiro (papel do `finme-planner`).
+> Direção da v3 (Fases 7–12): `docs/V3_DIRECTION.md`. Em conflito, ela vence este arquivo até ele ser atualizado.
 
 ## 1. Produto
 
@@ -16,6 +17,7 @@ Pilares:
 5. **Modo Simples** (enxuto) e **Modo Ultra** (denso) sobre o mesmo domínio.
 
 Local, sem backend, sem integração bancária. Foco em funcionalidade e desempenho.
+Plataforma: **só Windows desktop** (as demais foram removidas do projeto na v3).
 
 ## 2. Arquitetura
 
@@ -27,12 +29,13 @@ lib/
     bootstrap.dart             # abre storage, cria repos, seed, materializa recorrências
     app_scope.dart             # AppServices + AppScope (InheritedWidget)
     ledger.dart                # Ledger: visões derivadas memoizadas (faturas, saldos, previsão)
-    home_shell.dart            # sidebar (desktop) / drawer (mobile) + troca de páginas
+    home_shell.dart            # sidebar desktop (colapsa para só ícones em janela estreita) + troca de páginas
+    boot_screen.dart           # skeleton exibido enquanto o bootstrap carrega (Fase 7)
     seed.dart                  # categorias padrão + dados de exemplo fictícios
   core/
     models/                    # YearMonth, AppSettings, enums globais
     services/                  # RecordStore, CollectionRepository, SettingsController
-    theme/                     # AppColors (ThemeExtension), AppTheme, AppSpace, AppRadius, paletas
+    theme/                     # AppColors (ThemeExtension), AppTheme, AppText/AppFonts, AppSpace, AppRadius, AppMotion, paletas
     utils/                     # formatters, date_utils, id
     widgets/                   # widgets compartilhados (MoneyText, SectionCard, ...)
   features/
@@ -89,6 +92,7 @@ class YearMonth implements Comparable<YearMonth> {
 - `int? parseMoney(String input)` → aceita `"1.234,56"`, `"1234,5"`, `"1234.56"`, `"R$ 10"`, `"-5,00"`; inválido → `null`.
 - `String formatDate(DateTime d)` `"14/11/2026"`; `String formatShortDate(DateTime d)` `"14/11"`.
 - `String formatMonth(YearMonth m)` `"nov/2026"`; `String formatMonthLong(YearMonth m)` `"Novembro 2026"`.
+- `String formatPercent(double ratio, {int decimals = 1})` (Fase 7): `0.1234` → `"12,3%"`, `-0.05` → `"-5,0%"`, `0` → `"0,0%"`; vírgula decimal, arredondamento meio-para-cima.
 
 ### 3.4 `lib/core/utils/id.dart`
 - `String newId()` → único por processo (timestamp em micros base36 + contador + random). Sem dependência.
@@ -534,6 +538,34 @@ Duas faturas no mesmo dia na mesma conta têm o mesmo saldo-após (fim do dia).
 `forecastMonths = 3` com hoje em 31/01 dá horizonte até 31/03 (59 dias): por isso o Ledger chama a previsão com
 `minDays: Ledger.invoiceTimelineDays` (60), garantindo que o limite inclusivo `today + 60` esteja no horizonte (Fase 6, T-041).
 
+### 5.10 Histórico mensal e variação — `features/accounts/domain/monthly_history.dart` (Fase 7)
+Alimenta delta vs. mês anterior e sparklines dos KPIs do Painel (só Modo Ultra).
+```dart
+class MonthSnapshot {
+  const MonthSnapshot({required this.month, required this.endBalanceCents, required this.expenseCents});
+  final YearMonth month;
+  final int endBalanceCents; // saldo consolidado das contas ativas ao fim do mês
+  final int expenseCents;    // despesas pagas do mês (regra de spendingByCategory, sem provisionados)
+}
+List<MonthSnapshot> monthlyHistory({
+  required Iterable<Account> accounts,
+  required Iterable<PaymentCard> cards,
+  required Iterable<Transaction> transactions,
+  required DateTime today,
+  int months = 6,
+}); // ordem cronológica; length == months; último = mês de today
+int expenseUntilDay(Iterable<Transaction> txs, YearMonth month, int day);
+double? deltaRatio(int previous, int current);
+```
+Regras:
+1. Contas ativas = `!archived` (mesma base de `Forecast.currentTotalCents`). Transações provisionadas nunca contam.
+2. `endBalanceCents` de mês passado = soma, nas contas ativas, de `initialBalanceCents` + `signedEffectOn` de toda transação não provisionada com `date <= month.lastDay`.
+   O **último** snapshot (mês atual) usa todas as transações não provisionadas, sem corte por data: fica igual a `Forecast.currentTotalCents` (o KPI "Saldo atual").
+3. `expenseCents` = soma de `spendingByCategory(txs, month).values`; no mês atual, só transações com `date <= today`.
+4. `expenseUntilDay(txs, month, day)`: despesas pagas do mês com `date.day <= min(day, month.daysInMonth)`. Usado para comparar o mês atual com o mesmo período do mês anterior.
+5. `deltaRatio(previous, current)`: `previous == 0` → `null`; senão `(current - previous) / previous.abs()` (ex.: 1000 → 1500 = 0.5; -1000 → -500 = 0.5; 1000 → 0 = -1.0).
+6. Custo O(T × meses) no pior caso; chamado só pelo Ledger (memoizado).
+
 ## 6. Camada de app
 
 ### 6.1 `app/app_scope.dart`
@@ -573,6 +605,10 @@ class Ledger extends ChangeNotifier {
   List<CardPurchaseOption> get bestCardsToday;     // bestCardsToBuy(cards.all, {id: usedLimitFor(id)}, today)
   List<InstallmentCommitment> get installmentCommitments; // from: mês atual.next(), months: 12
   List<PaymentCard> get cardsWithoutPaymentAccount; // ids ativos = contas !archived
+  // Fase 7 (memoizados como os demais):
+  List<MonthSnapshot> get monthlyHistory;          // monthlyHistory(..., today: today, months: 6)
+  ({int current, int previous}) get expenseMonthToDate;
+    // current = monthlyHistory.last.expenseCents; previous = expenseUntilDay(transactions, mês anterior, today.day)
 }
 ```
 Cada getter é preguiçoso e memoizado; o cache inteiro é invalidado quando qualquer repo/settings notifica
@@ -588,23 +624,43 @@ Cada getter é preguiçoso e memoizado; o cache inteiro é invalidado quando qua
 
 ## 7. UI
 
-Visual conforme `CLAUDE.md` (paleta, tipografia, espaçamento). Cores via `context.colors` (extensão em `core/theme/app_colors.dart`).
+Visual conforme `CLAUDE.md` (paleta, tipografia, espaçamento) e `docs/V3_DIRECTION.md`. Tom: sóbrio, entre sério e wabi-sabi. Cores via `context.colors` (extensão em `core/theme/app_colors.dart`).
 
 ### 7.1 Tema — `lib/core/theme/`
 - `app_colors.dart`: `class AppColors extends ThemeExtension<AppColors>` com tokens `background, surface, sidebar, primary, primarySubtle, textPrimary, textSecondary, chartBar, warning, danger, success, border` + `AppColors.light`/`AppColors.dark` (valores do CLAUDE.md; `success` = `#43A047`/`#66BB6A`; `border` = textSecondary α 0.15) + `extension AppColorsX on BuildContext { AppColors get colors; }`.
-- `app_spacing.dart`: `AppSpace.xs=4, sm=8, md=12, lg=16, xl=24, xxl=32`; `AppRadius.card=8, chip=4` (+ `BorderRadius` prontos).
+  Neutros quentes (Fase 7): claro `background #F6F5F2`, `surface #FFFFFF`, `sidebar #ECEAE5`; escuro `background #161514`, `surface #1F1E1C`, `sidebar #2A2826`. Primário, status e texto inalterados.
+- `app_spacing.dart`: `AppSpace.xs=4, sm=8, md=12, lg=16, xl=24, xxl=32`; `AppRadius.card=8, chip=4` (+ `BorderRadius` prontos);
+  `abstract final class AppMotion { static const fast = Duration(milliseconds: 150); static const normal = Duration(milliseconds: 200); static const curve = Curves.easeOutCubic; }` (Fase 7). Toda microanimação usa esses valores.
 - `app_palettes.dart`: `const List<int> kEntityColors` (10 cores ARGB para contas/cartões/categorias) e `const List<int> kCategoryIcons` (codepoints de `Icons.*` comuns — use `Icons.x.codePoint`). Única exceção permitida a valores fixos.
-- `app_theme.dart`: `ThemeData AppTheme.light()` / `AppTheme.dark()` — Material 3, `extensions: [AppColors.x]`, `scaffoldBackgroundColor`, `cardTheme` (radius 8, elevation 0, borda), `inputDecorationTheme` (outline, dense), `dividerTheme`, `textTheme` (títulos 18 w600, seções 14 w600, corpo 13, apoio 12).
+- `app_text.dart` (Fase 7):
+  ```dart
+  abstract final class AppFonts { static const sans = 'IBMPlexSans'; static const serif = 'SourceSerif4'; }
+  abstract final class AppText {
+    static const tabularFigures = [FontFeature.tabularFigures()];
+    static TextStyle tabular(TextStyle style);           // style.copyWith(fontFeatures: tabularFigures)
+    static TextStyle screenTitle(BuildContext context);  // textTheme.titleLarge (serif, 20, w600)
+    static TextStyle kpi(BuildContext context);          // serif, 22, w600, textPrimary, tabular
+  }
+  ```
+- `app_theme.dart`: `ThemeData AppTheme.light()` / `AppTheme.dark()` — Material 3, `fontFamily: AppFonts.sans`, `extensions: [AppColors.x]`, `scaffoldBackgroundColor`, `cardTheme` (radius 8, elevation 0, borda), `inputDecorationTheme` (outline, dense), `dividerTheme`, `textTheme` (títulos 20 w600 **serif** em `titleLarge`; seções 14 w600, corpo 13, apoio 12, badge 11 em sans), `tooltipTheme` (fundo `surface`, borda `border`, texto `textPrimary` 12, radius 4, `waitDuration` 300 ms).
+- Fontes (Fase 7): `assets/fonts/` com IBM Plex Sans (Regular 400, Medium 500, SemiBold 600) e Source Serif 4 (Regular 400, Semibold 600), licença OFL (`OFL-*.txt` no mesmo diretório). Declaradas em `pubspec.yaml` (`flutter: fonts:`), famílias `IBMPlexSans` e `SourceSerif4`. Não é dependência nova (asset).
 
 ### 7.2 Widgets compartilhados — `lib/core/widgets/`
-`MoneyText(int cents, {style, signed, colorBySign})` (respeita `hideValues`), `SectionCard(title, trailing, child)`,
-`EmptyState(icon, message, action?)`, `LimitBar(used, limit)` (cor muda: <70% primary, <90% warning, ≥90% danger),
+`MoneyText(int cents, {style, signed, colorBySign})` (respeita `hideValues`; algarismos tabulares), `SectionCard(title, trailing, child)`,
+`EmptyState(icon, message, action?)`, `LimitBar(used, limit)` (cor muda: <70% primary, <90% warning, ≥90% danger; Fase 7: `Tooltip` "Usado R$ X de R$ Y (Z%)"),
 `StatusBadge(label, color)`, `MonthSelector(value, onChanged)`, `MoneyField(controller, label)`,
 `DateField(value, onChanged, label)`, `confirmDialog(context, title, message) → Future<bool>`,
-`PlannedMarker` (ícone relógio + itálico para provisionados), `KpiTile(label, cents, color?)`.
+`PlannedMarker` (ícone relógio + itálico para provisionados), `KpiTile(label, cents, color?, caption?, trend?)` (valor em `AppText.kpi`; Fase 7: `Widget? trend` abaixo do valor; troca de valor com `AnimatedSwitcher` fade `AppMotion.fast`).
+
+Fase 7 (arquivos novos, exportados por `widgets.dart`):
+- `trend.dart`: `DeltaBadge({required double? ratio, bool higherIsBetter = true})` → "▲ 12,3%" / "▼ 5,0%" (11 px w500, tabular); cor `success` se a variação é boa, `danger` se ruim, `textSecondary` se `ratio == 0`; `ratio == null` → `SizedBox.shrink()`. `Tooltip` "vs. mês anterior".
+  `Sparkline({required List<int> values, double width = 80, double height = 24, Color? color})` → `LineChart` do fl_chart sem eixos, grade, borda, pontos e toque; `color ?? colors.primary`; menos de 2 valores → `SizedBox(width, height)`.
+- `bank_avatar.dart`: `BankAvatar({required String bankName, double size = 24})` → quadrado `AppRadius.chip` com fundo `Color(kEntityColors[bankColorIndex(name)])` α 0.18 e iniciais na cor cheia (11 px w600). Nome vazio → "?" com `textSecondary`. Funções públicas puras: `String bankInitials(String name)` (trim; 2+ palavras → 1ª letra das 2 primeiras; 1 palavra → 2 primeiras letras; maiúsculas; vazio → "?") e `int bankColorIndex(String name)` (hash estável: `h = (h * 31 + codeUnit) & 0x7fffffff` sobre `name.trim().toLowerCase()`, `% kEntityColors.length`). Nunca logo real.
+- `skeleton.dart`: `SkeletonBox({double? width, required double height})` (retângulo `textSecondary` α 0.12, `AppRadius.chip`) e `SkeletonPulse({required Widget child})` (opacidade 0.5↔1.0 em loop de 900 ms). `SkeletonList({int rows = 6})` = coluna de `SkeletonBox` dentro de um `SkeletonPulse`.
+- `sortable_header.dart`: `SortableHeaderLabel({required String label, required bool active, required bool ascending, required VoidCallback? onTap, bool alignEnd = false})` → texto do cabeçalho (12 px w600 `textSecondary`; ativo → `textPrimary`) + seta `Icons.arrow_upward` 14 px visível só se `active`, girada 180° quando `!ascending` (`AnimatedRotation` `AppMotion.fast`). `onTap == null` → não clicável.
 
 ### 7.3 Shell e telas
-`HomeShell`: largura ≥ 900 → sidebar fixa 220px (`colors.sidebar`) com itens ícone+rótulo, item ativo com `primarySubtle`, rodapé com toggle "Modo: Simples/Ultra"; Ultra mostra badge de contagem (faturas vencidas/pendências). < 900 → `AppBar` + `Drawer` com os mesmos itens.
+`HomeShell`: só desktop, sempre com sidebar (`colors.sidebar`). Largura ≥ 900 → sidebar 220px com itens ícone+rótulo, item ativo com `primarySubtle`, rodapé com toggle "Modo: Simples/Ultra"; Ultra mostra badge de contagem (faturas vencidas/pendências). < 900 → sidebar colapsada de 64px só com ícones (rótulo em `Tooltip`; badge vira ponto `danger` 8px; rodapé vira `IconButton` de modo com tooltip "Modo: Simples/Ultra"). Largura animada com `AnimatedContainer` (`AppMotion.normal`). Sem `Drawer` nem `AppBar`.
 Páginas (índice): 0 Painel, 1 Previsão, 2 Cartões, 3 Contas, 4 Transações, 5 Recorrentes, 6 Categorias, 7 Ajustes.
 Botão global "Nova transação" (FAB / botão no cabeçalho).
 
@@ -631,11 +687,26 @@ Linhas provisionadas: itálico + `PlannedMarker` + fundo `warning` α 0.08. Pass
 | Cartão sem conta de pagamento | Cartões (`CardTile`) | badge `warning` "Sem conta de pagamento" | idem |
 | Mudança de ciclo com vigência (§4.2) | Form de cartão | ao editar fechamento/vencimento de cartão de crédito **com transações**, pergunta "Vale a partir de" (padrão hoje) e salva via `withCycleChange` | idem |
 
+#### Identidade visual e polimento (Fase 7)
+| Recurso | Onde | Simples | Ultra |
+|---|---|---|---|
+| Fontes e paleta quente (§7.1) | App inteiro | sim | sim |
+| Delta vs. mês anterior + sparkline 6 meses (§5.10) | Painel, KPI "Saldo atual": delta `deltaRatio(history[n-2].endBalanceCents, history.last.endBalanceCents)`, `higherIsBetter: true`; sparkline = `endBalanceCents` | — | sim |
+| KPI "Gasto no mês" | Painel (5º KPI): valor `expenseMonthToDate.current`, caption "até hoje"; delta `deltaRatio(previous, current)` com `higherIsBetter: false`; sparkline = `expenseCents` dos 6 meses | — | sim |
+| Avatar de banco | Cabeçalho de banco em Cartões e Contas | — | sim |
+| Cabeçalho ordenável (fixo) | Transações: Data, Descrição, Conta/Cartão, Categoria, Valor; clique alterna asc/desc; padrão Data desc | — (cabeçalho estático) | sim |
+| Estado vazio com ação | Transações ("Nova transação"; Ultra com filtro ativo: "Limpar filtros"), Recorrentes ("Nova recorrência"), Categorias ("Nova categoria") | sim | sim |
+| Tooltip rico | Gráfico de saldo diário (data, saldo, entradas e saídas do dia, nº de eventos); `LimitBar` | — (gráfico só Ultra) | sim |
+| Skeleton de boot | `main.dart` mostra `BootScreen` enquanto `bootstrap()` roda | sim | sim |
+| Microanimações 150–200 ms | Sidebar (item ativo e colapso), seta de ordenação, troca de valor do KPI | sim | sim |
+
+Dados de delta/sparkline vêm de `Ledger.monthlyHistory` / `Ledger.expenseMonthToDate` (memoizados), nunca calculados em `build`.
+
 ### 7.4 Onboarding
 Uma tela: escolher modo (Simples/Ultra) + checkbox "Criar dados de exemplo" (fictícios: "Banco Alfa", "Banco Beta"; nunca bancos reais). Grava `onboardingDone`.
 
 ## 8. Testes
 - Unitários obrigatórios para todo `domain/` e `core/utils|models|services`.
 - `test/` espelha `lib/` (`test/features/cards/domain/invoice_cycle_test.dart`).
-- Widget smoke test: app sobe com `MemoryRecordStore` e navega pelas 8 páginas sem exceção.
+- Widget smoke test: app sobe com `MemoryRecordStore` e navega pelas 8 páginas sem exceção (janela larga 1400×900 e estreita 800×700 com sidebar colapsada).
 - Portão: `bash tool/check.sh` → `CHECK OK`.

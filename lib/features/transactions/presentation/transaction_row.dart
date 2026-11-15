@@ -259,19 +259,31 @@ class TransactionColumns extends StatelessWidget {
   );
 }
 
-/// Cabeçalho fixo da tabela.
+/// Cabeçalho fixo da tabela. Rótulos ordenáveis só quando [onSort] é dado (Ultra).
 class TransactionTableHeader extends StatelessWidget {
-  const TransactionTableHeader({super.key, required this.ultra});
+  const TransactionTableHeader({
+    super.key,
+    required this.ultra,
+    this.sort,
+    this.onSort,
+  });
 
   final bool ultra;
+  final TxSort? sort;
+  final ValueChanged<TxSortColumn>? onSort;
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final style = (Theme.of(context).textTheme.bodySmall ?? const TextStyle())
-        .copyWith(color: c.textSecondary, fontWeight: FontWeight.w600);
-    Widget label(String text) =>
-        Text(text, style: style, maxLines: 1, overflow: TextOverflow.ellipsis);
+    final sortCallback = onSort;
+    Widget label(String text, TxSortColumn column, {bool alignEnd = false}) =>
+        SortableHeaderLabel(
+          label: text,
+          active: sort?.column == column,
+          ascending: sort?.ascending ?? false,
+          onTap: sortCallback == null ? null : () => sortCallback(column),
+          alignEnd: alignEnd,
+        );
     return DecoratedBox(
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: c.border)),
@@ -282,11 +294,15 @@ class TransactionTableHeader extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: AppSpace.sm),
           child: TransactionColumns(
             ultra: ultra,
-            date: label('Data'),
-            description: label('Descrição'),
-            origin: ultra ? label('Conta / Cartão') : const SizedBox.shrink(),
-            category: ultra ? label('Categoria') : const SizedBox.shrink(),
-            value: label('Valor'),
+            date: label('Data', TxSortColumn.date),
+            description: label('Descrição', TxSortColumn.description),
+            origin: ultra
+                ? label('Conta / Cartão', TxSortColumn.origin)
+                : const SizedBox.shrink(),
+            category: ultra
+                ? label('Categoria', TxSortColumn.category)
+                : const SizedBox.shrink(),
+            value: label('Valor', TxSortColumn.value, alignEnd: true),
             menu: const SizedBox.shrink(),
           ),
         ),

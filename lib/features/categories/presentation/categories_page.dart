@@ -137,11 +137,19 @@ class _CategoriesPageState extends State<CategoriesPage> {
                                   ),
                                 ),
                               if (lines.isEmpty)
-                                const SliverFillRemaining(
+                                SliverFillRemaining(
                                   hasScrollBody: false,
                                   child: EmptyState(
                                     icon: Icons.category_outlined,
                                     message: 'Nenhuma categoria aqui ainda.',
+                                    action: FilledButton.icon(
+                                      onPressed: () => showCategoryForm(
+                                        context,
+                                        kind: _kind,
+                                      ),
+                                      icon: const Icon(Icons.add),
+                                      label: const Text('Nova categoria'),
+                                    ),
                                   ),
                                 )
                               else

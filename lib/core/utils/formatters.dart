@@ -1,3 +1,5 @@
+import 'dart:math' show pow;
+
 import '../models/year_month.dart';
 
 const _monthsShort = [
@@ -79,6 +81,19 @@ String formatMonth(YearMonth m) => '${_monthsShort[m.month - 1]}/${m.year}';
 
 /// "Novembro 2026"
 String formatMonthLong(YearMonth m) => '${_monthsLong[m.month - 1]} ${m.year}';
+
+/// Razão em percentual com vírgula: `0.1234` → "12,3%". Arredonda meio-para-cima; zero nunca sai com sinal.
+String formatPercent(double ratio, {int decimals = 1}) {
+  final scale = pow(10, decimals).toInt();
+  final scaled = (ratio.abs() * 100 * scale + 0.5).floor();
+  final whole = scaled ~/ scale;
+  final frac = scaled % scale;
+  final sign = ratio < 0 && scaled > 0 ? '-' : '';
+  final digits = decimals == 0
+      ? '$whole'
+      : '$whole,${frac.toString().padLeft(decimals, '0')}';
+  return '$sign$digits%';
+}
 
 String _two(int n) => n.toString().padLeft(2, '0');
 

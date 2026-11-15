@@ -117,9 +117,14 @@ class RecurringPage extends StatelessWidget {
                     const SizedBox(height: AppSpace.lg),
                     Expanded(
                       child: items.isEmpty
-                          ? const EmptyState(
+                          ? EmptyState(
                               icon: Icons.repeat,
                               message: 'Nenhuma recorrência cadastrada.',
+                              action: FilledButton.icon(
+                                onPressed: () => showRecurringForm(context),
+                                icon: const Icon(Icons.add),
+                                label: const Text('Nova recorrência'),
+                              ),
                             )
                           : ListView.builder(
                               itemCount: items.length,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/app_scope.dart';
+import '../../../app/ledger.dart';
 import '../../../core/models/app_settings.dart';
 import '../../../core/models/year_month.dart';
 import '../../../core/theme/app_colors.dart';
@@ -22,6 +23,9 @@ class TransactionsPage extends StatefulWidget {
 class _TransactionsPageState extends State<TransactionsPage> {
   YearMonth? _month;
   TransactionFilter _filter = const TransactionFilter();
+  TxSort _sort = kDefaultTxSort;
+  // Troca a chave da barra de filtros: `initialValue` não reseta sozinho.
+  int _filterEpoch = 0;
 
   @override
   Widget build(BuildContext context) {
@@ -30,12 +34,42 @@ class _TransactionsPageState extends State<TransactionsPage> {
       listenable: s.ledger,
       builder: (context, _) {
         final ultra = s.settings.value.mode == AppMode.ultra;
-        final month = _month ?? YearMonth.fromDate(s.ledger.today);
+        final ledger = s.ledger;
+        final month = _month ?? YearMonth.fromDate(ledger.today);
         // Simples: só mês e provisionados ocultos (CLAUDE.md: Provisionados = Ocultos).
         final filter = ultra
             ? _filter
             : const TransactionFilter(showPlanned: false);
-        final rows = visibleTransactions(s.transactions.all, month, filter);
+        final filtered = visibleTransactions(s.transactions.all, month, filter);
+        // Ordenação só no Ultra e só sobre as linhas já filtradas do mês.
+        final rows = ultra
+            ? sortTransactions(
+                filtered,
+                _sort,
+                originName: (t) => _originText(ledger, t),
+                categoryName: (t) =>
+                    ledger.categoriesById[t.categoryId]?.name ?? '',
+              )
+            : filtered;
+        final newButton = FilledButton.icon(
+          icon: const Icon(Icons.add),
+          label: const Text('Nova transação'),
+          onPressed: () => showTransactionForm(context),
+        );
+        final emptyAction = ultra && _filter.hasCriteria
+            ? Wrap(
+                alignment: WrapAlignment.center,
+                spacing: AppSpace.sm,
+                runSpacing: AppSpace.sm,
+                children: [
+                  newButton,
+                  OutlinedButton(
+                    onPressed: _clearFilters,
+                    child: const Text('Limpar filtros'),
+                  ),
+                ],
+              )
+            : newButton;
         final pad = MediaQuery.sizeOf(context).width < 600
             ? AppSpace.lg
             : AppSpace.xl;
@@ -58,6 +92,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
                   Padding(
                     padding: EdgeInsets.fromLTRB(pad, 0, pad, AppSpace.md),
                     child: TransactionFilterBar(
+                      key: ValueKey(_filterEpoch),
                       filter: _filter,
                       accounts: [
                         for (final a in s.accounts.all)
@@ -84,6 +119,10 @@ class _TransactionsPageState extends State<TransactionsPage> {
                               s.ledger.today,
                             ).firstDay,
                             services: s,
+                            sort: _sort,
+                            onSort: (c) =>
+                                setState(() => _sort = toggleTxSort(_sort, c)),
+                            emptyAction: emptyAction,
                             onAction: (t, a) => _onAction(context, s, t, a),
                           ),
                         ),
@@ -98,6 +137,13 @@ class _TransactionsPageState extends State<TransactionsPage> {
         );
       },
     );
+  }
+
+  void _clearFilters() {
+    setState(() {
+      _filter = const TransactionFilter();
+      _filterEpoch++;
+    });
   }
 
   Future<void> _onAction(
@@ -248,12 +294,35 @@ Transaction _duplicate(Transaction t) => Transaction.fromMap({
   'recurringId': null,
 });
 
+/// Conta ou cartão de origem; '—' quando não há vínculo.
+String _originName(Ledger ledger, Transaction t) =>
+    ledger.accountsById[t.accountId]?.name ??
+    ledger.cardsById[t.cardId]?.name ??
+    '—';
+
+/// Conta destino (transferência) ou cartão pago (pagamento de fatura).
+String? _destinationName(Ledger ledger, Transaction t) => switch (t.type) {
+  TransactionType.transfer => ledger.accountsById[t.toAccountId]?.name,
+  TransactionType.invoicePayment => ledger.cardsById[t.cardId]?.name,
+  _ => null,
+};
+
+/// Texto da coluna Conta / Cartão; também é o critério de ordenação dessa coluna.
+String _originText(Ledger ledger, Transaction t) {
+  final destination = _destinationName(ledger, t);
+  final origin = _originName(ledger, t);
+  return destination == null ? origin : '$origin → $destination';
+}
+
 class _TransactionTable extends StatelessWidget {
   const _TransactionTable({
     required this.rows,
     required this.ultra,
     required this.pastBefore,
     required this.services,
+    required this.sort,
+    required this.onSort,
+    required this.emptyAction,
     required this.onAction,
   });
 
@@ -261,15 +330,19 @@ class _TransactionTable extends StatelessWidget {
   final bool ultra;
   final DateTime pastBefore;
   final AppServices services;
+  final TxSort sort;
+  final ValueChanged<TxSortColumn> onSort;
+  final Widget emptyAction;
   final void Function(Transaction, TransactionAction) onAction;
 
   @override
   Widget build(BuildContext context) {
     if (rows.isEmpty) {
-      return const Card(
+      return Card(
         child: EmptyState(
           icon: Icons.receipt_long,
           message: 'Nenhuma transação neste filtro.',
+          action: emptyAction,
         ),
       );
     }
@@ -284,16 +357,8 @@ class _TransactionTable extends StatelessWidget {
           ultra: ultra,
           past: t.date.isBefore(pastBefore),
           category: ledger.categoriesById[t.categoryId],
-          origin:
-              ledger.accountsById[t.accountId]?.name ??
-              ledger.cardsById[t.cardId]?.name ??
-              '—',
-          destination: switch (t.type) {
-            TransactionType.transfer =>
-              ledger.accountsById[t.toAccountId]?.name,
-            TransactionType.invoicePayment => ledger.cardsById[t.cardId]?.name,
-            _ => null,
-          },
+          origin: _originName(ledger, t),
+          destination: _destinationName(ledger, t),
           onAction: (a) => onAction(t, a),
         );
       },
@@ -322,7 +387,11 @@ class _TransactionTable extends StatelessWidget {
               height: constraints.maxHeight,
               child: Column(
                 children: [
-                  const TransactionTableHeader(ultra: true),
+                  TransactionTableHeader(
+                    ultra: true,
+                    sort: sort,
+                    onSort: onSort,
+                  ),
                   Expanded(child: list),
                 ],
               ),

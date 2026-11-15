@@ -19,11 +19,25 @@ class DashboardKpiRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final balanceTrend = summary.balanceTrend;
+    final expenseTrend = summary.expenseTrend;
     return Wrap(
       spacing: AppSpace.md,
       runSpacing: AppSpace.md,
       children: [
-        _slot(KpiTile(label: 'Saldo atual', cents: summary.currentCents)),
+        _slot(
+          KpiTile(
+            label: 'Saldo atual',
+            cents: summary.currentCents,
+            trend: balanceTrend == null
+                ? null
+                : _Trend(
+                    delta: summary.balanceDelta,
+                    values: balanceTrend,
+                    higherIsBetter: true,
+                  ),
+          ),
+        ),
         _slot(
           KpiTile(label: 'A pagar em 30 dias', cents: summary.payableCents),
         ),
@@ -37,11 +51,58 @@ class DashboardKpiRow extends StatelessWidget {
             color: summary.endOfMonthCents < 0 ? c.danger : null,
           ),
         ),
+        if (summary.monthExpenseCents case final spent?)
+          _slot(
+            KpiTile(
+              label: 'Gasto no mês',
+              cents: spent,
+              caption: 'até hoje',
+              trend: expenseTrend == null
+                  ? null
+                  : _Trend(
+                      delta: summary.monthExpenseDelta,
+                      values: expenseTrend,
+                      higherIsBetter: false,
+                    ),
+            ),
+          ),
       ],
     );
   }
 
   static Widget _slot(Widget child) => SizedBox(width: 240, child: child);
+}
+
+/// Variação vs. mês anterior à esquerda e sparkline de 6 meses à direita (só Ultra).
+class _Trend extends StatelessWidget {
+  const _Trend({
+    required this.delta,
+    required this.values,
+    required this.higherIsBetter,
+  });
+
+  final double? delta;
+  final List<int> values;
+  final bool higherIsBetter;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        // Badge encolhe em vez de estourar o KPI (200 px úteis no slot de 240).
+        Flexible(
+          flex: 2,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: DeltaBadge(ratio: delta, higherIsBetter: higherIsBetter),
+          ),
+        ),
+        const Spacer(),
+        Sparkline(values: values),
+      ],
+    );
+  }
 }
 
 /// Alerta de saldo negativo. Ultra lista também as contas afetadas.

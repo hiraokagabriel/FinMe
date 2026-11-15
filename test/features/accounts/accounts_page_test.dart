@@ -5,6 +5,7 @@ import 'package:finme/core/models/app_settings.dart';
 import 'package:finme/core/services/record_store.dart';
 import 'package:finme/core/theme/app_theme.dart';
 import 'package:finme/core/utils/formatters.dart';
+import 'package:finme/core/widgets/widgets.dart';
 import 'package:finme/features/accounts/presentation/accounts_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -132,6 +133,24 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('Provisionar (ainda não feita)'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Ultra: avatar por banco; "Sem banco" mostra "?"', (
+    tester,
+  ) async {
+    final s = await _boot(tester, AppMode.ultra);
+    await _pump(tester, s, const Size(1400, 900));
+    // Grupos: Banco Alfa, Banco Beta e Sem banco.
+    expect(find.byType(BankAvatar), findsNWidgets(3));
+    expect(find.text('?'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Simples: sem avatar de banco', (tester) async {
+    final s = await _boot(tester, AppMode.simple);
+    await _pump(tester, s, const Size(1400, 900));
+    expect(find.byType(BankAvatar), findsNothing);
     expect(tester.takeException(), isNull);
   });
 }
