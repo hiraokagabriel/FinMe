@@ -175,9 +175,27 @@ class PaymentCard {
   int closingDay,          // 1..31 (crédito)
   int dueDay,              // 1..31 (crédito)
   String? paymentAccountId,// crédito: conta que paga a fatura; débito: conta debitada
-  int colorValue, bool archived
+  int colorValue, bool archived,
+  List<CardCycle> cycleHistory, // padrão const []; ciclos ANTERIORES, ordenados por `until` asc (Fase 5)
 }
+class CardCycle {           // mesmo arquivo; ==/hashCode por campos
+  const CardCycle({required this.until, required this.closingDay, required this.dueDay});
+  final DateTime until;     // exclusivo, dateOnly: vale para compras com data < until
+  final int closingDay, dueDay;
+  Map<String, dynamic> toMap();  // {'until': dateKey(until), 'closingDay', 'dueDay'}
+  factory CardCycle.fromMap(Map<String, dynamic> m); // until via parseDateKey
+}
+// Em PaymentCard:
+({int closingDay, int dueDay}) cycleOn(DateTime date);
+  // 1º item de cycleHistory com dateOnly(date) < until → seus dias; senão (closingDay, dueDay) atuais.
+PaymentCard withCycleChange({required int closingDay, required int dueDay, required DateTime effectiveFrom});
+  // dias iguais aos atuais → this. Senão: cycleHistory + CardCycle(until: dateOnly(effectiveFrom),
+  // closingDay: this.closingDay, dueDay: this.dueDay), e closingDay/dueDay novos.
+  // ArgumentError se effectiveFrom <= último until do histórico.
 ```
+- `closingDay`/`dueDay` continuam sendo o ciclo **atual** (vigente a partir do último `until`, ou sempre se o histórico é vazio): todos os chamadores existentes seguem válidos.
+- `toMap` grava `cycleHistory` como lista de mapas; `fromMap` tolera chave ausente, `null` ou item inválido (ignora o item) → sem migração de box. Backups antigos importam normalmente.
+- `copyWith` aceita `cycleHistory`; `==`/`hashCode` comparam a lista elemento a elemento (sem `package:flutter` — use loop ou `Object.hashAll`).
 
 ### 4.3 `features/categories/domain/transaction_category.dart`
 ```dart
@@ -244,6 +262,21 @@ DateTime invoiceDueDate(YearMonth dueMonth, PaymentCard card); // dueMonth.dateA
 Exemplo: fecha 5, vence 12. Compra 04/11 → fatura vence 12/11. Compra 05/11 → vence 12/12.
 Fecha 25, vence 5. Compra 24/11 → vence 05/12. Compra 25/11 → vence 05/01.
 
+**Histórico de ciclo (Fase 5).** Mudar fechamento/vencimento vale a partir de uma data, sem reescrever faturas passadas
+(senão pagamentos antigos, ligados por `invoiceKey`, cairiam em faturas erradas e reabririam faturas quitadas).
+Assinaturas finais:
+```dart
+YearMonth invoiceDueMonth(DateTime purchase, PaymentCard card);
+  // c = card.cycleOn(purchase); mesma regra acima com c.closingDay / c.dueDay
+DateTime invoiceClosingDate(YearMonth dueMonth, PaymentCard card, {DateTime? cycleDate});
+DateTime invoiceDueDate(YearMonth dueMonth, PaymentCard card, {DateTime? cycleDate});
+  // c = card.cycleOn(cycleDate ?? dueMonth.firstDay); mesma regra acima com c
+DateTime purchaseDueDate(DateTime purchase, PaymentCard card);
+  // invoiceDueDate(invoiceDueMonth(purchase, card), card, cycleDate: purchase)
+```
+Sem histórico, `cycleOn` devolve sempre o ciclo atual → comportamento idêntico ao anterior (testes de T-006 passam sem mudança).
+Transição: duas faturas que caem no mesmo `dueMonth` (ciclo antigo + novo) **se fundem** numa só (id e `invoiceKey` estáveis).
+
 ### 5.2 Fatura — `features/cards/domain/invoice.dart`
 ```dart
 enum InvoiceStatus { open, closed, paid, overdue }
@@ -270,6 +303,9 @@ class InvoiceService {
 }
 ```
 Só cartões `credit` têm faturas.
+Datas da fatura com histórico de ciclo: `closingDate`/`dueDate` usam `cycleDate` = maior `t.date` entre os `items`
+(data própria do item, inclusive parcelas); fatura sem itens (só pagamento) usa `dueMonth.firstDay`.
+O mês das parcelas continua `invoiceDueMonth(dataDa1ª, card).addMonths(index - 1)`.
 
 ### 5.3 Parcelas — `features/transactions/domain/installments.dart`
 ```dart
@@ -295,8 +331,10 @@ List<Transaction> occurrenceTransactions(
   // materialização (forProjection: false) → paid se date < to && !isBoleto, senão planned
   // (boleto exige confirmação; ocorrência de hoje fica provisionada).
 ```
-No boot (`bootstrap.dart`): materializa ocorrências de `max(startDate, materializedUntil + 1 dia)` até hoje
-(`forProjection: false`), grava, e atualiza `materializedUntil = hoje` na regra. Ocorrências futuras **não** são gravadas: entram na previsão via projeção.
+No boot e na virada de dia (`materializeRecurring`): materializa ocorrências de
+`max(startDate, materializedUntil + 1 dia)` até **ontem** (`forProjection: false`, `to = ontem + 1 dia`
+para a regra de status → tudo < hoje), grava, e atualiza `materializedUntil = ontem`.
+A ocorrência de hoje em diante aparece só pela projeção. Ocorrências futuras **não** são gravadas: entram na previsão via projeção.
 
 ### 5.5 Saldos — `features/accounts/domain/balances.dart`
 ```dart
@@ -360,6 +398,76 @@ Algoritmo:
    `accountNegativeDates` análogo por conta.
 Desempenho: O(n) sobre transações por cartão (agrupe por `cardId` uma vez).
 
+### 5.8 Insights de cartão — `features/cards/domain/card_insights.dart` (Fase 5)
+```dart
+class CardPurchaseOption {
+  const CardPurchaseOption({required this.card, required this.dueDate, required this.daysUntilDue, required this.freeLimitCents});
+  final PaymentCard card;
+  final DateTime dueDate;      // purchaseDueDate(today, card)
+  final int daysUntilDue;      // dias corridos today → dueDate (calcule com DateTime.utc para evitar horário de verão)
+  final int freeLimitCents;    // card.limitCents - usado (pode ser <= 0; limite 0 = não informado)
+  bool get hasLimit => freeLimitCents > 0;
+}
+List<CardPurchaseOption> bestCardsToBuy({
+  required Iterable<PaymentCard> cards,
+  required Map<String, int> usedLimitByCard, // ausente → 0
+  required DateTime today,
+});
+  // só kind == credit && !archived. Ordem: hasLimit (true antes), daysUntilDue desc,
+  // freeLimitCents desc, card.name asc.
+
+class InstallmentCommitment {
+  const InstallmentCommitment({required this.month, required this.byCard});
+  final YearMonth month;            // mês de vencimento da fatura
+  final Map<String, int> byCard;    // cardId → centavos; omite cartões com 0
+  int get totalCents;               // soma de byCard
+}
+List<InstallmentCommitment> installmentCommitments({
+  required Iterable<Invoice> invoices, // faturas de todos os cartões de crédito
+  required YearMonth from,
+  int months = 12,
+});
+  // exatamente `months` entradas (from .. from+months-1), inclusive zeradas.
+  // por fatura com dueMonth no intervalo: soma itens com installmentGroupId != null
+  // (expense +, income −) em byCard[invoice.card.id]. Ignora pagamentos e itens sem grupo
+  // (compras à vista e recorrências projetadas não são "compromisso de parcela").
+
+List<PaymentCard> cardsWithoutPaymentAccount(Iterable<PaymentCard> cards, Set<String> activeAccountIds);
+  // !archived && (paymentAccountId == null || !activeAccountIds.contains(paymentAccountId)); mantém ordem de entrada.
+```
+Exemplo (hoje 14/11/2026): A fecha 5/vence 12 → vence 12/12 (28 dias); B fecha 25/vence 5 → 05/12 (21);
+C fecha 20/vence 27 → 27/11 (13). Ordem A, B, C — exceto se A não tiver limite livre (vai para o fim).
+
+### 5.9 Linha do tempo de vencimentos e cobertura — `features/forecast/domain/invoice_timeline.dart` (Fase 5)
+```dart
+class InvoiceDue {
+  const InvoiceDue({required this.invoice, required this.date, required this.amountCents,
+                    this.accountId, this.accountBalanceAfterCents});
+  final Invoice invoice;
+  final DateTime date;                 // data do evento de previsão = max(invoice.dueDate, today)
+  final int amountCents;               // > 0 (remaining previsto)
+  final String? accountId;             // conta de pagamento ativa; null = sem conta (ou arquivada)
+  final int? accountBalanceAfterCents; // saldo previsto da conta ao FIM de `date`; null se accountId null
+  bool get overdue => invoice.dueDate.isBefore(date);
+  bool get hasAccount => accountId != null;
+  bool get uncovered => accountBalanceAfterCents != null && accountBalanceAfterCents! < 0;
+  bool get needsAttention => !hasAccount || uncovered;
+}
+List<InvoiceDue> invoiceTimeline({
+  required Forecast forecast,
+  required Iterable<Invoice> invoices, // para resolver ForecastEvent.sourceId == Invoice.id
+  int days = 60,
+});
+```
+Algoritmo (uma passada, O(eventos)):
+1. `limit = forecast.today + days` (inclusivo). Saldos por conta começam em `forecast.currentBalances`.
+2. Percorre `forecast.events` (já ordenados) agrupados por data; aplica **todos** os eventos do dia às contas
+   (`accountId != null`) e só então emite um `InvoiceDue` por evento `kind == invoice` do dia,
+   com `accountBalanceAfterCents = saldo[accountId]`. Para ao passar de `limit`.
+3. Evento cujo `sourceId` não está em `invoices` é ignorado. Saída na ordem dos eventos.
+Duas faturas no mesmo dia na mesma conta têm o mesmo saldo-após (fim do dia).
+O horizonte da previsão é ≥ 3 meses (`forecastMonths` mín. 3) → sempre cobre 60 dias.
+
 ## 6. Camada de app
 
 ### 6.1 `app/app_scope.dart`
@@ -393,9 +501,16 @@ class Ledger extends ChangeNotifier {
   Forecast get forecast;                      // horizonte = settings.forecastMonths
   Map<String?, int> spendingFor(YearMonth m);
   List<Transaction> upcoming({int days = 30}); // planned + ocorrências projetadas no período, ordenado
+  // Fase 5 (memoizados como os demais):
+  List<InvoiceDue> get invoiceTimeline;            // invoiceTimeline(forecast, faturas de todos os cartões de crédito, days: 60)
+  List<CardPurchaseOption> get bestCardsToday;     // bestCardsToBuy(cards.all, {id: usedLimitFor(id)}, today)
+  List<InstallmentCommitment> get installmentCommitments; // from: mês atual.next(), months: 12
+  List<PaymentCard> get cardsWithoutPaymentAccount; // ids ativos = contas !archived
 }
 ```
-Cada getter é preguiçoso e memoizado; o cache inteiro é invalidado quando qualquer repo/settings notifica.
+Cada getter é preguiçoso e memoizado; o cache inteiro é invalidado quando qualquer repo/settings notifica
+**ou quando `today` muda** (virada de dia: invalida, roda `materializeRecurring` e notifica).
+`upcoming` lista só **saídas** (despesas/boletos provisionados e projetados de conta).
 
 ### 6.3 Ações de escrita (em `features/*/presentation/*_actions.dart` ou no próprio form)
 - Salvar compra parcelada: `buildInstallments` e `transactions.upsertAll`.
@@ -438,6 +553,16 @@ Botão global "Nova transação" (FAB / botão no cabeçalho).
 | Ajustes | modo, tema, ocultar valores | + horizonte de previsão, backup JSON (exportar/importar), CSV, apagar dados |
 
 Linhas provisionadas: itálico + `PlannedMarker` + fundo `warning` α 0.08. Passadas: `textSecondary`.
+
+#### Previsibilidade avançada (Fase 5)
+| Recurso | Onde | Simples | Ultra |
+|---|---|---|---|
+| Cobertura de faturas (§5.9 `needsAttention`) | Painel | 1 banner (cor `danger`): "N faturas nos próximos 60 dias sem saldo previsto na conta de pagamento" + a mais próxima (cartão, data). Oculto se N = 0 | `SectionCard` "Cobertura de faturas": linha por fatura com data, cartão, conta (ou "Sem conta de pagamento" em `warning`), valor, saldo após (`danger`) |
+| Linha do tempo de vencimentos (60 dias) | Previsão | — | `SectionCard` "Vencimentos (60 dias)": agrupado por dia; linha = cartão, conta, valor, saldo previsto da conta após; badge "Vencida" (overdue), saldo < 0 em `danger` |
+| Compromisso de parcelas M+1..M+12 | Previsão | — | `SectionCard` "Parcelas já comprometidas": tabela meses × (Total + 1 coluna por cartão com algum valor), rolagem horizontal |
+| Melhor cartão para comprar hoje (§5.8) | Cartões (topo) | 1 linha: "Melhor para comprar hoje: {cartão} — fatura vence em N dias ({dd/mm})" (1º com `hasLimit`; oculto se nenhum) | `SectionCard` com tabela: cartão, banco, vencimento, dias, limite livre (`danger` se ≤ 0) |
+| Cartão sem conta de pagamento | Cartões (`CardTile`) | badge `warning` "Sem conta de pagamento" | idem |
+| Mudança de ciclo com vigência (§4.2) | Form de cartão | ao editar fechamento/vencimento de cartão de crédito **com transações**, pergunta "Vale a partir de" (padrão hoje) e salva via `withCycleChange` | idem |
 
 ### 7.4 Onboarding
 Uma tela: escolher modo (Simples/Ultra) + checkbox "Criar dados de exemplo" (fictícios: "Banco Alfa", "Banco Beta"; nunca bancos reais). Grava `onboardingDone`.

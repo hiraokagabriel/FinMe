@@ -25,6 +25,9 @@ Future<void> showTransactionForm(BuildContext context, {Transaction? initial}) {
   );
 }
 
+CategoryKind _kindOf(TransactionType type) =>
+    type == TransactionType.income ? CategoryKind.income : CategoryKind.expense;
+
 class _TransactionFormDialog extends StatefulWidget {
   const _TransactionFormDialog({required this.services, this.initial});
 
@@ -41,6 +44,9 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
   late final TextEditingController _description;
   late final TextEditingController _notes;
   late final TextEditingController _installments;
+  // Ids gerados uma vez: duplo clique regrava o mesmo registro, não cria outro.
+  late final String _id;
+  late final String _groupId;
   late TransactionType _type;
   late DateTime _date;
   String? _categoryId;
@@ -57,6 +63,9 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
     return type == TransactionType.transfer ||
         type == TransactionType.invoicePayment;
   }
+
+  /// Parcela existente: só valor, descrição, categoria e notas são editáveis.
+  bool get _fixed => widget.initial?.isInstallment ?? false;
 
   PaymentCard? get _card =>
       _cardId == null ? null : widget.services.ledger.cardsById[_cardId];
@@ -75,8 +84,11 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
   void initState() {
     super.initState();
     final init = widget.initial;
+    final s = widget.services;
+    _id = init?.id ?? newId();
+    _groupId = newId();
     _type = init?.type ?? TransactionType.expense;
-    _date = init?.date ?? widget.services.ledger.today;
+    _date = init?.date ?? s.ledger.today;
     _amount = TextEditingController(
       text: init == null
           ? ''
@@ -85,9 +97,14 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
     _description = TextEditingController(text: init?.description ?? '');
     _notes = TextEditingController(text: init?.notes ?? '');
     _installments = TextEditingController(text: '1');
-    _categoryId = init?.categoryId;
-    _accountId = init?.accountId;
-    _cardId = init?.cardId;
+    // Referências órfãs (conta/cartão/categoria apagados) viram null: evita assert do Dropdown.
+    _categoryId = _validCategory(init?.categoryId);
+    final accountId = init?.accountId;
+    _accountId = accountId != null && s.accounts.byId(accountId) != null
+        ? accountId
+        : null;
+    final cardId = init?.cardId;
+    _cardId = cardId != null && s.cards.byId(cardId) != null ? cardId : null;
     _planned = init?.isPlanned ?? false;
     _boleto = init?.isBoleto ?? false;
   }
@@ -101,10 +118,14 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
     super.dispose();
   }
 
+  /// Categoria só vale se existe e é do tipo da transação.
+  String? _validCategory(String? id) {
+    final c = id == null ? null : widget.services.categories.byId(id);
+    return c != null && c.kind == _kindOf(_type) ? id : null;
+  }
+
   List<TransactionCategory> _categoriesFor(AppServices s) {
-    final kind = _type == TransactionType.income
-        ? CategoryKind.income
-        : CategoryKind.expense;
+    final kind = _kindOf(_type);
     final list = [
       for (final c in s.categories.all)
         if (c.kind == kind) c,
@@ -114,14 +135,9 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
   }
 
   void _setType(TransactionType type) {
-    final kind = type == TransactionType.income
-        ? CategoryKind.income
-        : CategoryKind.expense;
     setState(() {
       _type = type;
-      if (widget.services.ledger.categoriesById[_categoryId]?.kind != kind) {
-        _categoryId = null;
-      }
+      _categoryId = _validCategory(_categoryId);
     });
   }
 
@@ -161,7 +177,7 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
   }
 
   Future<void> _save() async {
-    if (!(_formKey.currentState?.validate() ?? false)) {
+    if (_saving || !(_formKey.currentState?.validate() ?? false)) {
       return;
     }
     final cents = parseMoney(_amount.text);
@@ -173,7 +189,7 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
     final notes = _notes.text.trim();
     final hasAccount = _accountId != null;
     final tx = Transaction(
-      id: init?.id ?? newId(),
+      id: _id,
       type: _type,
       amountCents: cents,
       date: _date,
@@ -194,22 +210,29 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
       notes: notes.isEmpty ? null : notes,
     );
     setState(() => _saving = true);
-    if (_installmentsEnabled) {
-      final count = int.parse(_installments.text.trim());
+    try {
+      final count = _installmentsEnabled
+          ? int.parse(_installments.text.trim())
+          : 1;
       if (count > 1) {
         await s.transactions.upsertAll(
-          buildInstallments(base: tx, count: count, groupId: newId()),
+          buildInstallments(base: tx, count: count, groupId: _groupId),
         );
       } else {
         await s.transactions.upsert(tx);
       }
-    } else {
-      await s.transactions.upsert(tx);
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Erro ao salvar: $e')));
+      }
     }
-    if (!mounted) {
-      return;
-    }
-    Navigator.of(context).pop();
   }
 
   @override
@@ -217,8 +240,11 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
     final s = widget.services;
     final init = widget.initial;
     final locked = _locked;
+    final fixed = _fixed;
     final c = context.colors;
+    final narrow = MediaQuery.sizeOf(context).width < 600;
     return Dialog(
+      insetPadding: narrow ? const EdgeInsets.all(AppSpace.lg) : null,
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 520),
         child: Form(
@@ -256,7 +282,9 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
                         ),
                       ],
                       selected: {_type},
-                      onSelectionChanged: (sel) => _setType(sel.first),
+                      onSelectionChanged: fixed
+                          ? null
+                          : (sel) => _setType(sel.first),
                     ),
                   ),
                 const SizedBox(height: AppSpace.md),
@@ -269,9 +297,12 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
                       (v ?? '').trim().isEmpty ? 'Informe a descrição' : null,
                 ),
                 const SizedBox(height: AppSpace.md),
-                DateField(
-                  value: _date,
-                  onChanged: (d) => setState(() => _date = d),
+                AbsorbPointer(
+                  absorbing: fixed,
+                  child: DateField(
+                    value: _date,
+                    onChanged: (d) => setState(() => _date = d),
+                  ),
                 ),
                 if (!locked) ...[
                   const SizedBox(height: AppSpace.md),
@@ -283,7 +314,7 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
                       labelText: 'Conta ou cartão',
                     ),
                     items: _originItems(s),
-                    onChanged: _setOrigin,
+                    onChanged: fixed ? null : _setOrigin,
                     validator: (v) =>
                         v == null ? 'Escolha a conta ou cartão' : null,
                   ),
@@ -322,8 +353,8 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
                 if (init != null && init.isInstallment) ...[
                   const SizedBox(height: AppSpace.md),
                   Text(
-                    'Parcela ${init.installmentIndex}/${init.installmentCount}. '
-                    'Alterações valem só para esta parcela.',
+                    'Parcela ${init.installmentIndex}/${init.installmentCount}'
+                    ' — data e cartão seguem a compra original.',
                     style: Theme.of(
                       context,
                     ).textTheme.bodySmall?.copyWith(color: c.textSecondary),
@@ -332,7 +363,9 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
                 if (!locked && _accountId != null) ...[
                   CheckboxListTile(
                     value: _planned,
-                    onChanged: (v) => setState(() => _planned = v ?? false),
+                    onChanged: fixed
+                        ? null
+                        : (v) => setState(() => _planned = v ?? false),
                     title: const Text('Provisionado (ainda não pago)'),
                     controlAffinity: ListTileControlAffinity.leading,
                     contentPadding: EdgeInsets.zero,
@@ -340,7 +373,9 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
                   ),
                   CheckboxListTile(
                     value: _boleto,
-                    onChanged: (v) => setState(() => _boleto = v ?? false),
+                    onChanged: fixed
+                        ? null
+                        : (v) => setState(() => _boleto = v ?? false),
                     title: const Text('Boleto'),
                     controlAffinity: ListTileControlAffinity.leading,
                     contentPadding: EdgeInsets.zero,
@@ -356,17 +391,23 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
                   ),
                 ),
                 const SizedBox(height: AppSpace.xl),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
+                Wrap(
+                  alignment: WrapAlignment.end,
+                  spacing: AppSpace.sm,
+                  runSpacing: AppSpace.sm,
                   children: [
                     TextButton(
                       onPressed: () => Navigator.of(context).pop(),
                       child: const Text('Cancelar'),
                     ),
-                    const SizedBox(width: AppSpace.sm),
                     FilledButton(
                       onPressed: _saving ? null : _save,
-                      child: const Text('Salvar'),
+                      child: _saving
+                          ? const SizedBox.square(
+                              dimension: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Salvar'),
                     ),
                   ],
                 ),

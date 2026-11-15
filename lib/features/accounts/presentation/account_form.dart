@@ -54,6 +54,8 @@ class _AccountFormDialogState extends State<_AccountFormDialog> {
   }.where((b) => b.isNotEmpty).toList()..sort();
   late AccountType _type = widget.initial?.type ?? AccountType.checking;
   late int _color = widget.initial?.colorValue ?? kEntityColors.first;
+  late final String _id = widget.initial?.id ?? newId();
+  bool _saving = false;
 
   @override
   void dispose() {
@@ -65,7 +67,7 @@ class _AccountFormDialogState extends State<_AccountFormDialog> {
   }
 
   Future<void> _save() async {
-    if (!(_formKey.currentState?.validate() ?? false)) {
+    if (_saving || !(_formKey.currentState?.validate() ?? false)) {
       return;
     }
     final balance = parseMoney(_balance.text);
@@ -75,25 +77,35 @@ class _AccountFormDialogState extends State<_AccountFormDialog> {
     final name = _name.text.trim();
     final bank = _bank.text.trim();
     final initial = widget.initial;
-    final account = initial == null
-        ? Account(
-            id: newId(),
-            name: name,
-            bankName: bank,
-            type: _type,
-            initialBalanceCents: balance,
-            colorValue: _color,
-          )
-        : initial.copyWith(
-            name: name,
-            bankName: bank,
-            type: _type,
-            initialBalanceCents: balance,
-            colorValue: _color,
-          );
-    await widget.services.accounts.upsert(account);
-    if (mounted) {
-      Navigator.of(context).pop();
+    setState(() => _saving = true);
+    try {
+      final account = initial == null
+          ? Account(
+              id: _id,
+              name: name,
+              bankName: bank,
+              type: _type,
+              initialBalanceCents: balance,
+              colorValue: _color,
+            )
+          : initial.copyWith(
+              name: name,
+              bankName: bank,
+              type: _type,
+              initialBalanceCents: balance,
+              colorValue: _color,
+            );
+      await widget.services.accounts.upsert(account);
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Erro ao salvar: $e')));
+      }
     }
   }
 
@@ -215,7 +227,15 @@ class _AccountFormDialogState extends State<_AccountFormDialog> {
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancelar'),
         ),
-        FilledButton(onPressed: _save, child: const Text('Salvar')),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          child: _saving
+              ? const SizedBox.square(
+                  dimension: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Salvar'),
+        ),
       ],
     );
   }

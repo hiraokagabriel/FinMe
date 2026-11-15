@@ -53,11 +53,30 @@ class _CardFormState extends State<_CardForm> {
   late CardKind _kind;
   late String? _accountId;
   late int _color;
+  late final String _id;
+  bool _saving = false;
+
+  /// Cartão com transações: tipo travado e troca de dias reorganiza faturas.
+  bool _hasTransactions(AppServices s) {
+    final id = widget.initial?.id;
+    return id != null && s.transactions.all.any((t) => t.cardId == id);
+  }
+
+  bool _reorganizes(AppServices s) {
+    final old = widget.initial;
+    return old != null &&
+        _kind == CardKind.credit &&
+        old.kind == CardKind.credit &&
+        _hasTransactions(s) &&
+        (int.tryParse(_closing.text.trim()) != old.closingDay ||
+            int.tryParse(_due.text.trim()) != old.dueDay);
+  }
 
   @override
   void initState() {
     super.initState();
     final initial = widget.initial;
+    _id = initial?.id ?? newId();
     final credit = initial?.kind == CardKind.credit;
     _name = TextEditingController(text: initial?.name ?? '');
     _bank = TextEditingController(text: initial?.bankName ?? '');
@@ -106,6 +125,7 @@ class _CardFormState extends State<_CardForm> {
     final accountValue = accounts.any((a) => a.id == _accountId)
         ? _accountId
         : null;
+    final kindLocked = _hasTransactions(s);
     return AlertDialog(
       title: Text(widget.initial == null ? 'Novo cartão' : 'Editar cartão'),
       content: ConstrainedBox(
@@ -153,7 +173,9 @@ class _CardFormState extends State<_CardForm> {
                   ButtonSegment(value: CardKind.debit, label: Text('Débito')),
                 ],
                 selected: {_kind},
-                onSelectionChanged: (sel) => setState(() => _kind = sel.first),
+                onSelectionChanged: kindLocked
+                    ? null
+                    : (sel) => setState(() => _kind = sel.first),
               ),
               const SizedBox(height: AppSpace.md),
               TextFormField(
@@ -185,6 +207,16 @@ class _CardFormState extends State<_CardForm> {
                     Expanded(child: _dayField(_due, 'Dia de vencimento')),
                   ],
                 ),
+                if (_reorganizes(s)) ...[
+                  const SizedBox(height: AppSpace.sm),
+                  Text(
+                    'Mudar fechamento/vencimento reorganiza as faturas passadas deste cartão.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: context.colors.warning,
+                    ),
+                  ),
+                ],
               ],
               const SizedBox(height: AppSpace.md),
               DropdownButtonFormField<String?>(
@@ -239,7 +271,15 @@ class _CardFormState extends State<_CardForm> {
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancelar'),
         ),
-        FilledButton(onPressed: () => _save(s), child: const Text('Salvar')),
+        FilledButton(
+          onPressed: _saving ? null : () => _save(s),
+          child: _saving
+              ? const SizedBox.square(
+                  dimension: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Salvar'),
+        ),
       ],
     );
   }
@@ -247,6 +287,7 @@ class _CardFormState extends State<_CardForm> {
   Widget _dayField(TextEditingController controller, String label) {
     return TextFormField(
       controller: controller,
+      onChanged: (_) => setState(() {}),
       keyboardType: TextInputType.number,
       inputFormatters: [
         FilteringTextInputFormatter.digitsOnly,
@@ -261,30 +302,56 @@ class _CardFormState extends State<_CardForm> {
   }
 
   Future<void> _save(AppServices s) async {
-    if (!(_formKey.currentState?.validate() ?? false)) {
+    if (_saving || !(_formKey.currentState?.validate() ?? false)) {
       return;
     }
-    final credit = _kind == CardKind.credit;
-    final old = widget.initial;
-    await s.cards.upsert(
-      PaymentCard(
-        id: old?.id ?? newId(),
-        name: _name.text.trim(),
-        bankName: _bank.text.trim(),
-        brand: _brand,
-        kind: _kind,
-        last4: _last4.text.trim(),
-        // Em débito, limite e dias de fatura são ignorados (SPEC §4.2).
-        limitCents: credit ? (parseMoney(_limit.text) ?? 0) : 0,
-        closingDay: credit ? int.parse(_closing.text.trim()) : 1,
-        dueDay: credit ? int.parse(_due.text.trim()) : 1,
-        paymentAccountId: _accountId,
-        colorValue: _color,
-        archived: old?.archived ?? false,
-      ),
-    );
-    if (mounted) {
-      Navigator.of(context).pop();
+    setState(() => _saving = true);
+    try {
+      if (_reorganizes(s)) {
+        final ok = await confirmDialog(
+          context,
+          title: 'Reorganizar faturas?',
+          message:
+              'Mudar fechamento/vencimento reorganiza as faturas passadas deste cartão.',
+          confirmLabel: 'Salvar',
+        );
+        if (!mounted) {
+          return;
+        }
+        if (!ok) {
+          setState(() => _saving = false);
+          return;
+        }
+      }
+      final credit = _kind == CardKind.credit;
+      final old = widget.initial;
+      await s.cards.upsert(
+        PaymentCard(
+          id: _id,
+          name: _name.text.trim(),
+          bankName: _bank.text.trim(),
+          brand: _brand,
+          kind: _kind,
+          last4: _last4.text.trim(),
+          // Em débito, limite e dias de fatura são ignorados (SPEC §4.2).
+          limitCents: credit ? (parseMoney(_limit.text) ?? 0) : 0,
+          closingDay: credit ? int.parse(_closing.text.trim()) : 1,
+          dueDay: credit ? int.parse(_due.text.trim()) : 1,
+          paymentAccountId: _accountId,
+          colorValue: _color,
+          archived: old?.archived ?? false,
+        ),
+      );
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Erro ao salvar: $e')));
+      }
     }
   }
 }

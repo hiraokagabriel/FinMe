@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_palettes.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/widgets.dart';
@@ -84,7 +85,7 @@ class TransactionRow extends StatelessWidget {
               Icon(
                 cat == null
                     ? Icons.label_outline
-                    : IconData(cat.iconCodePoint, fontFamily: 'MaterialIcons'),
+                    : categoryIcon(cat.iconCodePoint),
                 size: 16,
                 color: cat == null ? c.textSecondary : Color(cat.colorValue),
               ),

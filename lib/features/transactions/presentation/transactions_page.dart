@@ -31,8 +31,10 @@ class _TransactionsPageState extends State<TransactionsPage> {
       builder: (context, _) {
         final ultra = s.settings.value.mode == AppMode.ultra;
         final month = _month ?? YearMonth.fromDate(s.ledger.today);
-        // Simples: só mês; provisionados sempre visíveis.
-        final filter = ultra ? _filter : const TransactionFilter();
+        // Simples: só mês e provisionados ocultos (CLAUDE.md: Provisionados = Ocultos).
+        final filter = ultra
+            ? _filter
+            : const TransactionFilter(showPlanned: false);
         final rows = visibleTransactions(s.transactions.all, month, filter);
         final pad = MediaQuery.sizeOf(context).width < 600
             ? AppSpace.lg
@@ -85,7 +87,7 @@ class _TransactionsPageState extends State<TransactionsPage> {
                             onAction: (t, a) => _onAction(context, s, t, a),
                           ),
                         ),
-                        _TotalsBar(totals: txTotals(rows)),
+                        _TotalsBar(totals: txTotals(rows), ultra: ultra),
                       ],
                     ),
                   ),
@@ -123,27 +125,38 @@ class _TransactionsPageState extends State<TransactionsPage> {
     Transaction t,
   ) async {
     var date = s.ledger.today;
+    var answered = false;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialog) => AlertDialog(
-          title: const Text('Confirmar pagamento'),
-          content: DateField(
-            value: date,
-            label: 'Data do pagamento',
-            onChanged: (d) => setDialog(() => date = d),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Cancelar'),
+        builder: (ctx, setDialog) {
+          // Duplo clique faria um segundo pop, fechando a rota de baixo.
+          void close(bool value) {
+            if (!answered) {
+              answered = true;
+              Navigator.of(ctx).pop(value);
+            }
+          }
+
+          return AlertDialog(
+            title: const Text('Confirmar pagamento'),
+            content: DateField(
+              value: date,
+              label: 'Data do pagamento',
+              onChanged: (d) => setDialog(() => date = d),
             ),
-            FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Confirmar'),
-            ),
-          ],
-        ),
+            actions: [
+              TextButton(
+                onPressed: () => close(false),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () => close(true),
+                child: const Text('Confirmar'),
+              ),
+            ],
+          );
+        },
       ),
     );
     if (ok != true || !context.mounted) {
@@ -162,29 +175,42 @@ class _TransactionsPageState extends State<TransactionsPage> {
   ) async {
     if (t.isInstallment) {
       final group = t.installmentGroupId;
+      var answered = false;
       final scope = await showDialog<_DeleteScope>(
         context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Excluir parcela'),
-          content: Text(
-            '${t.description} · parcela ${t.installmentIndex}/${t.installmentCount}',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancelar'),
+        builder: (ctx) {
+          // Duplo clique faria um segundo pop, fechando a rota de baixo.
+          void close([_DeleteScope? value]) {
+            if (!answered) {
+              answered = true;
+              Navigator.of(ctx).pop(value);
+            }
+          }
+
+          return AlertDialog(
+            title: const Text('Excluir parcela'),
+            content: Text(
+              '${t.description} · parcela ${t.installmentIndex}/${t.installmentCount}',
             ),
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(_DeleteScope.one),
-              child: const Text('Só esta parcela'),
-            ),
-            FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: ctx.colors.danger),
-              onPressed: () => Navigator.of(ctx).pop(_DeleteScope.all),
-              child: const Text('Todas as parcelas'),
-            ),
-          ],
-        ),
+            actions: [
+              TextButton(
+                onPressed: () => close(),
+                child: const Text('Cancelar'),
+              ),
+              TextButton(
+                onPressed: () => close(_DeleteScope.one),
+                child: const Text('Só esta parcela'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: ctx.colors.danger,
+                ),
+                onPressed: () => close(_DeleteScope.all),
+                child: const Text('Todas as parcelas'),
+              ),
+            ],
+          );
+        },
       );
       if (scope == null || !context.mounted) {
         return;
@@ -310,9 +336,11 @@ class _TransactionTable extends StatelessWidget {
 
 /// Rodapé: despesas, provisionado e receitas do filtro ativo.
 class _TotalsBar extends StatelessWidget {
-  const _TotalsBar({required this.totals});
+  const _TotalsBar({required this.totals, required this.ultra});
 
   final TxTotals totals;
+  // Simples oculta provisionados, então o total provisionado também some.
+  final bool ultra;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -322,7 +350,7 @@ class _TotalsBar extends StatelessWidget {
       runSpacing: AppSpace.xs,
       children: [
         _Total(label: 'Despesas', cents: totals.expenses),
-        _Total(label: 'Provisionado', cents: totals.provisioned),
+        if (ultra) _Total(label: 'Provisionado', cents: totals.provisioned),
         _Total(label: 'Receitas', cents: totals.income),
       ],
     ),

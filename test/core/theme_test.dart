@@ -50,6 +50,12 @@ void main() {
     expect(kCategoryIcons, hasLength(30));
   });
 
+  test('categoryIcon resolve codepoint salvo e cai em label_outline', () {
+    expect(categoryIcon(kCategoryIcons.first), Icons.restaurant);
+    expect(categoryIcon(kCategoryIcons.last), Icons.category);
+    expect(categoryIcon(0), Icons.label_outline);
+  });
+
   testWidgets('context.colors resolve o token do tema ativo', (tester) async {
     late AppColors captured;
     await tester.pumpWidget(

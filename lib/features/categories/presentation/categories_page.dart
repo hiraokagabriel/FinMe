@@ -4,6 +4,7 @@ import '../../../app/app_scope.dart';
 import '../../../core/models/app_settings.dart';
 import '../../../core/models/year_month.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_palettes.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/widgets.dart';
 import '../../recurring/domain/recurring_rule.dart';
@@ -194,7 +195,7 @@ class _CategoriesPageState extends State<CategoriesPage> {
   }
 }
 
-/// Exclui a categoria. Se houver lançamentos/recorrências usando, avisa e os deixa sem categoria.
+/// Exclui a categoria, sempre com confirmação. Lançamentos/recorrências que a usam ficam sem categoria.
 Future<void> _deleteCategory(
   BuildContext context,
   AppServices s,
@@ -204,15 +205,12 @@ Future<void> _deleteCategory(
       .where((t) => t.categoryId == cat.id)
       .length;
   final ruleCount = s.recurring.all.where((r) => r.categoryId == cat.id).length;
-  if (txCount + ruleCount == 0) {
-    await s.categories.delete(cat.id);
-    return;
-  }
   final ok = await confirmDialog(
     context,
     title: 'Excluir "${cat.name}"?',
-    message:
-        '$txCount lançamento(s) e $ruleCount recorrência(s) ficarão sem categoria.',
+    message: txCount + ruleCount == 0
+        ? 'A categoria não está em uso.'
+        : '$txCount lançamento(s) e $ruleCount recorrência(s) ficarão sem categoria.',
     confirmLabel: 'Excluir',
     destructive: true,
   );
@@ -332,7 +330,7 @@ class _CategoryRow extends StatelessWidget {
     final color = cat == null ? c.textSecondary : Color(cat.colorValue);
     final icon = cat == null
         ? Icons.help_outline
-        : IconData(cat.iconCodePoint, fontFamily: 'MaterialIcons');
+        : categoryIcon(cat.iconCodePoint);
     final budget = line.budget;
     final spent = line.spentCents;
     return Padding(

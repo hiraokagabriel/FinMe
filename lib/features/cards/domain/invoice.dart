@@ -156,11 +156,13 @@ class InvoiceService {
 
   static Invoice _toInvoice(PaymentCard card, YearMonth month, _Group group) {
     final items = [...group.items]..sort((a, b) => a.date.compareTo(b.date));
+    // Ciclo das datas = item mais recente (lista ordenada); sem itens → início do mês.
+    final cycleDate = items.isEmpty ? null : items.last.date;
     return Invoice(
       card: card,
       dueMonth: month,
-      closingDate: invoiceClosingDate(month, card),
-      dueDate: invoiceDueDate(month, card),
+      closingDate: invoiceClosingDate(month, card, cycleDate: cycleDate),
+      dueDate: invoiceDueDate(month, card, cycleDate: cycleDate),
       items: items,
       chargesCents: group.charges,
       creditsCents: group.credits,

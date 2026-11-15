@@ -144,4 +144,55 @@ void main() {
       greaterThanOrEqualTo(usedBefore),
     );
   });
+
+  testWidgets('categoria em uso trava o tipo no formulário de edição', (
+    tester,
+  ) async {
+    final s = await _setup(tester, AppMode.simple);
+    await _pump(tester, s);
+
+    final row = find.byKey(const ValueKey('cat-cat_mercado'));
+    await tester.tap(
+      find.descendant(of: row, matching: find.byIcon(Icons.more_vert)),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Editar'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Tipo travado'), findsOneWidget);
+    // O último SegmentedButton é o do diálogo, que está sobre a página.
+    final kindControl = tester.widget<SegmentedButton<CategoryKind>>(
+      find.byType(SegmentedButton<CategoryKind>).last,
+    );
+    expect(kindControl.onSelectionChanged, isNull);
+  });
+
+  testWidgets('excluir categoria sem uso pede confirmação', (tester) async {
+    final s = await _setup(tester, AppMode.simple);
+    await s.categories.upsert(
+      const TransactionCategory(
+        id: 'cat_pets',
+        name: 'Pets',
+        kind: CategoryKind.expense,
+        iconCodePoint: 0,
+        colorValue: 0xFF000000,
+      ),
+    );
+    await _pump(tester, s);
+
+    final row = find.byKey(const ValueKey('cat-cat_pets'));
+    await tester.tap(
+      find.descendant(of: row, matching: find.byIcon(Icons.more_vert)),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Excluir'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Excluir "Pets"?'), findsOneWidget);
+    expect(s.categories.byId('cat_pets'), isNotNull);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Excluir'));
+    await tester.pumpAndSettle();
+    expect(s.categories.byId('cat_pets'), isNull);
+  });
 }

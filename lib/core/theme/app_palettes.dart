@@ -14,36 +14,49 @@ const List<int> kEntityColors = [
   0xFF546E7A, // cinza-azulado
 ];
 
-/// Codepoints de ícones de categoria (`IconData.fontFamily` é MaterialIcons).
-final List<int> kCategoryIcons = [
-  Icons.restaurant.codePoint,
-  Icons.shopping_cart.codePoint,
-  Icons.directions_car.codePoint,
-  Icons.home.codePoint,
-  Icons.local_hospital.codePoint,
-  Icons.school.codePoint,
-  Icons.movie.codePoint,
-  Icons.flight.codePoint,
-  Icons.pets.codePoint,
-  Icons.fitness_center.codePoint,
-  Icons.receipt_long.codePoint,
-  Icons.phone_android.codePoint,
-  Icons.wifi.codePoint,
-  Icons.bolt.codePoint,
-  Icons.water_drop.codePoint,
-  Icons.local_gas_station.codePoint,
-  Icons.checkroom.codePoint,
-  Icons.card_giftcard.codePoint,
-  Icons.savings.codePoint,
-  Icons.work.codePoint,
-  Icons.attach_money.codePoint,
-  Icons.trending_up.codePoint,
-  Icons.subscriptions.codePoint,
-  Icons.sports_esports.codePoint,
-  Icons.local_cafe.codePoint,
-  Icons.build.codePoint,
-  Icons.child_care.codePoint,
-  Icons.spa.codePoint,
-  Icons.more_horiz.codePoint,
-  Icons.category.codePoint,
+/// Ícones de categoria. A ordem é o índice usado pelo seed (`kCategoryIcons[i]`).
+const List<IconData> kCategoryIconData = [
+  Icons.restaurant,
+  Icons.shopping_cart,
+  Icons.directions_car,
+  Icons.home,
+  Icons.local_hospital,
+  Icons.school,
+  Icons.movie,
+  Icons.flight,
+  Icons.pets,
+  Icons.fitness_center,
+  Icons.receipt_long,
+  Icons.phone_android,
+  Icons.wifi,
+  Icons.bolt,
+  Icons.water_drop,
+  Icons.local_gas_station,
+  Icons.checkroom,
+  Icons.card_giftcard,
+  Icons.savings,
+  Icons.work,
+  Icons.attach_money,
+  Icons.trending_up,
+  Icons.subscriptions,
+  Icons.sports_esports,
+  Icons.local_cafe,
+  Icons.build,
+  Icons.child_care,
+  Icons.spa,
+  Icons.more_horiz,
+  Icons.category,
 ];
+
+/// Codepoints salvos em `TransactionCategory.iconCodePoint`.
+final List<int> kCategoryIcons = [
+  for (final icon in kCategoryIconData) icon.codePoint,
+];
+
+final Map<int, IconData> _iconByCodePoint = {
+  for (final icon in kCategoryIconData) icon.codePoint: icon,
+};
+
+/// Ícone de um codepoint salvo. Desconhecido (ex.: backup de outra versão) cai em `label_outline`.
+IconData categoryIcon(int codePoint) =>
+    _iconByCodePoint[codePoint] ?? Icons.label_outline;

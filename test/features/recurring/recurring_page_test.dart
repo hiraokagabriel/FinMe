@@ -145,11 +145,16 @@ void main() {
     final rule = created.single;
     expect(rule.cardId, 'card_alfa_visa');
     expect(rule.amountCents, 15000);
-    // Início = hoje (14/11): a ocorrência de hoje já foi materializada.
-    expect(
-      s.transactions.all.where((t) => t.recurringId == rule.id),
-      hasLength(1),
-    );
+    // Início = hoje (14/11): materializa só até ontem, então hoje não é gravada.
+    expect(s.transactions.all.where((t) => t.recurringId == rule.id), isEmpty);
+    // Ocorrência de hoje aparece só pela projeção da fatura do cartão.
+    final todayOccurrence = s.ledger
+        .invoicesFor(rule.cardId!)
+        .expand((i) => i.items)
+        .where(
+          (t) => t.recurringId == rule.id && t.date == DateTime(2026, 11, 14),
+        );
+    expect(todayOccurrence, hasLength(1));
   });
 
   testWidgets(
@@ -171,7 +176,8 @@ void main() {
       final rule = s.recurring.byId('rec_aluguel')!;
       expect(rule.isBoleto, isTrue);
       expect(rule.accountId, 'acc_beta');
-      expect(rule.materializedUntil, DateTime(2026, 11, 14));
+      // materializedUntil = ontem (13/11), preservado na edição.
+      expect(rule.materializedUntil, DateTime(2026, 11, 13));
     },
   );
 

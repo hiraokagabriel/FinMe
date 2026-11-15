@@ -44,6 +44,8 @@ class _TransferDialogState extends State<_TransferDialog> {
   late String _to = widget.accounts[1].id;
   late DateTime _date = widget.services.ledger.today;
   bool _planned = false;
+  late final String _id = newId();
+  bool _saving = false;
 
   @override
   void dispose() {
@@ -58,27 +60,37 @@ class _TransferDialogState extends State<_TransferDialog> {
   ];
 
   Future<void> _save() async {
-    if (!(_formKey.currentState?.validate() ?? false)) {
+    if (_saving || !(_formKey.currentState?.validate() ?? false)) {
       return;
     }
     final amount = parseMoney(_amount.text);
     if (amount == null) {
       return;
     }
-    await widget.services.transactions.upsert(
-      Transaction(
-        id: newId(),
-        type: TransactionType.transfer,
-        amountCents: amount,
-        date: _date,
-        description: _description.text.trim(),
-        accountId: _from,
-        toAccountId: _to,
-        status: _planned ? TransactionStatus.planned : TransactionStatus.paid,
-      ),
-    );
-    if (mounted) {
-      Navigator.of(context).pop();
+    setState(() => _saving = true);
+    try {
+      await widget.services.transactions.upsert(
+        Transaction(
+          id: _id,
+          type: TransactionType.transfer,
+          amountCents: amount,
+          date: _date,
+          description: _description.text.trim(),
+          accountId: _from,
+          toAccountId: _to,
+          status: _planned ? TransactionStatus.planned : TransactionStatus.paid,
+        ),
+      );
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Erro ao salvar: $e')));
+      }
     }
   }
 
@@ -148,7 +160,15 @@ class _TransferDialogState extends State<_TransferDialog> {
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancelar'),
         ),
-        FilledButton(onPressed: _save, child: const Text('Salvar')),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          child: _saving
+              ? const SizedBox.square(
+                  dimension: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Salvar'),
+        ),
       ],
     );
   }

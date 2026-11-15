@@ -87,7 +87,7 @@ class _AccountsPageState extends State<AccountsPage> {
                         label: const Text('Nova conta'),
                       ),
                     ]
-                  // Cabeçalho sem espaço para rótulos no mobile (PageHeader não quebra linha).
+                  // Mobile: só ícones, para o cabeçalho caber numa linha.
                   : [
                       IconButton.outlined(
                         tooltip: 'Transferir',

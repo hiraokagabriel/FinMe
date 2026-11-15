@@ -75,6 +75,7 @@ Future<AppServices> bootstrap({
     await categories.upsertAll(defaultCategories());
   }
 
+  late final AppServices services;
   final ledger = Ledger(
     accounts: accounts,
     cards: cards,
@@ -83,8 +84,9 @@ Future<AppServices> bootstrap({
     recurring: recurring,
     settings: settings,
     clock: now,
+    onDayChanged: () => materializeRecurring(services),
   );
-  final services = AppServices(
+  services = AppServices(
     accounts: accounts,
     cards: cards,
     categories: categories,
@@ -98,22 +100,32 @@ Future<AppServices> bootstrap({
   return services;
 }
 
-/// SPEC §5.4: grava as ocorrências de recorrência de `materializedUntil + 1` até hoje
-/// e avança `materializedUntil`. Idempotente; ocorrências futuras não são gravadas.
+/// SPEC §5.4: grava as ocorrências de recorrência de `materializedUntil + 1` até ontem
+/// e avança `materializedUntil = ontem`. Idempotente; a ocorrência de hoje e as futuras
+/// não são gravadas: entram na previsão via projeção.
 Future<void> materializeRecurring(AppServices s) async {
   final today = dateOnly(s.clock());
+  final yesterday = DateTime(today.year, today.month, today.day - 1);
   final existing = {for (final t in s.transactions.all) t.id};
   final created = <Transaction>[];
   final updated = <RecurringRule>[];
   for (final r in s.recurring.all) {
     final from = _firstPendingDay(r);
-    if (from.isAfter(today)) {
+    if (from.isAfter(yesterday)) {
       continue;
     }
+    // `to = hoje` só para a regra de status (tudo < hoje fica paid, exceto boleto);
+    // o filtro tira a ocorrência de hoje, que não é gravada.
     created.addAll(
-      occurrenceTransactions(r, from, today, existing, forProjection: false),
+      occurrenceTransactions(
+        r,
+        from,
+        today,
+        existing,
+        forProjection: false,
+      ).where((t) => t.date.isBefore(today)),
     );
-    updated.add(r.copyWith(materializedUntil: today));
+    updated.add(r.copyWith(materializedUntil: yesterday));
   }
   // Transações antes das regras: se falhar no meio, a próxima execução não duplica (ids existentes são pulados).
   await s.transactions.upsertAll(created);

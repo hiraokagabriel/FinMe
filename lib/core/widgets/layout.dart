@@ -90,6 +90,7 @@ class EmptyState extends StatelessWidget {
 }
 
 /// Cabeçalho de página: título à esquerda, ações à direita.
+/// Sem espaço na mesma linha, as ações quebram para baixo do título (Wrap).
 class PageHeader extends StatelessWidget {
   const PageHeader({super.key, required this.title, this.actions = const []});
 
@@ -103,15 +104,14 @@ class PageHeader extends StatelessWidget {
         horizontal: AppSpace.xl,
         vertical: AppSpace.lg,
       ),
-      child: Row(
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: AppSpace.sm,
+        runSpacing: AppSpace.sm,
         children: [
-          Expanded(
-            child: Text(title, style: Theme.of(context).textTheme.titleLarge),
-          ),
-          for (final action in actions) ...[
-            const SizedBox(width: AppSpace.sm),
-            action,
-          ],
+          Text(title, style: Theme.of(context).textTheme.titleLarge),
+          ...actions,
         ],
       ),
     );

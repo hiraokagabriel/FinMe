@@ -31,11 +31,14 @@ class _PayInvoiceDialogState extends State<_PayInvoiceDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _amount;
   late String? _accountId;
+  late final String _id;
   DateTime? _date;
+  bool _saving = false;
 
   @override
   void initState() {
     super.initState();
+    _id = newId();
     final invoice = widget.invoice;
     _amount = TextEditingController(
       text: formatMoney(invoice.remainingCents).replaceFirst('R\$ ', ''),
@@ -114,8 +117,13 @@ class _PayInvoiceDialogState extends State<_PayInvoiceDialog> {
               child: const Text('Cancelar'),
             ),
             FilledButton(
-              onPressed: () => _save(s),
-              child: const Text('Salvar'),
+              onPressed: _saving ? null : () => _save(s),
+              child: _saving
+                  ? const SizedBox.square(
+                      dimension: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Salvar'),
             ),
           ],
         );
@@ -124,26 +132,36 @@ class _PayInvoiceDialogState extends State<_PayInvoiceDialog> {
   }
 
   Future<void> _save(AppServices s) async {
-    if (!(_formKey.currentState?.validate() ?? false)) {
+    if (_saving || !(_formKey.currentState?.validate() ?? false)) {
       return;
     }
     final invoice = widget.invoice;
-    await s.transactions.upsert(
-      Transaction(
-        id: newId(),
-        type: TransactionType.invoicePayment,
-        // MoneyField já rejeita vazio e <= 0; após validate() o valor existe.
-        amountCents: parseMoney(_amount.text)!,
-        date: _date ?? s.ledger.today,
-        description: 'Pagamento fatura ${invoice.card.name}',
-        accountId: _accountId,
-        cardId: invoice.card.id,
-        invoiceKey: invoice.dueMonth.key,
-        status: TransactionStatus.paid,
-      ),
-    );
-    if (mounted) {
-      Navigator.of(context).pop();
+    setState(() => _saving = true);
+    try {
+      await s.transactions.upsert(
+        Transaction(
+          id: _id,
+          type: TransactionType.invoicePayment,
+          // MoneyField já rejeita vazio e <= 0; após validate() o valor existe.
+          amountCents: parseMoney(_amount.text)!,
+          date: _date ?? s.ledger.today,
+          description: 'Pagamento fatura ${invoice.card.name}',
+          accountId: _accountId,
+          cardId: invoice.card.id,
+          invoiceKey: invoice.dueMonth.key,
+          status: TransactionStatus.paid,
+        ),
+      );
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Erro ao salvar: $e')));
+      }
     }
   }
 }

@@ -48,6 +48,8 @@ class _CategoryFormDialogState extends State<_CategoryFormDialog> {
   late CategoryKind _kind = widget.kind;
   late int _icon = widget.initial?.iconCodePoint ?? kCategoryIcons.first;
   late int _color = widget.initial?.colorValue ?? kEntityColors.first;
+  late final bool _inUse = _isInUse();
+  bool _saving = false;
 
   @override
   void dispose() {
@@ -63,25 +65,49 @@ class _CategoryFormDialogState extends State<_CategoryFormDialog> {
         : (cents / 100).toStringAsFixed(2).replaceAll('.', ',');
   }
 
+  /// Categoria com lançamentos ou recorrências não pode trocar de tipo (despesa/receita).
+  bool _isInUse() {
+    final id = widget.initial?.id;
+    if (id == null) {
+      return false;
+    }
+    final services = widget.services;
+    return services.transactions.all.any((t) => t.categoryId == id) ||
+        services.recurring.all.any((r) => r.categoryId == id);
+  }
+
   Future<void> _save() async {
-    if (!(_formKey.currentState?.validate() ?? false)) {
+    if (_saving || !(_formKey.currentState?.validate() ?? false)) {
       return;
     }
-    final budget = parseMoney(_budget.text);
-    final category = TransactionCategory(
-      id: widget.initial?.id ?? newId(),
-      name: _name.text.trim(),
-      kind: _kind,
-      iconCodePoint: _icon,
-      colorValue: _color,
-      monthlyBudgetCents:
-          _kind == CategoryKind.expense && budget != null && budget > 0
-          ? budget
-          : null,
-    );
-    await widget.services.categories.upsert(category);
-    if (mounted) {
-      Navigator.of(context).pop();
+    setState(() => _saving = true);
+    try {
+      final budget = parseMoney(_budget.text);
+      final category = TransactionCategory(
+        id: widget.initial?.id ?? newId(),
+        name: _name.text.trim(),
+        kind: _kind,
+        iconCodePoint: _icon,
+        colorValue: _color,
+        monthlyBudgetCents:
+            _kind == CategoryKind.expense && budget != null && budget > 0
+            ? budget
+            : null,
+      );
+      await widget.services.categories.upsert(category);
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Não foi possível salvar a categoria.')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
     }
   }
 
@@ -127,9 +153,20 @@ class _CategoryFormDialogState extends State<_CategoryFormDialog> {
                     ),
                   ],
                   selected: {_kind},
-                  onSelectionChanged: (sel) =>
-                      setState(() => _kind = sel.first),
+                  // Sem onSelectionChanged o controle fica desabilitado.
+                  onSelectionChanged: _inUse
+                      ? null
+                      : (sel) => setState(() => _kind = sel.first),
                 ),
+                if (_inUse) ...[
+                  const SizedBox(height: AppSpace.xs),
+                  Text(
+                    'Tipo travado: a categoria tem lançamentos ou recorrências.',
+                    style: textTheme.bodySmall?.copyWith(
+                      color: c.textSecondary,
+                    ),
+                  ),
+                ],
                 if (_kind == CategoryKind.expense) ...[
                   const SizedBox(height: AppSpace.md),
                   MoneyField(
@@ -182,11 +219,16 @@ class _CategoryFormDialogState extends State<_CategoryFormDialog> {
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     TextButton(
-                      onPressed: () => Navigator.of(context).pop(),
+                      onPressed: _saving
+                          ? null
+                          : () => Navigator.of(context).pop(),
                       child: const Text('Cancelar'),
                     ),
                     const SizedBox(width: AppSpace.sm),
-                    FilledButton(onPressed: _save, child: const Text('Salvar')),
+                    FilledButton(
+                      onPressed: _saving ? null : _save,
+                      child: const Text('Salvar'),
+                    ),
                   ],
                 ),
               ],
@@ -220,11 +262,7 @@ class _IconChoice extends StatelessWidget {
           borderRadius: AppRadius.chipBorder,
           border: selected ? Border.all(color: c.primary, width: 2) : null,
         ),
-        child: Icon(
-          IconData(codePoint, fontFamily: 'MaterialIcons'),
-          size: 20,
-          color: c.textPrimary,
-        ),
+        child: Icon(categoryIcon(codePoint), size: 20, color: c.textPrimary),
       ),
     );
   }

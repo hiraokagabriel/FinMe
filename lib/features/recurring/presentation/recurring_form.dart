@@ -56,6 +56,8 @@ class _RecurringDialogState extends State<_RecurringDialog> {
   String? _originKey;
   String? _categoryId;
   String? _endError;
+  late final String _id;
+  bool _saving = false;
 
   bool get _isExpense => _type == TransactionType.expense;
   bool get _isAccount => _originKey?.startsWith(_accountPrefix) ?? false;
@@ -67,6 +69,7 @@ class _RecurringDialogState extends State<_RecurringDialog> {
   void initState() {
     super.initState();
     final r = widget.initial;
+    _id = r?.id ?? newId();
     _description = TextEditingController(text: r?.description);
     _amount = TextEditingController(
       text: r == null
@@ -138,6 +141,9 @@ class _RecurringDialogState extends State<_RecurringDialog> {
   }
 
   Future<void> _save() async {
+    if (_saving) {
+      return;
+    }
     final endError = _hasEnd && _end.isBefore(_start)
         ? 'A data de término é anterior ao início.'
         : null;
@@ -148,7 +154,7 @@ class _RecurringDialogState extends State<_RecurringDialog> {
     final s = widget.services;
     final initial = widget.initial;
     final rule = RecurringRule(
-      id: initial?.id ?? newId(),
+      id: _id,
       description: _description.text.trim(),
       type: _type,
       amountCents: parseMoney(_amount.text)!,
@@ -163,13 +169,35 @@ class _RecurringDialogState extends State<_RecurringDialog> {
       active: initial?.active ?? true,
       materializedUntil: initial?.materializedUntil,
     );
-    await s.recurring.upsert(rule);
-    // Regra nova com início no passado: gera já as ocorrências vencidas.
-    if (initial == null && !rule.startDate.isAfter(s.ledger.today)) {
-      await materializeRecurring(s);
-    }
-    if (mounted) {
-      Navigator.of(context).pop();
+    setState(() => _saving = true);
+    try {
+      // Início antecipado: as ocorrências entre o novo e o antigo início nunca foram geradas.
+      // Ids determinísticos (regra + data) impedem duplicar as já existentes.
+      if (initial != null && rule.startDate.isBefore(initial.startDate)) {
+        final start = rule.startDate;
+        await s.recurring.upsert(
+          rule.copyWith(
+            materializedUntil: DateTime(start.year, start.month, start.day - 1),
+          ),
+        );
+        await materializeRecurring(s);
+      } else {
+        await s.recurring.upsert(rule);
+        // Regra nova com início no passado: gera já as ocorrências vencidas.
+        if (initial == null && !rule.startDate.isAfter(s.ledger.today)) {
+          await materializeRecurring(s);
+        }
+      }
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Erro ao salvar: $e')));
+      }
     }
   }
 
@@ -309,7 +337,15 @@ class _RecurringDialogState extends State<_RecurringDialog> {
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancelar'),
         ),
-        FilledButton(onPressed: _save, child: const Text('Salvar')),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          child: _saving
+              ? const SizedBox.square(
+                  dimension: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Salvar'),
+        ),
       ],
     );
   }

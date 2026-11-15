@@ -6,6 +6,8 @@ import 'package:finme/app/seed.dart';
 import 'package:finme/core/models/year_month.dart';
 import 'package:finme/core/services/backup_service.dart';
 import 'package:finme/core/services/record_store.dart';
+import 'package:finme/core/utils/date_utils.dart';
+import 'package:finme/features/transactions/domain/transaction.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 DateTime _now() => DateTime(2026, 11, 14);
@@ -92,4 +94,93 @@ void main() {
     final market = lines.firstWhere((l) => l.contains('Supermercado Central'));
     expect(market, contains(';-387,50;'));
   });
+
+  test(
+    'CSV: transferência fora do total com destino; fórmula escapada',
+    () async {
+      final s = await _bootstrap();
+      await s.transactions.upsert(
+        Transaction(
+          id: 'formula',
+          type: TransactionType.expense,
+          amountCents: 500,
+          date: DateTime(2026, 11, 10),
+          description: '=HYPERLINK("x")',
+          accountId: 'acc_alfa',
+        ),
+      );
+      final csv = BackupService.transactionsCsv(s);
+      final transfer = csv
+          .split('\r\n')
+          .firstWhere((l) => l.contains('Reserva de emergência'));
+
+      expect(transfer, contains(';Conta corrente;não;'));
+      expect(csv, contains("'=HYPERLINK"));
+    },
+  );
+
+  test('CSV: crédito fora do total; débito dentro do total', () async {
+    final s = await _bootstrap();
+    await s.transactions.upsert(
+      Transaction(
+        id: 'compra_credito',
+        type: TransactionType.expense,
+        amountCents: 500,
+        date: DateTime(2026, 11, 10),
+        description: 'Compra no crédito',
+        cardId: 'card_alfa_visa',
+      ),
+    );
+    await s.transactions.upsert(
+      Transaction(
+        id: 'compra_debito',
+        type: TransactionType.expense,
+        amountCents: 500,
+        date: DateTime(2026, 11, 10),
+        description: 'Compra no débito',
+        cardId: 'card_alfa_debito',
+      ),
+    );
+    final lines = BackupService.transactionsCsv(s).split('\r\n');
+
+    expect(
+      lines.firstWhere((l) => l.contains('Compra no crédito')),
+      contains(';não;'),
+    );
+    expect(
+      lines.firstWhere((l) => l.contains('Compra no débito')),
+      contains(';sim;'),
+    );
+  });
+
+  test(
+    'import: categoria órfã vira null, lançamento órfão é descartado',
+    () async {
+      final src = await _bootstrap();
+      final dst = await _bootstrap(demo: false);
+      final map =
+          jsonDecode(BackupService.exportJson(src)) as Map<String, dynamic>;
+      final txs = (map['transactions'] as List).cast<Map<String, dynamic>>();
+      final sample = txs.firstWhere((t) => t['categoryId'] == 'cat_mercado');
+      final sampleId = sample['id'] as String;
+      txs.add({...sample, 'id': 'orfa', 'cardId': 'card_fantasma'});
+      sample['categoryId'] = 'cat_fantasma';
+      // Força a materialização no import: sem materializedUntil ela recomeça do início.
+      for (final r in map['recurring'] as List) {
+        (r as Map<String, dynamic>)['materializedUntil'] = null;
+      }
+
+      await BackupService.importJson(dst, jsonEncode(map));
+
+      expect(dst.transactions.byId('orfa'), isNull);
+      expect(dst.transactions.byId(sampleId)!.categoryId, isNull);
+      expect(
+        isSameDay(
+          dst.recurring.byId('rec_salario')!.materializedUntil!,
+          DateTime(2026, 11, 13),
+        ),
+        isTrue,
+      );
+    },
+  );
 }
