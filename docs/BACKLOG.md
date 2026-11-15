@@ -72,14 +72,14 @@ contrato: SPEC §7.2
 
 ## Fase 3 — Telas (todas parallel: yes, deps: T-011)
 
-### T-012 · Painel · `todo` · files: `lib/features/dashboard/presentation/*`
-### T-013 · Previsão · `todo` · files: `lib/features/forecast/presentation/*`
-### T-014 · Cartões e faturas · `todo` · files: `lib/features/cards/presentation/*` (lista por banco, form cartão, detalhe com faturas, pagar fatura)
-### T-015 · Contas e transferência · `todo` · files: `lib/features/accounts/presentation/*`
-### T-016 · Transações · `todo` · files: `lib/features/transactions/presentation/*` (lista/tabela, filtros, form com parcelas/provisionado/boleto, confirmar provisionado, excluir grupo). Expõe `Future<void> showTransactionForm(BuildContext context, {Transaction? initial})` usado pelo shell.
-### T-017 · Recorrentes · `todo` · files: `lib/features/recurring/presentation/*`
-### T-018 · Categorias e orçamento · `todo` · files: `lib/features/categories/presentation/*`
-### T-019 · Ajustes, backup e CSV · `todo` · files: `lib/features/settings/presentation/*`, `lib/core/services/backup_service.dart`, `test/core/backup_service_test.dart`
+### T-012 · Painel · `done` · files: `lib/features/dashboard/presentation/*`
+### T-013 · Previsão · `done` · files: `lib/features/forecast/presentation/*`
+### T-014 · Cartões e faturas · `done` · files: `lib/features/cards/presentation/*` (lista por banco, form cartão, detalhe com faturas, pagar fatura)
+### T-015 · Contas e transferência · `done` · files: `lib/features/accounts/presentation/*`
+### T-016 · Transações · `done` · files: `lib/features/transactions/presentation/*` (lista/tabela, filtros, form com parcelas/provisionado/boleto, confirmar provisionado, excluir grupo). Expõe `Future<void> showTransactionForm(BuildContext context, {Transaction? initial})` usado pelo shell.
+### T-017 · Recorrentes · `done` · files: `lib/features/recurring/presentation/*`
+### T-018 · Categorias e orçamento · `done` · files: `lib/features/categories/presentation/*`
+### T-019 · Ajustes, backup e CSV · `done` · files: `lib/features/settings/presentation/*`, `lib/core/services/backup_service.dart`, `test/core/backup_service_test.dart`
 contrato comum: SPEC §6.3, §7.3 (tabela Simples/Ultra), `CLAUDE.md` padrões visuais. Ler dados só via `AppScope.of(context)` + `ListenableBuilder(listenable: ledger)`.
 
 ## Fase 4 — Integração

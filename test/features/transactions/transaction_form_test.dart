@@ -1,0 +1,87 @@
+import 'package:finme/app/app_scope.dart';
+import 'package:finme/app/bootstrap.dart';
+import 'package:finme/app/seed.dart';
+import 'package:finme/core/services/record_store.dart';
+import 'package:finme/core/theme/app_theme.dart';
+import 'package:finme/features/transactions/domain/transaction.dart';
+import 'package:finme/features/transactions/presentation/transaction_form.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  testWidgets(
+    'despesa parcelada 3x no cartão de crédito grava 3 parcelas somando o valor',
+    (tester) async {
+      final s = (await tester.runAsync(() async {
+        final s = await bootstrap(
+          storeFactory: (_) => MemoryRecordStore(),
+          clock: () => DateTime(2026, 11, 14),
+        );
+        await seedDemo(s);
+        return s;
+      }))!;
+      await tester.binding.setSurfaceSize(const Size(1400, 900));
+      await tester.pumpWidget(
+        AppScope(
+          services: s,
+          child: MaterialApp(
+            theme: AppTheme.light(),
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => ElevatedButton(
+                  onPressed: () => showTransactionForm(context),
+                  child: const Text('abrir'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('abrir'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Valor'),
+        '100,00',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Descrição'),
+        'Compra teste parcelada',
+      );
+
+      await tester.tap(find.byKey(const ValueKey('form-origem')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cartão · Alfa Visa ••••1234').last);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Parcelas'),
+        '3',
+      );
+      await tester.tap(find.text('Salvar'));
+      await tester.pumpAndSettle();
+
+      final parcels = s.transactions.all
+          .where(
+            (t) =>
+                t.installmentGroupId != null &&
+                t.description == 'Compra teste parcelada',
+          )
+          .toList();
+      expect(parcels, hasLength(3));
+      expect(parcels.fold<int>(0, (sum, t) => sum + t.amountCents), 10000);
+      expect(
+        parcels.map((t) => t.installmentIndex),
+        unorderedEquals([1, 2, 3]),
+      );
+      expect(parcels.every((t) => t.cardId == 'card_alfa_visa'), isTrue);
+      expect(parcels.every((t) => t.type == TransactionType.expense), isTrue);
+      expect(
+        parcels.every((t) => t.description == 'Compra teste parcelada'),
+        isTrue,
+      );
+      expect(find.text('Salvar'), findsNothing);
+    },
+  );
+}
