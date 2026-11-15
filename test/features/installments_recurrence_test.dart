@@ -20,6 +20,7 @@ RecurringRule _rule({
   DateTime? end,
   bool active = true,
   String? cardId,
+  bool isBoleto = false,
 }) => RecurringRule(
   id: 'r1',
   description: 'Streaming',
@@ -30,6 +31,7 @@ RecurringRule _rule({
   endDate: end,
   active: active,
   cardId: cardId,
+  isBoleto: isBoleto,
   accountId: cardId == null ? 'acc1' : null,
   categoryId: 'subs',
 );
@@ -277,6 +279,77 @@ void main() {
       expect(txs.single.status, TransactionStatus.paid);
       expect(txs.single.cardId, 'card1');
       expect(txs.single.accountId, isNull);
+    });
+
+    test('status materializada: passado não-boleto → paid', () {
+      final txs = occurrenceTransactions(
+        _rule(),
+        DateTime(2026, 1, 1),
+        DateTime(2026, 2, 28),
+        const <String>{},
+        forProjection: false,
+      );
+
+      expect(txs.map((t) => t.date), [
+        DateTime(2026, 1, 31),
+        DateTime(2026, 2, 28),
+      ]);
+      expect(txs.first.status, TransactionStatus.paid);
+    });
+
+    test('status materializada: date == to → planned', () {
+      final txs = occurrenceTransactions(
+        _rule(),
+        DateTime(2026, 1, 1),
+        DateTime(2026, 2, 28),
+        const <String>{},
+        forProjection: false,
+      );
+
+      expect(txs.last.date, DateTime(2026, 2, 28));
+      expect(txs.last.status, TransactionStatus.planned);
+    });
+
+    test('status materializada: passado boleto → planned', () {
+      final txs = occurrenceTransactions(
+        _rule(isBoleto: true),
+        DateTime(2026, 1, 1),
+        DateTime(2026, 2, 28),
+        const <String>{},
+        forProjection: false,
+      );
+
+      expect(txs.map((t) => t.isBoleto), [true, true]);
+      expect(txs.map((t) => t.status), [
+        TransactionStatus.planned,
+        TransactionStatus.planned,
+      ]);
+    });
+
+    test('status projeção: conta passada → planned; cartão → paid', () {
+      final conta = occurrenceTransactions(
+        _rule(),
+        DateTime(2026, 1, 1),
+        DateTime(2026, 2, 28),
+        const <String>{},
+        forProjection: true,
+      );
+      expect(conta.map((t) => t.status), [
+        TransactionStatus.planned,
+        TransactionStatus.planned,
+      ]);
+
+      final cartao = occurrenceTransactions(
+        _rule(cardId: 'card1'),
+        DateTime(2026, 1, 1),
+        DateTime(2026, 2, 28),
+        const <String>{},
+        forProjection: true,
+      );
+      expect(cartao.map((t) => t.status), [
+        TransactionStatus.paid,
+        TransactionStatus.paid,
+      ]);
     });
 
     test('pula ids já existentes', () {

@@ -89,7 +89,9 @@ String occurrenceId(RecurringRule r, DateTime date) =>
     '${r.id}_${dateKey(date)}';
 
 /// Transações geradas por [r] em [from]..[to], pulando ids em [existingIds].
-/// `forProjection` não altera o resultado: SPEC §5.4 usa `planned` nos dois casos.
+/// Status (SPEC §5.4): cartão → paid. Conta com [forProjection] → planned.
+/// Conta na materialização → paid só se o dia é antes de [to] e não é boleto
+/// (boleto exige confirmação; ocorrência de [to] fica provisionada).
 List<Transaction> occurrenceTransactions(
   RecurringRule r,
   DateTime from,
@@ -109,11 +111,25 @@ List<Transaction> occurrenceTransactions(
           categoryId: r.categoryId,
           accountId: r.accountId,
           cardId: r.cardId,
-          status: r.cardId != null
-              ? TransactionStatus.paid
-              : TransactionStatus.planned,
+          status: _occurrenceStatus(r, d, to, forProjection: forProjection),
           isBoleto: r.isBoleto,
           recurringId: r.id,
         ),
   ];
+}
+
+TransactionStatus _occurrenceStatus(
+  RecurringRule r,
+  DateTime d,
+  DateTime to, {
+  required bool forProjection,
+}) {
+  if (r.cardId != null) {
+    return TransactionStatus.paid;
+  }
+  if (forProjection) {
+    return TransactionStatus.planned;
+  }
+  final settled = dateOnly(d).isBefore(dateOnly(to)) && !r.isBoleto;
+  return settled ? TransactionStatus.paid : TransactionStatus.planned;
 }

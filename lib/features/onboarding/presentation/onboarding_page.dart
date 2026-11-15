@@ -23,14 +23,26 @@ class _OnboardingPageState extends State<OnboardingPage> {
   Future<void> _start() async {
     final services = AppScope.of(context);
     setState(() => _busy = true);
-    if (_demo) {
-      await seedDemo(services);
-      await materializeRecurring(services);
+    try {
+      if (_demo) {
+        await seedDemo(services);
+        await materializeRecurring(services);
+      }
+      // Atualizar as configurações troca a `home` para a casca principal.
+      await services.settings.update(
+        (s) => s.copyWith(mode: _mode, onboardingDone: true),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Não foi possível iniciar: $e')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
+      }
     }
-    // Atualizar as configurações troca a `home` para a casca principal.
-    await services.settings.update(
-      (s) => s.copyWith(mode: _mode, onboardingDone: true),
-    );
   }
 
   @override
