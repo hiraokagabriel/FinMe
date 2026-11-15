@@ -1,0 +1,323 @@
+// Cabeçalho e linha da tabela da prévia de importação. Contrato: docs/SPEC.md §7.3 (Fase 8).
+
+import 'package:flutter/material.dart';
+
+import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_spacing.dart';
+import '../../../core/utils/formatters.dart';
+import '../../../core/widgets/indicators.dart';
+import '../../../core/widgets/money.dart';
+import '../../../core/widgets/sortable_header.dart';
+import '../../categories/domain/transaction_category.dart';
+import '../domain/categorizer.dart';
+import '../domain/import_matcher.dart';
+import '../domain/import_session.dart';
+
+// Larguras das colunas: cabeçalho e linha usam as mesmas.
+const double _wCheck = 40;
+const double _wDate = 56;
+const double _wOrigin = 150;
+const double _wValue = 116;
+const double _wCategory = 180;
+const double _wInstallment = 112;
+const double _wFlags = 104;
+const double _wMenu = 40;
+
+String suggestionSourceLabel(SuggestionSource s) => switch (s) {
+  SuggestionSource.rule => 'Regra',
+  SuggestionSource.bank => 'Banco',
+  SuggestionSource.history => 'Histórico',
+  SuggestionSource.dictionary => 'Dicionário',
+};
+
+String _flagLabel(ImportFlag f) => switch (f) {
+  ImportFlag.fitidDuplicate => 'Já importada (mesmo identificador do banco)',
+  ImportFlag.probableDuplicate => 'Provável duplicata de lançamento existente',
+  ImportFlag.existingInstallment => 'Parcela já existe no histórico',
+  ImportFlag.sameNameAmount => 'Mesmo nome e valor de outro lançamento',
+  ImportFlag.invoicePaymentLike => 'Parece pagamento de fatura',
+};
+
+Widget _flagIcon(AppColors c, ImportFlag f) {
+  final (icon, color) = switch (f) {
+    ImportFlag.fitidDuplicate => (Icons.content_copy, c.danger),
+    ImportFlag.probableDuplicate => (Icons.content_copy, c.warning),
+    ImportFlag.existingInstallment => (Icons.layers, c.warning),
+    ImportFlag.sameNameAmount => (Icons.repeat, c.textSecondary),
+    ImportFlag.invoicePaymentLike => (Icons.credit_score, c.warning),
+  };
+  return Tooltip(
+    message: _flagLabel(f),
+    child: Icon(icon, size: 16, color: color),
+  );
+}
+
+Widget _check(bool value, ValueChanged<bool>? onChanged) => Checkbox(
+  value: value,
+  onChanged: onChanged == null ? null : (v) => onChanged(v ?? false),
+  visualDensity: VisualDensity.compact,
+  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+);
+
+/// Monta uma linha de tabela com as colunas fixas; a descrição ocupa o resto.
+Widget _cells({
+  required bool ultra,
+  required Widget check,
+  required Widget date,
+  required Widget description,
+  Widget? origin,
+  required Widget value,
+  required Widget category,
+  Widget? installment,
+  required Widget flags,
+  Widget? menu,
+}) => Padding(
+  padding: const EdgeInsets.symmetric(horizontal: AppSpace.sm),
+  child: Row(
+    children: [
+      SizedBox(width: _wCheck, child: check),
+      SizedBox(width: _wDate, child: date),
+      Expanded(child: description),
+      if (ultra) SizedBox(width: _wOrigin, child: origin),
+      SizedBox(width: _wValue, child: value),
+      SizedBox(width: _wCategory, child: category),
+      if (ultra) SizedBox(width: _wInstallment, child: installment),
+      SizedBox(width: _wFlags, child: flags),
+      if (ultra) SizedBox(width: _wMenu, child: menu),
+    ],
+  ),
+);
+
+/// Cabeçalho estático da tabela (sem ordenação na prévia).
+class ImportPreviewHeader extends StatelessWidget {
+  const ImportPreviewHeader({super.key, required this.ultra});
+
+  final bool ultra;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget label(String text, {bool end = false}) => SortableHeaderLabel(
+      label: text,
+      active: false,
+      ascending: true,
+      onTap: null,
+      alignEnd: end,
+    );
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: context.colors.border)),
+      ),
+      child: SizedBox(
+        height: 32,
+        child: _cells(
+          ultra: ultra,
+          check: const SizedBox.shrink(),
+          date: label('Data'),
+          description: label('Descrição'),
+          origin: label('Origem'),
+          value: label('Valor', end: true),
+          category: label('Categoria'),
+          installment: label('Parcela'),
+          flags: label('Alertas'),
+        ),
+      ),
+    );
+  }
+}
+
+/// Uma linha da prévia. Simples: sem origem/confiança, sem parcelas editáveis, sem menu de regra.
+class ImportPreviewRow extends StatelessWidget {
+  const ImportPreviewRow({
+    super.key,
+    required this.row,
+    required this.ultra,
+    required this.categoryOptions,
+    required this.onInclude,
+    required this.onCategory,
+    this.onCreateInstallments,
+    this.onCreateRule,
+  });
+
+  final ImportRow row;
+  final bool ultra;
+
+  /// Já filtradas pelo tipo da linha.
+  final List<TransactionCategory> categoryOptions;
+  final ValueChanged<bool> onInclude;
+  final ValueChanged<String?> onCategory;
+  final ValueChanged<bool>? onCreateInstallments;
+  final VoidCallback? onCreateRule;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final textTheme = Theme.of(context).textTheme;
+    final body = (textTheme.bodyMedium ?? const TextStyle()).copyWith(
+      color: row.include ? c.textPrimary : c.textSecondary,
+    );
+    final small = (textTheme.bodySmall ?? const TextStyle()).copyWith(
+      color: c.textSecondary,
+    );
+    final line = row.line;
+    final mark = row.installment;
+    final chip = mark == null
+        ? null
+        : StatusBadge(label: '${mark.index}/${mark.count}', color: c.primary);
+    final onRule = ultra ? onCreateRule : null;
+    final onSeries = ultra ? onCreateInstallments : null;
+    final planned = row.match.plannedMatch;
+
+    final text = ultra && row.finalDescription != line.description
+        ? Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                line.description,
+                style: small,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              Text(
+                row.finalDescription,
+                style: body,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          )
+        : Text(
+            row.finalDescription,
+            style: body,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          );
+
+    final source = row.suggestion.source;
+    final origin = source == null
+        ? Text('—', style: small)
+        : Row(
+            children: [
+              Flexible(
+                child: Text(
+                  suggestionSourceLabel(source),
+                  style: small,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: AppSpace.xs),
+              Text(confidenceLabel(row.suggestion.confidence), style: small),
+            ],
+          );
+
+    final categoryIds = {for (final cat in categoryOptions) cat.id};
+    final category = DropdownButton<String?>(
+      value: categoryIds.contains(row.categoryId) ? row.categoryId : null,
+      isDense: true,
+      isExpanded: true,
+      style: body,
+      items: [
+        const DropdownMenuItem<String?>(
+          value: null,
+          child: Text('Sem categoria'),
+        ),
+        for (final cat in categoryOptions)
+          DropdownMenuItem<String?>(
+            value: cat.id,
+            child: Text(cat.name, overflow: TextOverflow.ellipsis),
+          ),
+      ],
+      onChanged: onCategory,
+    );
+
+    final installment = mark == null
+        ? null
+        : Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ?chip,
+              if (onSeries != null && mark.index < mark.count)
+                Tooltip(
+                  message: 'criar futuras',
+                  child: _check(row.createInstallments, onSeries),
+                ),
+            ],
+          );
+
+    final flags = ultra
+        ? Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final f in row.match.flags) _flagIcon(c, f),
+              if (planned != null)
+                Tooltip(
+                  message:
+                      'Confirma provisionado ${planned.description} de '
+                      '${formatShortDate(planned.date)}',
+                  child: Icon(
+                    Icons.event_available,
+                    size: 16,
+                    color: c.primary,
+                  ),
+                ),
+            ],
+          )
+        : row.hasWarning
+        ? Tooltip(
+            message: _flagLabel(row.match.flags.first),
+            child: Icon(Icons.error_outline, size: 16, color: c.warning),
+          )
+        : const SizedBox.shrink();
+
+    final menu = onRule == null
+        ? null
+        : PopupMenuButton<String>(
+            tooltip: 'Ações da linha',
+            icon: Icon(Icons.more_vert, size: 18, color: c.textSecondary),
+            onSelected: (_) => onRule(),
+            itemBuilder: (_) => const [
+              PopupMenuItem<String>(
+                value: 'rule',
+                child: Text('Criar regra a partir desta linha'),
+              ),
+            ],
+          );
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: c.border)),
+      ),
+      child: _cells(
+        ultra: ultra,
+        check: _check(row.include, onInclude),
+        date: Text(
+          ultra ? formatDate(line.date) : formatShortDate(line.date),
+          style: small,
+        ),
+        description: Row(
+          children: [
+            Expanded(child: text),
+            // Simples: o chip de parcela é só informativo, sem coluna própria.
+            if (!ultra && chip != null) ...[
+              const SizedBox(width: AppSpace.xs),
+              chip,
+            ],
+          ],
+        ),
+        origin: origin,
+        value: MoneyText(
+          line.amountCents,
+          signed: true,
+          colorBySign: ultra && row.include,
+          style: body,
+        ),
+        category: category,
+        installment: installment,
+        flags: flags,
+        menu: menu,
+      ),
+    );
+  }
+}

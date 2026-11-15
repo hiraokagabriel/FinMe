@@ -52,6 +52,14 @@ class _LogStore implements RecordStore {
   }
 }
 
+/// putAll falha (ex.: disco cheio): nada deve ficar na memória.
+class _FailingPutStore extends _LogStore {
+  @override
+  Future<void> putAll(Map<String, Map<String, dynamic>> entries) async {
+    throw StateError('disco cheio');
+  }
+}
+
 CollectionRepository<_Item> _repo(RecordStore store) =>
     CollectionRepository<_Item>(
       store: store,
@@ -91,6 +99,23 @@ void main() {
         await repo.upsert(const _Item('b', 'B2'));
         expect(repo.all.map((i) => i.id), ['b', 'a']);
         expect(repo.byId('b')?.name, 'B2');
+      },
+    );
+
+    test(
+      'upsertAll com store que falha não altera a memória nem notifica',
+      () async {
+        final repo = _repo(_FailingPutStore());
+        var notifications = 0;
+        repo.addListener(() => notifications++);
+
+        await expectLater(
+          repo.upsertAll(const [_Item('a', 'A')]),
+          throwsStateError,
+        );
+        expect(repo.isEmpty, isTrue);
+        expect(repo.byId('a'), isNull);
+        expect(notifications, 0);
       },
     );
 

@@ -79,6 +79,20 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('Importar aparece no cabeçalho em Simples e Ultra', (
+    tester,
+  ) async {
+    for (final mode in AppMode.values) {
+      final s = await _services(tester, mode);
+      await _pump(tester, s, const Size(1400, 900));
+      expect(
+        find.widgetWithText(OutlinedButton, 'Importar'),
+        findsOneWidget,
+        reason: mode.name,
+      );
+    }
+  });
+
   testWidgets('Ultra: barra de filtros, colunas extras e rodapé', (
     tester,
   ) async {

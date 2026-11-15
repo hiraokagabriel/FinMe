@@ -30,6 +30,8 @@ class Transaction {
     this.installmentCount,
     this.recurringId,
     this.notes,
+    this.externalId,
+    this.importedDescription,
   }) : date = dateOnly(date);
 
   /// Data lida como `dateKey` e normalizada para meia-noite local.
@@ -51,6 +53,8 @@ class Transaction {
     installmentCount: (map['installmentCount'] as num?)?.toInt(),
     recurringId: map['recurringId'] as String?,
     notes: map['notes'] as String?,
+    externalId: map['externalId'] as String?,
+    importedDescription: map['importedDescription'] as String?,
   );
 
   final String id;
@@ -70,6 +74,12 @@ class Transaction {
   final int? installmentCount;
   final String? recurringId;
   final String? notes;
+
+  /// FITID do OFX (deduplicação forte); null em manual/CSV.
+  final String? externalId;
+
+  /// Descrição como veio do arquivo; null em lançamento manual.
+  final String? importedDescription;
 
   /// Provisionado: ainda não saiu, mas já se sabe que vai sair.
   bool get isPlanned => status == TransactionStatus.planned;
@@ -94,6 +104,8 @@ class Transaction {
     Object? installmentCount = _keep,
     Object? recurringId = _keep,
     Object? notes = _keep,
+    Object? externalId = _keep,
+    Object? importedDescription = _keep,
   }) => Transaction(
     id: id,
     type: type ?? this.type,
@@ -128,6 +140,12 @@ class Transaction {
         ? this.recurringId
         : recurringId as String?,
     notes: identical(notes, _keep) ? this.notes : notes as String?,
+    externalId: identical(externalId, _keep)
+        ? this.externalId
+        : externalId as String?,
+    importedDescription: identical(importedDescription, _keep)
+        ? this.importedDescription
+        : importedDescription as String?,
   );
 
   Map<String, dynamic> toMap() => {
@@ -148,6 +166,8 @@ class Transaction {
     'installmentCount': installmentCount,
     'recurringId': recurringId,
     'notes': notes,
+    if (externalId != null) 'externalId': externalId,
+    if (importedDescription != null) 'importedDescription': importedDescription,
   };
 
   @override
@@ -170,7 +190,9 @@ class Transaction {
           other.installmentIndex == installmentIndex &&
           other.installmentCount == installmentCount &&
           other.recurringId == recurringId &&
-          other.notes == notes;
+          other.notes == notes &&
+          other.externalId == externalId &&
+          other.importedDescription == importedDescription;
 
   @override
   int get hashCode => Object.hash(
@@ -191,5 +213,7 @@ class Transaction {
     installmentCount,
     recurringId,
     notes,
+    externalId,
+    importedDescription,
   );
 }

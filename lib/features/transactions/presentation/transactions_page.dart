@@ -8,6 +8,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/id.dart';
 import '../../../core/widgets/widgets.dart';
+import '../../importing/presentation/import_flow.dart';
 import '../domain/transaction.dart';
 import 'transaction_filters.dart';
 import 'transaction_form.dart';
@@ -82,6 +83,11 @@ class _TransactionsPageState extends State<TransactionsPage> {
                 PageHeader(
                   title: 'Transações',
                   actions: [
+                    OutlinedButton.icon(
+                      onPressed: () => startImport(context),
+                      icon: const Icon(Icons.upload_file),
+                      label: const Text('Importar'),
+                    ),
                     MonthSelector(
                       value: month,
                       onChanged: (m) => setState(() => _month = m),

@@ -10,6 +10,7 @@ import '../features/cards/presentation/cards_page.dart';
 import '../features/categories/presentation/categories_page.dart';
 import '../features/dashboard/presentation/dashboard_page.dart';
 import '../features/forecast/presentation/forecast_page.dart';
+import '../features/importing/presentation/import_page.dart';
 import '../features/recurring/presentation/recurring_page.dart';
 import '../features/settings/presentation/settings_page.dart';
 import '../features/transactions/presentation/transaction_form.dart';
@@ -26,6 +27,7 @@ const _navItems = <({String label, IconData icon})>[
   (label: 'Cartões', icon: Icons.credit_card),
   (label: 'Contas', icon: Icons.account_balance_wallet_outlined),
   (label: 'Transações', icon: Icons.receipt_long),
+  (label: 'Importar', icon: Icons.upload_file),
   (label: 'Recorrentes', icon: Icons.autorenew),
   (label: 'Categorias', icon: Icons.category_outlined),
   (label: 'Ajustes', icon: Icons.settings_outlined),
@@ -101,9 +103,10 @@ class _HomeShellState extends State<HomeShell> {
     2 => const CardsPage(),
     3 => const AccountsPage(),
     4 => const TransactionsPage(),
-    5 => const RecurringPage(),
-    6 => const CategoriesPage(),
-    7 => const SettingsPage(),
+    5 => const ImportPage(),
+    6 => const RecurringPage(),
+    7 => const CategoriesPage(),
+    8 => const SettingsPage(),
     _ => const DashboardPage(),
   };
 }

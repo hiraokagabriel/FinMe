@@ -19,6 +19,7 @@ Direção do produto e próximos passos. Tarefas detalhadas e status: `docs/BACK
 ## v3 — em andamento (`docs/V3_DIRECTION.md`)
 
 - **Fase 7 — Identidade visual e polimento**: tipografia Plex + Source Serif 4, neutros quentes, deltas/sparklines, avatar de banco, ordenação, estados vazios, shell só desktop (T-050..T-068).
+- **Fase 8 — Importação, regras e categorização**: CSV com perfis, OFX, prévia com deduplicação, casamento com provisionados e parcelas, categorização offline em cascata, regras e dicionário editáveis (T-070..T-092).
 
 ## Próximos passos sugeridos
 

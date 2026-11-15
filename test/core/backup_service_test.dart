@@ -8,6 +8,9 @@ import 'package:finme/core/models/year_month.dart';
 import 'package:finme/core/services/backup_service.dart';
 import 'package:finme/core/services/record_store.dart';
 import 'package:finme/core/utils/date_utils.dart';
+import 'package:finme/features/importing/domain/import_profile.dart';
+import 'package:finme/features/importing/domain/merchant_dictionary.dart';
+import 'package:finme/features/rules/domain/transaction_rule.dart';
 import 'package:finme/features/transactions/domain/transaction.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -45,6 +48,9 @@ List<Object?> _state(AppServices s) => [
   [for (final t in s.transactions.all) t.toMap()],
   [for (final r in s.recurring.all) r.toMap()],
   s.settings.value.toMap(),
+  [for (final r in s.rules.all) r.toMap()],
+  [for (final p in s.importProfiles.all) p.toMap()],
+  [for (final e in s.dictionary.all) e.toMap()],
 ];
 
 Future<AppServices> _bootstrap({
@@ -276,7 +282,113 @@ void main() {
     },
   );
 
-  for (final box in ['fm_transactions', 'fm_settings']) {
+  test('export→import devolve regras, perfis e dicionário editados', () async {
+    final src = await _bootstrap();
+    final dst = await _bootstrap(demo: false);
+    final accountId = src.accounts.all.first.id;
+    await src.rules.upsert(
+      const TransactionRule(
+        id: 'r1',
+        pattern: 'LOJA EXEMPLO',
+        categoryId: 'cat_mercado',
+        renameTo: 'Mercado Exemplo',
+        priority: 2,
+      ),
+    );
+    await src.importProfiles.upsert(
+      ImportProfile(
+        id: 'p1',
+        name: 'Alfa CSV',
+        accountId: accountId,
+        categoryMap: {'SUPERMERCADO': 'cat_mercado'},
+        invertSign: true,
+      ),
+    );
+    await src.dictionary.delete('dict_uber');
+    await src.dictionary.upsert(
+      const DictionaryEntry(
+        id: 'dict_loja',
+        pattern: 'LOJA EXEMPLO',
+        categoryName: 'Mercado',
+      ),
+    );
+
+    await BackupService.importJson(dst, BackupService.exportJson(src));
+
+    expect(dst.rules.all, src.rules.all);
+    expect(dst.importProfiles.all, src.importProfiles.all);
+    expect(dst.dictionary.all, src.dictionary.all);
+  });
+
+  test(
+    'backup sem regras, perfis e dicionário: vazios e dicionário padrão',
+    () async {
+      final src = await _bootstrap();
+      final dst = await _bootstrap(demo: false);
+      await dst.rules.upsert(
+        const TransactionRule(id: 'local', pattern: 'LOCAL'),
+      );
+      await dst.dictionary.delete('dict_uber');
+      final map =
+          jsonDecode(BackupService.exportJson(src)) as Map<String, dynamic>;
+      map
+        ..remove('rules')
+        ..remove('importProfiles')
+        ..remove('dictionary');
+
+      await BackupService.importJson(dst, jsonEncode(map));
+
+      expect(dst.rules.all, isEmpty);
+      expect(dst.importProfiles.all, isEmpty);
+      expect(dst.dictionary.all, defaultDictionary());
+    },
+  );
+
+  test(
+    'import: perfil com destino ausente some; regra com categoria ausente fica null',
+    () async {
+      final src = await _bootstrap();
+      final dst = await _bootstrap(demo: false);
+      final accountId = src.accounts.all.first.id;
+      final map =
+          jsonDecode(BackupService.exportJson(src)) as Map<String, dynamic>;
+      map['rules'] = [
+        const TransactionRule(
+          id: 'r_ok',
+          pattern: 'LOJA',
+          categoryId: 'cat_mercado',
+        ).toMap(),
+        const TransactionRule(
+          id: 'r_orfa',
+          pattern: 'LOJA',
+          categoryId: 'cat_fantasma',
+        ).toMap(),
+      ];
+      map['importProfiles'] = [
+        ImportProfile(id: 'p_ok', name: 'OK', accountId: accountId).toMap(),
+        const ImportProfile(
+          id: 'p_orfa',
+          name: 'Órfão',
+          accountId: 'conta_fantasma',
+        ).toMap(),
+        const ImportProfile(id: 'p_sem_destino', name: 'Sem destino').toMap(),
+      ];
+
+      await BackupService.importJson(dst, jsonEncode(map));
+
+      expect(dst.importProfiles.all.map((p) => p.id), ['p_ok']);
+      expect(dst.rules.byId('r_ok')!.categoryId, 'cat_mercado');
+      expect(dst.rules.byId('r_orfa')!.categoryId, isNull);
+    },
+  );
+
+  for (final box in [
+    'fm_transactions',
+    'fm_settings',
+    'fm_rules',
+    'fm_import_profiles',
+    'fm_dictionary',
+  ]) {
     test('import com falha em $box restaura tudo (tudo-ou-nada)', () async {
       final src = await _bootstrap();
       final flaky = _FlakyStore();
@@ -293,6 +405,23 @@ void main() {
         ),
       );
       await dst.settings.update((s) => s.copyWith(mode: AppMode.ultra));
+      await dst.rules.upsert(
+        const TransactionRule(id: 'local_regra', pattern: 'LOCAL'),
+      );
+      await dst.importProfiles.upsert(
+        ImportProfile(
+          id: 'local_perfil',
+          name: 'Local',
+          accountId: dst.accounts.all.first.id,
+        ),
+      );
+      await dst.dictionary.upsert(
+        const DictionaryEntry(
+          id: 'local_dic',
+          pattern: 'LOCAL',
+          categoryName: 'Mercado',
+        ),
+      );
       final json = BackupService.exportJson(src);
       final before = _state(dst);
 

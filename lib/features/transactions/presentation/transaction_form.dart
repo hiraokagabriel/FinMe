@@ -8,11 +8,19 @@ import '../../../core/utils/id.dart';
 import '../../../core/widgets/widgets.dart';
 import '../../cards/domain/payment_card.dart';
 import '../../categories/domain/transaction_category.dart';
+import '../../importing/domain/categorizer.dart';
 import '../domain/installments.dart';
 import '../domain/transaction.dart';
 import 'transaction_filters.dart';
 
 const _maxInstallments = 48;
+
+String _suggestionLabel(SuggestionSource source) => switch (source) {
+  SuggestionSource.rule => 'Sugerida por regra',
+  SuggestionSource.bank => 'Sugerida pelo banco',
+  SuggestionSource.history => 'Sugerida pelo histórico',
+  SuggestionSource.dictionary => 'Sugerida pelo dicionário',
+};
 
 /// Abre o formulário de transação (nova ou edição).
 /// Transferência e pagamento de fatura editados mantêm o tipo travado.
@@ -50,6 +58,9 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
   late TransactionType _type;
   late DateTime _date;
   String? _categoryId;
+  // Usuário escolheu (ou já tinha) categoria: a descrição não sobrescreve mais.
+  late bool _categoryTouched;
+  CategorizationResult? _suggestion;
   String? _accountId;
   String? _cardId;
   late bool _planned;
@@ -99,6 +110,7 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
     _installments = TextEditingController(text: '1');
     // Referências órfãs (conta/cartão/categoria apagados) viram null: evita assert do Dropdown.
     _categoryId = _validCategory(init?.categoryId);
+    _categoryTouched = init?.categoryId != null;
     final accountId = init?.accountId;
     _accountId = accountId != null && s.accounts.byId(accountId) != null
         ? accountId
@@ -138,6 +150,34 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
     setState(() {
       _type = type;
       _categoryId = _validCategory(_categoryId);
+      // Sugestão era do tipo anterior: sem ela, o helper não some junto com a categoria limpa.
+      _suggestion = null;
+    });
+  }
+
+  /// Sugere categoria pela descrição, só enquanto o usuário não escolheu uma.
+  void _suggestCategory(String text) {
+    if (_categoryTouched || _locked) {
+      return;
+    }
+    final s = widget.services;
+    final r = s.ledger.categorizer.categorize(
+      text,
+      isIncome: _type == TransactionType.income,
+    );
+    final id = r.categoryId;
+    final valid = id != null && _categoriesFor(s).any((cat) => cat.id == id);
+    setState(() {
+      if (valid) {
+        _categoryId = id;
+        _suggestion = r;
+      } else {
+        // Categoria veio da sugestão que sumiu (o usuário não escolheu): limpa junto.
+        if (_suggestion != null) {
+          _categoryId = null;
+        }
+        _suggestion = null;
+      }
     });
   }
 
@@ -241,6 +281,7 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
     final init = widget.initial;
     final locked = _locked;
     final fixed = _fixed;
+    final source = _suggestion?.source;
     final c = context.colors;
     final narrow = MediaQuery.sizeOf(context).width < 600;
     return Dialog(
@@ -293,6 +334,7 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
                 TextFormField(
                   controller: _description,
                   decoration: const InputDecoration(labelText: 'Descrição'),
+                  onChanged: _suggestCategory,
                   validator: (v) =>
                       (v ?? '').trim().isEmpty ? 'Informe a descrição' : null,
                 ),
@@ -320,10 +362,16 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
                   ),
                   const SizedBox(height: AppSpace.md),
                   DropdownButtonFormField<String?>(
-                    key: ValueKey('form-categoria-${_type.name}'),
+                    // Chave com a categoria: recria o campo quando a sugestão troca o valor.
+                    key: ValueKey('form-categoria-${_type.name}-$_categoryId'),
                     isExpanded: true,
                     initialValue: _categoryId,
-                    decoration: const InputDecoration(labelText: 'Categoria'),
+                    decoration: InputDecoration(
+                      labelText: 'Categoria',
+                      helperText: source == null
+                          ? null
+                          : _suggestionLabel(source),
+                    ),
                     items: [
                       const DropdownMenuItem<String?>(
                         value: null,
@@ -335,7 +383,11 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
                           child: Text(cat.name),
                         ),
                     ],
-                    onChanged: (v) => setState(() => _categoryId = v),
+                    onChanged: (v) => setState(() {
+                      _categoryId = v;
+                      _categoryTouched = true;
+                      _suggestion = null;
+                    }),
                   ),
                 ],
                 if (_installmentsEnabled) ...[

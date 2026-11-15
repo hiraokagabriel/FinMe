@@ -7,8 +7,11 @@ import '../core/utils/date_utils.dart';
 import '../features/accounts/domain/account.dart';
 import '../features/cards/domain/payment_card.dart';
 import '../features/categories/domain/transaction_category.dart';
+import '../features/importing/domain/import_profile.dart';
+import '../features/importing/domain/merchant_dictionary.dart';
 import '../features/recurring/domain/recurrence.dart';
 import '../features/recurring/domain/recurring_rule.dart';
+import '../features/rules/domain/transaction_rule.dart';
 import '../features/transactions/domain/transaction.dart';
 import 'app_scope.dart';
 import 'ledger.dart';
@@ -21,6 +24,9 @@ const _boxes = [
   'fm_transactions',
   'fm_recurring',
   'fm_settings',
+  'fm_rules',
+  'fm_import_profiles',
+  'fm_dictionary',
 ];
 
 /// Monta os serviços do app. Sem [storeFactory] usa Hive; testes passam `MemoryRecordStore`.
@@ -70,9 +76,30 @@ Future<AppServices> bootstrap({
     idOf: (r) => r.id,
   );
   final settings = SettingsController(stores['fm_settings']!);
+  final rules = CollectionRepository<TransactionRule>(
+    store: stores['fm_rules']!,
+    fromMap: TransactionRule.fromMap,
+    toMap: (r) => r.toMap(),
+    idOf: (r) => r.id,
+  );
+  final importProfiles = CollectionRepository<ImportProfile>(
+    store: stores['fm_import_profiles']!,
+    fromMap: ImportProfile.fromMap,
+    toMap: (p) => p.toMap(),
+    idOf: (p) => p.id,
+  );
+  final dictionary = CollectionRepository<DictionaryEntry>(
+    store: stores['fm_dictionary']!,
+    fromMap: DictionaryEntry.fromMap,
+    toMap: (e) => e.toMap(),
+    idOf: (e) => e.id,
+  );
 
   if (categories.isEmpty) {
     await categories.upsertAll(defaultCategories());
+  }
+  if (dictionary.isEmpty) {
+    await dictionary.upsertAll(defaultDictionary());
   }
 
   late final AppServices services;
@@ -83,6 +110,8 @@ Future<AppServices> bootstrap({
     transactions: transactions,
     recurring: recurring,
     settings: settings,
+    rules: rules,
+    dictionary: dictionary,
     clock: now,
     onDayChanged: () => materializeRecurring(services),
   );
@@ -93,6 +122,9 @@ Future<AppServices> bootstrap({
     transactions: transactions,
     recurring: recurring,
     settings: settings,
+    rules: rules,
+    importProfiles: importProfiles,
+    dictionary: dictionary,
     ledger: ledger,
     clock: now,
   );

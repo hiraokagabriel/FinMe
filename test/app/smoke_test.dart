@@ -13,6 +13,7 @@ const _pages = [
   'Cartões',
   'Contas',
   'Transações',
+  'Importar',
   'Recorrentes',
   'Categorias',
   'Ajustes',
@@ -62,7 +63,7 @@ Future<void> _openAndCancelTransactionForm(WidgetTester tester) async {
 
 void main() {
   for (final mode in AppMode.values) {
-    testWidgets('desktop 1400x900 ($mode): navega 8 páginas e abre o form', (
+    testWidgets('desktop 1400x900 ($mode): navega 9 páginas e abre o form', (
       tester,
     ) async {
       final s = await _boot(tester, mode);
@@ -79,7 +80,7 @@ void main() {
     });
   }
 
-  testWidgets('estreito 800x700 (Ultra): sidebar colapsada navega 8 páginas', (
+  testWidgets('estreito 800x700 (Ultra): sidebar colapsada navega 9 páginas', (
     tester,
   ) async {
     final s = await _boot(tester, AppMode.ultra);

@@ -16,8 +16,12 @@ import '../features/categories/domain/category_spending.dart';
 import '../features/categories/domain/transaction_category.dart';
 import '../features/forecast/domain/forecast.dart';
 import '../features/forecast/domain/invoice_timeline.dart' as timeline;
+import '../features/importing/domain/categorizer.dart';
+import '../features/importing/domain/category_history.dart';
+import '../features/importing/domain/merchant_dictionary.dart';
 import '../features/recurring/domain/recurrence.dart';
 import '../features/recurring/domain/recurring_rule.dart';
+import '../features/rules/domain/transaction_rule.dart';
 import '../features/transactions/domain/transaction.dart';
 
 /// Visões calculadas sobre os repositórios. Getters são preguiçosos e memoizados;
@@ -32,6 +36,8 @@ class Ledger extends ChangeNotifier {
     required this.recurring,
     required this.settings,
     required this.clock,
+    this.rules,
+    this.dictionary,
     this.onDayChanged,
     this.scheduleMidnightTimer = true,
   }) {
@@ -51,6 +57,10 @@ class Ledger extends ChangeNotifier {
   final CollectionRepository<RecurringRule> recurring;
   final SettingsController settings;
   final DateTime Function() clock;
+
+  /// Fase 8: opcionais para que testes que constroem o Ledger direto sigam válidos (null = vazio).
+  final CollectionRepository<TransactionRule>? rules;
+  final CollectionRepository<DictionaryEntry>? dictionary;
 
   /// Chamado na virada de dia (bootstrap passa `materializeRecurring`). Evita import circular.
   final Future<void> Function()? onDayChanged;
@@ -77,6 +87,7 @@ class Ledger extends ChangeNotifier {
   List<PaymentCard>? _cardsNoAccount;
   List<history.MonthSnapshot>? _history;
   ({int current, int previous})? _expenseMtd;
+  Categorizer? _categorizer;
 
   List<Listenable> get _sources => [
     accounts,
@@ -85,6 +96,8 @@ class Ledger extends ChangeNotifier {
     transactions,
     recurring,
     settings,
+    ?rules,
+    ?dictionary,
   ];
 
   /// Dia do cache. Se o relógio andou para outro dia, invalida e agenda [onDayChanged].
@@ -257,6 +270,17 @@ class Ledger extends ChangeNotifier {
     );
   }
 
+  /// Cascata de sugestão de categoria (SPEC §5.13). Recriada a cada mudança de repo.
+  Categorizer get categorizer {
+    _ensureFresh();
+    return _categorizer ??= Categorizer(
+      rules: rules?.all ?? const [],
+      categories: categories.all,
+      history: CategoryHistory.build(transactions.all),
+      dictionary: dictionary?.all ?? const [],
+    );
+  }
+
   Map<String?, int> spendingFor(YearMonth month) {
     _ensureFresh();
     return _spending[month] ??= spendingByCategory(transactions.all, month);
@@ -346,6 +370,7 @@ class Ledger extends ChangeNotifier {
     _cardsNoAccount = null;
     _history = null;
     _expenseMtd = null;
+    _categorizer = null;
   }
 
   void _invalidate() {

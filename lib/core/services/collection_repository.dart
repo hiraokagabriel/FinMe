@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'record_store.dart';
 
 /// Coleção de entidades em memória, persistida em um [RecordStore].
-/// Mudanças atualizam a memória e notificam antes da escrita terminar.
+/// upsertAll grava antes de mudar a memória; delete/deleteWhere mudam a memória e depois gravam.
 class CollectionRepository<T> extends ChangeNotifier {
   CollectionRepository({
     required RecordStore store,
@@ -52,9 +52,10 @@ class CollectionRepository<T> extends ChangeNotifier {
     if (entries.isEmpty) {
       return;
     }
+    // Grava antes: falha no store deixa a memória igual ao disco.
+    await _store.putAll(entries);
     _items.addAll(byId);
     _changed();
-    await _store.putAll(entries);
   }
 
   Future<void> delete(String id) async {

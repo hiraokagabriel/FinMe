@@ -12,6 +12,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/date_utils.dart';
 import '../../../core/widgets/widgets.dart';
+import '../../importing/domain/merchant_dictionary.dart';
 
 const _jsonGroup = XTypeGroup(label: 'JSON', extensions: ['json']);
 const _csvGroup = XTypeGroup(label: 'CSV', extensions: ['csv']);
@@ -270,7 +271,7 @@ class _DataCardState extends State<_DataCard> {
       context,
       title: 'Apagar todos os dados?',
       message:
-          'Contas, cartões, lançamentos e recorrências serão removidos. Esta ação não pode ser desfeita.',
+          'Contas, cartões, lançamentos, recorrências, regras e perfis de importação serão removidos. O dicionário volta ao padrão. Esta ação não pode ser desfeita.',
       confirmLabel: 'Apagar',
       destructive: true,
     );
@@ -284,6 +285,9 @@ class _DataCardState extends State<_DataCard> {
       await _s.transactions.replaceAll(const []);
       await _s.recurring.replaceAll(const []);
       await _s.categories.replaceAll(defaultCategories());
+      await _s.rules.replaceAll(const []);
+      await _s.importProfiles.replaceAll(const []);
+      await _s.dictionary.replaceAll(defaultDictionary());
       // Volta ao onboarding: o shell some quando onboardingDone for false.
       await _s.settings.update((c) => c.copyWith(onboardingDone: false));
     } catch (_) {

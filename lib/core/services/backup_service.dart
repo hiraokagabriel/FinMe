@@ -8,7 +8,10 @@ import '../../app/bootstrap.dart';
 import '../../features/accounts/domain/account.dart';
 import '../../features/cards/domain/payment_card.dart';
 import '../../features/categories/domain/transaction_category.dart';
+import '../../features/importing/domain/import_profile.dart';
+import '../../features/importing/domain/merchant_dictionary.dart';
 import '../../features/recurring/domain/recurring_rule.dart';
+import '../../features/rules/domain/transaction_rule.dart';
 import '../../features/transactions/domain/transaction.dart';
 import '../models/app_settings.dart';
 import '../models/year_month.dart';
@@ -43,6 +46,9 @@ class BackupService {
     'transactions': [for (final t in s.transactions.all) t.toMap()],
     'recurring': [for (final r in s.recurring.all) r.toMap()],
     'settings': s.settings.value.toMap(),
+    'rules': [for (final r in s.rules.all) r.toMap()],
+    'importProfiles': [for (final p in s.importProfiles.all) p.toMap()],
+    'dictionary': [for (final e in s.dictionary.all) e.toMap()],
   });
 
   /// Lê tudo antes de gravar: JSON ou registro inválido lança [FormatException] e nada muda.
@@ -63,6 +69,9 @@ class BackupService {
       transactions: s.transactions.all,
       recurring: s.recurring.all,
       settings: s.settings.value,
+      rules: s.rules.all,
+      importProfiles: s.importProfiles.all,
+      dictionary: s.dictionary.all,
     );
     try {
       await s.accounts.replaceAll(b.accounts);
@@ -71,6 +80,9 @@ class BackupService {
       await s.transactions.replaceAll(b.transactions);
       await s.recurring.replaceAll(b.recurring);
       await s.settings.update((_) => b.settings);
+      await s.rules.replaceAll(b.rules);
+      await s.importProfiles.replaceAll(b.importProfiles);
+      await s.dictionary.replaceAll(b.dictionary);
       await materializeRecurring(s);
     } catch (e, st) {
       // Cada restauração tem try próprio: uma falha não impede as demais.
@@ -81,6 +93,9 @@ class BackupService {
         () => s.transactions.replaceAll(retrato.transactions),
         () => s.recurring.replaceAll(retrato.recurring),
         () => s.settings.update((_) => retrato.settings),
+        () => s.rules.replaceAll(retrato.rules),
+        () => s.importProfiles.replaceAll(retrato.importProfiles),
+        () => s.dictionary.replaceAll(retrato.dictionary),
       ];
       for (final restore in restores) {
         try {
@@ -155,6 +170,9 @@ class BackupService {
     List<Transaction> transactions,
     List<RecurringRule> recurring,
     AppSettings settings,
+    List<TransactionRule> rules,
+    List<ImportProfile> importProfiles,
+    List<DictionaryEntry> dictionary,
   })
   _parse(Map<String, dynamic> data) {
     try {
@@ -188,6 +206,18 @@ class BackupService {
         settings: AppSettings.fromMap(
           data['settings'] as Map<String, dynamic>,
         ).copyWith(onboardingDone: true),
+        // Chaves da Fase 8 ausentes (backup antigo): regras e perfis vazios, dicionário padrão.
+        rules: _rows([
+          for (final row in _optMaps(data, 'rules'))
+            _unlinkedCategory(row, categoryIds),
+        ], TransactionRule.fromMap),
+        importProfiles: _rows([
+          for (final row in _optMaps(data, 'importProfiles'))
+            if (_hasDestino(row, accountIds, cardIds)) row,
+        ], ImportProfile.fromMap),
+        dictionary: data.containsKey('dictionary')
+            ? _rows(_maps(data, 'dictionary'), DictionaryEntry.fromMap)
+            : defaultDictionary(),
       );
     } on TypeError catch (e) {
       throw FormatException('Backup com campos inválidos: $e');
@@ -199,6 +229,11 @@ class BackupService {
     String key,
   ) => [for (final row in data[key] as List) row as Map<String, dynamic>];
 
+  static List<Map<String, dynamic>> _optMaps(
+    Map<String, dynamic> data,
+    String key,
+  ) => data.containsKey(key) ? _maps(data, key) : const [];
+
   static Set<String> _idsOf(Map<String, dynamic> data, String key) => {
     for (final row in _maps(data, key)) row['id'] as String,
   };
@@ -206,6 +241,19 @@ class BackupService {
   /// Referência nula ou existente no backup; qualquer outra é órfã.
   static bool _linked(Object? id, Set<String> ids) =>
       id == null || ids.contains(id);
+
+  /// Perfil precisa de um destino que exista no backup; sem destino ou com destino órfão, é descartado.
+  static bool _hasDestino(
+    Map<String, dynamic> row,
+    Set<String> accountIds,
+    Set<String> cardIds,
+  ) {
+    final accountId = row['accountId'];
+    final cardId = row['cardId'];
+    return (accountId != null || cardId != null) &&
+        _linked(accountId, accountIds) &&
+        _linked(cardId, cardIds);
+  }
 
   static Map<String, dynamic> _unlinkedCategory(
     Map<String, dynamic> row,

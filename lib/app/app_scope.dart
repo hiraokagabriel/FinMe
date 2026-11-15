@@ -5,7 +5,10 @@ import '../core/services/settings_controller.dart';
 import '../features/accounts/domain/account.dart';
 import '../features/cards/domain/payment_card.dart';
 import '../features/categories/domain/transaction_category.dart';
+import '../features/importing/domain/import_profile.dart';
+import '../features/importing/domain/merchant_dictionary.dart';
 import '../features/recurring/domain/recurring_rule.dart';
+import '../features/rules/domain/transaction_rule.dart';
 import '../features/transactions/domain/transaction.dart';
 import 'ledger.dart';
 
@@ -18,6 +21,9 @@ class AppServices {
     required this.transactions,
     required this.recurring,
     required this.settings,
+    required this.rules,
+    required this.importProfiles,
+    required this.dictionary,
     required this.ledger,
     this.clock = DateTime.now,
   });
@@ -28,6 +34,9 @@ class AppServices {
   final CollectionRepository<Transaction> transactions;
   final CollectionRepository<RecurringRule> recurring;
   final SettingsController settings;
+  final CollectionRepository<TransactionRule> rules;
+  final CollectionRepository<ImportProfile> importProfiles;
+  final CollectionRepository<DictionaryEntry> dictionary;
   final Ledger ledger;
   final DateTime Function() clock;
 }
