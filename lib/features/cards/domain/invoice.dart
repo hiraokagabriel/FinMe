@@ -85,8 +85,9 @@ class InvoiceService {
         continue;
       }
       if (t.type == TransactionType.invoicePayment) {
-        final month = _parseKey(t.invoiceKey);
-        if (month != null) {
+        final key = _parseKey(t.invoiceKey);
+        if (key != null) {
+          final month = invoiceMonthForKey(key, card);
           groups.putIfAbsent(month, _Group.new).paid += t.amountCents;
         }
         continue;

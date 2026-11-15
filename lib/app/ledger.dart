@@ -272,12 +272,14 @@ class Ledger extends ChangeNotifier {
   Map<String, List<Transaction>> get _cardProjections =>
       _projectedByCard ??= _groupByCard(_projectedCardOccurrences());
 
-  /// Ocorrências de recorrências de cartão de hoje até o fim do horizonte de previsão.
+  /// Ocorrências de recorrências de cartão de hoje até o mesmo fim da previsão (`forecast`).
   List<Transaction> _projectedCardOccurrences() {
     final now = today;
-    final end = YearMonth.fromDate(
-      now,
-    ).addMonths(settings.value.forecastMonths - 1).lastDay;
+    final end = ForecastService.horizonEnd(
+      today: now,
+      months: settings.value.forecastMonths,
+      minDays: invoiceTimelineDays,
+    );
     final existing = {for (final t in transactions.all) t.id};
     return [
       for (final r in recurring.all)

@@ -100,28 +100,34 @@ class Transaction {
     amountCents: amountCents ?? this.amountCents,
     date: date ?? this.date,
     description: description ?? this.description,
-    categoryId: categoryId == _keep ? this.categoryId : categoryId as String?,
-    accountId: accountId == _keep ? this.accountId : accountId as String?,
-    cardId: cardId == _keep ? this.cardId : cardId as String?,
-    toAccountId: toAccountId == _keep
+    categoryId: identical(categoryId, _keep)
+        ? this.categoryId
+        : categoryId as String?,
+    accountId: identical(accountId, _keep)
+        ? this.accountId
+        : accountId as String?,
+    cardId: identical(cardId, _keep) ? this.cardId : cardId as String?,
+    toAccountId: identical(toAccountId, _keep)
         ? this.toAccountId
         : toAccountId as String?,
     status: status ?? this.status,
     isBoleto: isBoleto ?? this.isBoleto,
-    invoiceKey: invoiceKey == _keep ? this.invoiceKey : invoiceKey as String?,
-    installmentGroupId: installmentGroupId == _keep
+    invoiceKey: identical(invoiceKey, _keep)
+        ? this.invoiceKey
+        : invoiceKey as String?,
+    installmentGroupId: identical(installmentGroupId, _keep)
         ? this.installmentGroupId
         : installmentGroupId as String?,
-    installmentIndex: installmentIndex == _keep
+    installmentIndex: identical(installmentIndex, _keep)
         ? this.installmentIndex
         : installmentIndex as int?,
-    installmentCount: installmentCount == _keep
+    installmentCount: identical(installmentCount, _keep)
         ? this.installmentCount
         : installmentCount as int?,
-    recurringId: recurringId == _keep
+    recurringId: identical(recurringId, _keep)
         ? this.recurringId
         : recurringId as String?,
-    notes: notes == _keep ? this.notes : notes as String?,
+    notes: identical(notes, _keep) ? this.notes : notes as String?,
   );
 
   Map<String, dynamic> toMap() => {

@@ -104,7 +104,8 @@ class PaymentCard {
     return (closingDay: closingDay, dueDay: dueDay);
   }
 
-  /// Muda fechamento/vencimento a partir de [effectiveFrom], sem reescrever faturas passadas.
+  /// Muda fechamento/vencimento a partir de [effectiveFrom]. Compras com data < [effectiveFrom]
+  /// seguem o ciclo antigo; a fatura aberta pode virar fatura de transição (SPEC §5.1).
   /// Dias iguais aos atuais → this. Data não posterior ao último `until` → [ArgumentError].
   PaymentCard withCycleChange({
     required int closingDay,
@@ -159,7 +160,7 @@ class PaymentCard {
     limitCents: limitCents ?? this.limitCents,
     closingDay: closingDay ?? this.closingDay,
     dueDay: dueDay ?? this.dueDay,
-    paymentAccountId: paymentAccountId == _keep
+    paymentAccountId: identical(paymentAccountId, _keep)
         ? this.paymentAccountId
         : paymentAccountId as String?,
     colorValue: colorValue ?? this.colorValue,

@@ -88,14 +88,9 @@ class Forecast {
 }
 
 class ForecastService {
-  /// Previsão de [months] meses a partir de [today] (mês atual incluso). O horizonte
-  /// vai até o último dia desses meses ou até `today + minDays`, o que for mais tarde;
-  /// `months` continua com exatamente [months] entradas.
-  static Forecast compute({
-    required List<Account> accounts,
-    required List<PaymentCard> cards,
-    required List<Transaction> transactions,
-    required List<RecurringRule> recurring,
+  /// Fim do horizonte da previsão: último dia de [months] meses (mês atual incluso) ou
+  /// `today + minDays`, o que for mais tarde. Compartilhado com quem projeta até o mesmo fim.
+  static DateTime horizonEnd({
     required DateTime today,
     int months = 6,
     int minDays = 0,
@@ -105,7 +100,22 @@ class ForecastService {
     final day = dateOnly(today);
     final monthsEnd = YearMonth.fromDate(day).addMonths(months - 1).lastDay;
     final minEnd = DateTime(day.year, day.month, day.day + minDays);
-    final end = monthsEnd.isAfter(minEnd) ? monthsEnd : minEnd;
+    return monthsEnd.isAfter(minEnd) ? monthsEnd : minEnd;
+  }
+
+  /// Previsão de [months] meses a partir de [today] (mês atual incluso). O horizonte
+  /// vai até [horizonEnd]; `months` continua com exatamente [months] entradas.
+  static Forecast compute({
+    required List<Account> accounts,
+    required List<PaymentCard> cards,
+    required List<Transaction> transactions,
+    required List<RecurringRule> recurring,
+    required DateTime today,
+    int months = 6,
+    int minDays = 0,
+  }) {
+    final day = dateOnly(today);
+    final end = horizonEnd(today: day, months: months, minDays: minDays);
     final activeAccounts = accounts.where((a) => !a.archived).toList();
     final activeIds = {for (final a in activeAccounts) a.id};
     final currentBalances = accountBalances(

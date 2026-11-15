@@ -146,16 +146,18 @@ Detalhes completos em `docs/SPEC.md` §5. Resumo:
 - `478314b` telas Painel, Previsão, Cartões, Contas, Transações, Recorrentes, Categorias e Ajustes (T-012..T-019)
 - `6cb402c` polimento pós-revisão e domínio da Fase 5 (T-020a/b, T-030..T-032)
 - `06b1531` previsibilidade: cobertura de faturas, vencimentos 60 dias, parcelas comprometidas, melhor cartão, ciclo com vigência (T-033..T-038)
+- `9194b17` correções da revisão da Fase 5 e documentação v2 (T-021)
+- `152052b` pendências: backup atômico, previsão 60 dias, copyWith limpa anuláveis, fatura de transição (T-040..T-044)
+- correções da revisão da Fase 6: pagamento de mês descartado abate a fatura de transição, horizonte único (T-046)
 
 ## 11. Status
 
-- Fases 0–5 concluídas (`docs/BACKLOG.md`). T-021 (documentação) em andamento.
+- Fases 0–6 concluídas (`docs/BACKLOG.md`), exceto T-045 (manual) e T-047 (`todo`).
+- Fase 6: import de backup tudo-ou-nada (restaura o estado anterior em falha), previsão cobre os 60 dias da linha do tempo (`Ledger.invoiceTimelineDays`, `ForecastService.horizonEnd`), `copyWith` limpa anuláveis (sentinela `_keep`), fatura de transição sem fusão na mudança de ciclo (`installmentDueMonth`, `invoiceMonthForKey`; SPEC §5.1).
 - Próximos passos sugeridos: ver ROADMAP.md.
 
 ## 12. Pendências conhecidas
 
-- Sem teste em dispositivo Android real.
-- `copyWith` não limpa campos nulos; os formulários recriam a entidade pelo construtor.
-- Fusão de faturas no mês de troca de ciclo é simplificação (SPEC §5.1).
-- Import de backup não é atômico entre coleções (cada coleção grava sozinha).
-- Linha do tempo de vencimentos promete 60 dias, mas com `forecastMonths = 3` e hoje no fim de janeiro o horizonte cobre 59 dias (último dia fica fora).
+- Sem teste em dispositivo Android real (T-045, manual — usuário).
+- Linha de fechamentos do cartão é recalculada a cada chamada; memoização pendente (T-047).
+- Rollback do import de backup não é atômico se o disco também falhar durante a restauração (SPEC §3.5).

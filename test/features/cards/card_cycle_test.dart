@@ -375,6 +375,80 @@ void main() {
     );
   });
 
+  group('pagamento com invoiceKey de mês descartado (SPEC §5.1)', () {
+    // Fecha 5/vence 12 → fecha 25/vence 5 a partir de 01/12: 2026-12 não tem fechamento mantido.
+    final c = changedCard();
+
+    test('invoiceMonthForKey: mês descartado vai para o próximo mantido', () {
+      expect(
+        invoiceMonthForKey(const YearMonth(2026, 12), c),
+        const YearMonth(2027, 1),
+      );
+      expect(
+        invoiceMonthForKey(const YearMonth(2026, 11), c),
+        const YearMonth(2026, 11),
+      );
+      expect(
+        invoiceMonthForKey(const YearMonth(2027, 1), c),
+        const YearMonth(2027, 1),
+      );
+    });
+
+    test('sem histórico, invoiceMonthForKey devolve o mês', () {
+      expect(
+        invoiceMonthForKey(const YearMonth(2026, 12), card()),
+        const YearMonth(2026, 12),
+      );
+    });
+
+    test(
+      'pagamento antecipado de 2026-12 abate a fatura de transição 2027-01',
+      () {
+        final invoices = InvoiceService.build(
+          card: c,
+          transactions: [
+            tx(
+              'compra',
+              TransactionType.expense,
+              10000,
+              DateTime(2026, 11, 10),
+            ),
+            tx(
+              'pag',
+              TransactionType.invoicePayment,
+              4000,
+              DateTime(2026, 11, 20),
+              invoiceKey: '2026-12',
+            ),
+          ],
+        );
+        expect(invoices.map((i) => i.dueMonth.key), ['2027-01']);
+        final jan = invoiceOf(invoices, '2027-01');
+        expect(jan.paidCents, 4000);
+        expect(jan.remainingCents, 6000);
+        expect(jan.statusOn(DateTime(2026, 12, 1)), InvoiceStatus.open);
+      },
+    );
+
+    test('sem histórico, pagamento de 2026-12 continua em 2026-12', () {
+      final invoices = InvoiceService.build(
+        card: card(),
+        transactions: [
+          tx('compra', TransactionType.expense, 1000, DateTime(2026, 11, 4)),
+          tx(
+            'pag',
+            TransactionType.invoicePayment,
+            300,
+            DateTime(2026, 11, 20),
+            invoiceKey: '2026-12',
+          ),
+        ],
+      );
+      expect(invoices.map((i) => i.dueMonth.key), ['2026-11', '2026-12']);
+      expect(invoiceOf(invoices, '2026-12').paidCents, 300);
+    });
+  });
+
   group('purchaseDueDate e vencimento da fatura', () {
     final cards = {
       'sem mudança': card(),

@@ -7,6 +7,7 @@ import 'package:finme/core/theme/app_palettes.dart';
 import 'package:finme/features/accounts/domain/account.dart';
 import 'package:finme/features/cards/domain/payment_card.dart';
 import 'package:finme/features/forecast/domain/forecast.dart';
+import 'package:finme/features/recurring/domain/recurring_rule.dart';
 import 'package:finme/features/transactions/domain/transaction.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -138,4 +139,43 @@ void main() {
     expect(due.amountCents, 4000);
     expect(due.accountBalanceAfterCents, 96000);
   });
+
+  test(
+    'recorrência de cartão é projetada até o fim da previsão (hoje + 60 dias)',
+    () async {
+      // Com 3 meses em 31/01/2027 o fim dos meses é 31/03; hoje + 60 dias é 01/04.
+      final s31 = await bootstrap(
+        storeFactory: (_) => MemoryRecordStore(),
+        clock: () => DateTime(2027, 1, 31),
+      );
+      await s31.settings.update((x) => x.copyWith(forecastMonths: 3));
+      await s31.cards.upsert(
+        PaymentCard(
+          id: 'card_x',
+          name: 'X',
+          bankName: 'Banco',
+          brand: CardBrand.visa,
+          kind: CardKind.credit,
+          last4: '0001',
+          closingDay: 25,
+          dueDay: 5,
+          colorValue: kEntityColors[0],
+        ),
+      );
+      await s31.recurring.upsert(
+        RecurringRule(
+          id: 'rec_card',
+          description: 'Assinatura',
+          type: TransactionType.expense,
+          amountCents: 1000,
+          frequency: Frequency.monthly,
+          startDate: DateTime(2027, 4, 1),
+          cardId: 'card_x',
+        ),
+      );
+
+      final items = s31.ledger.invoicesFor('card_x').expand((i) => i.items);
+      expect(items.any((t) => t.date == DateTime(2027, 4, 1)), isTrue);
+    },
+  );
 }

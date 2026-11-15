@@ -45,7 +45,7 @@ class TransactionCategory {
     kind: kind ?? this.kind,
     iconCodePoint: iconCodePoint ?? this.iconCodePoint,
     colorValue: colorValue ?? this.colorValue,
-    monthlyBudgetCents: monthlyBudgetCents == _keep
+    monthlyBudgetCents: identical(monthlyBudgetCents, _keep)
         ? this.monthlyBudgetCents
         : monthlyBudgetCents as int?,
   );

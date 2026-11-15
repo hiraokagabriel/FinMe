@@ -33,6 +33,17 @@ YearMonth installmentDueMonth(DateTime firstDate, int index, PaymentCard card) {
   return _closingAfter(firstDate, card, index - 1).dueMonth;
 }
 
+/// Mês de fatura que recebe um `invoiceKey` (pagamento). Mês sem fechamento mantido
+/// (descartado pela mudança de ciclo) vai para o vencimento do próximo fechamento mantido,
+/// para o pagamento abater a fatura de transição e não ser contado duas vezes.
+YearMonth invoiceMonthForKey(YearMonth month, PaymentCard card) {
+  if (card.cycleHistory.isEmpty || _keptFor(month, card) != null) {
+    return month;
+  }
+  // Fechamento após o último dia do mês anterior = primeiro fechamento em ou após o dia 1 de `month`.
+  return _closingAfter(month.prev().lastDay, card, 0).dueMonth;
+}
+
 /// Data de fechamento da fatura que vence em [dueMonth]. [cycleDate] escolhe o ciclo
 /// vigente quando [dueMonth] não tem fechamento mantido (padrão: início de [dueMonth]).
 DateTime invoiceClosingDate(

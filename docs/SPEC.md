@@ -325,15 +325,16 @@ Exemplos (todas as datas de 2026, salvo indicação):
   Compra 04/11 → `2026-11`, vence 12/11. Compras 20/11 e 02/12 → `2027-01`, vence 05/01/2027 (fatura de transição 05/11–25/12).
   Não existe fatura `2026-12`. Parcelado 3x com 1ª em 15/10 → `2026-11`, `2027-01`, `2027-02`.
   Pagamento com `invoiceKey` `2026-11` continua quitando nov.
+  Pagamento com `invoiceKey` `2026-12` (sem fechamento mantido) → `invoiceMonthForKey` = `2027-01`: abate a fatura de transição.
 - Fecha 5/vence 12 → fecha 20/vence 27 a partir de 15/11. Fechamento 20/11 venceria em nov (= nov do 05/11) → descartado.
   Compras 04/11 → nov (12/11). Compras 10/11 e 16/11 → `2026-12`, fecha 20/12, vence 27/12 (transição 05/11–20/12).
   `invoiceDueDate(2026-12)` = 27/12 com ou sem itens.
 - Fecha 25/vence 5 → fecha 5/vence 12 a partir de 01/12. 25/11 → dez (05/12). 05/12 venceria em dez → descartado.
   Compra 24/11 → `2026-12` (05/12). Compra 28/11 → `2027-01`, fecha 05/01/2027, vence 12/01/2027.
 
-Limite conhecido: pagamento antigo com `invoiceKey` de um mês que deixou de ter fechamento vira fatura só de pagamento
-(`remaining == 0`, status `paid`) e não abate a fatura de transição. Aceitável: a mudança de ciclo é da Fase 5 e não havia
-dados reais com a regra de fusão.
+11. **Pagamento (`invoicePayment`) com `invoiceKey` K** → `invoiceMonthForKey(K, card)`: se K tem fechamento mantido, K;
+    senão, `dueMonth` do primeiro fechamento mantido posterior ao fim do mês K-1 (= o primeiro com vencimento > K).
+    Assim o pagamento abate a fatura de transição e não vira fatura só de pagamento. Sem histórico, K.
 
 ### 5.2 Fatura — `features/cards/domain/invoice.dart`
 ```dart
@@ -353,7 +354,7 @@ class InvoiceService {
     required PaymentCard card,
     required Iterable<Transaction> transactions, // todas; filtra por cardId
     Iterable<Transaction> projected = const [],  // recorrências futuras do cartão
-  }); // agrupa expense(+)/income(-) por invoiceDueMonth; invoicePayment soma em paidCents por invoiceKey; ordena por dueMonth
+  }); // agrupa expense(+)/income(-) por invoiceDueMonth; invoicePayment soma em paidCents pelo invoiceMonthForKey(invoiceKey) (§5.1 regra 11); ordena por dueMonth
   static int usedLimitCents(Iterable<Invoice> invoices, DateTime today);
     // soma remainingCents das faturas com status != paid (inclui parcelas futuras)
   static Invoice? currentInvoice(Iterable<Invoice> invoices, DateTime today);

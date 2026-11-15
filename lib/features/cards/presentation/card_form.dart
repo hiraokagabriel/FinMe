@@ -66,6 +66,7 @@ class _CardFormState extends State<_CardForm> {
 
   /// Dia do lançamento mais recente do cartão editado (null se não há nenhum).
   /// Parcelas 2+ são ancoradas na fatura da parcela 1 (SPEC §5.2), então não contam.
+  /// O form exige vigência depois dele (regra do form; o domínio não exige).
   DateTime? _lastTransactionDay(AppServices s) {
     final id = widget.initial?.id;
     if (id == null) {
@@ -422,7 +423,8 @@ class _CycleChangeDialogState extends State<_CycleChangeDialog> {
   late DateTime _from = _minFrom();
   String? _error;
 
-  /// Menor vigência válida: hoje, ou o dia seguinte ao último lançamento se ele for futuro.
+  /// Menor vigência válida no form: hoje, ou o dia seguinte ao último lançamento se ele cair
+  /// hoje ou depois. O domínio só exige vigência posterior ao último `until`.
   DateTime _minFrom() {
     final last = widget.lastTransactionDay;
     if (last == null) {
@@ -460,7 +462,7 @@ class _CycleChangeDialogState extends State<_CycleChangeDialog> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const Text(
-              'Compras a partir desta data usam o novo fechamento/vencimento. Faturas anteriores não mudam.',
+              'Compras a partir desta data usam o novo fechamento/vencimento. A fatura aberta pode virar fatura de transição, com vencimento no novo ciclo.',
             ),
             const SizedBox(height: AppSpace.md),
             DateField(

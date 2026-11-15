@@ -92,16 +92,20 @@ class RecurringRule {
     description: description ?? this.description,
     type: type ?? this.type,
     amountCents: amountCents ?? this.amountCents,
-    categoryId: categoryId == _keep ? this.categoryId : categoryId as String?,
-    accountId: accountId == _keep ? this.accountId : accountId as String?,
-    cardId: cardId == _keep ? this.cardId : cardId as String?,
+    categoryId: identical(categoryId, _keep)
+        ? this.categoryId
+        : categoryId as String?,
+    accountId: identical(accountId, _keep)
+        ? this.accountId
+        : accountId as String?,
+    cardId: identical(cardId, _keep) ? this.cardId : cardId as String?,
     frequency: frequency ?? this.frequency,
     startDate: startDate ?? this.startDate,
-    endDate: endDate == _keep ? this.endDate : endDate as DateTime?,
+    endDate: identical(endDate, _keep) ? this.endDate : endDate as DateTime?,
     isSubscription: isSubscription ?? this.isSubscription,
     isBoleto: isBoleto ?? this.isBoleto,
     active: active ?? this.active,
-    materializedUntil: materializedUntil == _keep
+    materializedUntil: identical(materializedUntil, _keep)
         ? this.materializedUntil
         : materializedUntil as DateTime?,
   );

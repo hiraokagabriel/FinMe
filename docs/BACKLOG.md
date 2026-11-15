@@ -215,6 +215,15 @@ aceite (substituir os testes do grupo "transição de ciclo" e o grupo "fatura f
 - Sem histórico: `installmentDueMonth(d1, i, card) == invoiceDueMonth(d1, card).addMonths(i - 1)` para i = 1..12.
 - `test/features/cards/invoice_test.dart`, `card_insights_test.dart`, `entities_test.dart` e `card_form_test.dart` passam **sem alteração**.
 
+### T-046 · Correções da revisão da Fase 6 · `done` · deps: T-040..T-044
+- (a) Pagamento com `invoiceKey` de mês descartado pela mudança de ciclo é remapeado para o próximo fechamento mantido (abate a fatura de transição; sem dupla contagem na previsão). Helper público `invoiceMonthForKey(YearMonth, PaymentCard)` em `invoice_cycle.dart`; usado em `InvoiceService.build`. SPEC §5.1/§5.2 atualizada (remove o "limite conhecido").
+- (b) `card_form.dart`: texto "Faturas anteriores não mudam" e comentários de `_lastTransactionDay`/`_minFrom` e `PaymentCard.withCycleChange` alinhados à fatura de transição.
+- (c) `copyWith`: `identical(x, _keep)` no lugar de `x == _keep` (4 entidades).
+- (d) `Ledger._projectedCardOccurrences` usa o mesmo fim da previsão (`max(fim dos meses, hoje + invoiceTimelineDays)`).
+
+### T-047 · Memoizar a linha de fechamentos por cartão · `todo` · deps: T-046
+files: `lib/features/cards/domain/invoice_cycle.dart` (+ teste). Hoje cada `invoiceDueMonth`/`installmentDueMonth`/`_keptFor` reconstrói segmentos e fechamentos desde a 1ª mudança: O(T × meses × segmentos) por cartão com histórico, crescendo com o tempo. Memoizar por instância de `PaymentCard` (ex.: `Expando`, estendido sob demanda) com busca binária por data e por `dueMonth`, ou montar a linha uma vez em `InvoiceService.build`. Aceite: resultados idênticos (todos os testes de cards passam sem alteração).
+
 ### T-045 · Teste em dispositivo Android real · `todo` · **manual — usuário** (agentes NÃO executam) · deps: T-040..T-044
 files: — (nenhum código; registrar resultado em `CONTEXT.md` §12)
 passos: `flutter build apk` (ou `flutter run -d <id>`) em aparelho físico; rodar onboarding com dados de exemplo; navegar pelas 8 páginas nos modos Simples e Ultra; criar compra parcelada, pagar fatura, mudar ciclo de um cartão; exportar e importar backup (seletor de arquivo do Android); girar a tela e testar o drawer.
