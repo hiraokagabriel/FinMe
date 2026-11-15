@@ -31,17 +31,17 @@ files: `lib/features/accounts/domain/account.dart`, `lib/features/cards/domain/p
 contrato: SPEC §4
 aceite: round-trip `fromMap(toMap(x)) == x` (implemente `==`/`hashCode`) para cada entidade; enum desconhecido → primeiro valor; campos opcionais ausentes → null.
 
-### T-006 · Faturas · `todo` · deps: T-005 · parallel: yes
+### T-006 · Faturas · `done` · deps: T-005 · parallel: yes
 files: `lib/features/cards/domain/invoice_cycle.dart`, `lib/features/cards/domain/invoice.dart`, `test/features/cards/invoice_test.dart`
 contrato: SPEC §5.1–5.2
 aceite: os 4 exemplos do SPEC §5.1; fechamento dia 31 em fevereiro; virada de ano (fecha 25, vence 5: compra 28/12/2026 → fecha 25/01/2027 → vence 05/02/2027); estorno abate; pagamento parcial → remaining; status open/closed/paid/overdue; `usedLimitCents` com parcelas futuras.
 
-### T-007 · Parcelas e recorrência · `todo` · deps: T-005 · parallel: yes
+### T-007 · Parcelas e recorrência · `done` · deps: T-005 · parallel: yes
 files: `lib/features/transactions/domain/installments.dart`, `lib/features/recurring/domain/recurrence.dart`, `test/features/installments_recurrence_test.dart`
 contrato: SPEC §5.3–5.4
 aceite: 100,00 em 3x = 33,34 + 33,33 + 33,33; datas a partir de 31/01; monthly com start dia 31 → 28/02, 31/03, 30/04; weekly; yearly 29/02 → 28/02 em não-bissexto; endDate respeitado; `existingIds` evita duplicata; `active=false` → vazio.
 
-### T-008 · Saldos e categorias · `todo` · deps: T-005 · parallel: yes
+### T-008 · Saldos e categorias · `done` · deps: T-005 · parallel: yes
 files: `lib/features/accounts/domain/balances.dart`, `lib/features/categories/domain/category_spending.dart`, `test/features/balances_spending_test.dart`
 contrato: SPEC §5.5–5.6
 aceite: planned não afeta saldo; transfer move entre contas; débito afeta conta do cartão; crédito não afeta conta; invoicePayment debita; gasto por categoria inclui cartão, exclui transfer/income; budget ordenado por ratio.

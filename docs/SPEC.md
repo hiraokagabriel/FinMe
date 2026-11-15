@@ -264,7 +264,7 @@ class InvoiceService {
   static int usedLimitCents(Iterable<Invoice> invoices, DateTime today);
     // soma remainingCents das faturas com status != paid (inclui parcelas futuras)
   static Invoice? currentInvoice(Iterable<Invoice> invoices, DateTime today);
-    // primeira fatura não paga com dueDate >= today; se não houver, a open/closed mais próxima
+    // fatura não paga mais antiga (inclusive vencida); se todas pagas, null
 }
 ```
 Só cartões `credit` têm faturas.
