@@ -57,10 +57,14 @@ aceite: (1) parcelas com fechamento 29/30/31 cruzando fev e mês de 30 dias caem
 
 ## Fase 2 — App
 
-### T-010 · Bootstrap, Ledger, Shell, Onboarding · `todo` · deps: T-003, T-004, T-009
+### T-010 · Bootstrap, Ledger, Shell, Onboarding · `done` · deps: T-003, T-004, T-009
 files: `lib/main.dart`, `lib/app/app.dart`, `lib/app/bootstrap.dart`, `lib/app/app_scope.dart`, `lib/app/ledger.dart`, `lib/app/seed.dart`, `lib/app/home_shell.dart`, `lib/features/onboarding/presentation/onboarding_page.dart`, + placeholders `lib/features/{dashboard,forecast,cards,accounts,transactions,recurring,categories,settings}/presentation/<x>_page.dart` (classes `DashboardPage`, `ForecastPage`, `CardsPage`, `AccountsPage`, `TransactionsPage`, `RecurringPage`, `CategoriesPage`, `SettingsPage`, cada um `StatelessWidget` com `Center(Text(...))`), `test/app/ledger_test.dart`
 contrato: SPEC §6, §7.3, §7.4
 aceite: `bootstrap({RecordStore Function(String box)? storeFactory, DateTime Function()? clock})` permite memória em teste; seed de categorias padrão (12 despesa, 4 receita, sem nomes de empresas reais); seed demo cria ≥ 2 bancos fictícios, 4 cartões (3 crédito, 1 débito), 3 contas, ~40 transações dos últimos 3 meses + parcelas futuras, 4 recorrentes; Ledger memoiza (teste: `forecast` idêntico entre chamadas sem mudança, recalcula após upsert).
+
+### T-010b · Status de recorrência materializada + robustez do onboarding · `todo` · deps: T-010
+files: `lib/features/recurring/domain/recurrence.dart`, `test/features/installments_recurrence_test.dart`, `lib/features/onboarding/presentation/onboarding_page.dart`
+aceite: regra de status do SPEC §5.4; onboarding com try/finally e SnackBar de erro.
 
 ### T-011 · Widgets compartilhados · `todo` · deps: T-010
 files: `lib/core/widgets/*.dart` (um arquivo por widget do SPEC §7.2 ou agrupados em ≤ 4 arquivos), `lib/core/widgets/widgets.dart` (barrel)

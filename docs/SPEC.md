@@ -291,7 +291,9 @@ List<Transaction> occurrenceTransactions(
   {required bool forProjection});
   // gera Transaction com id = occurrenceId, recurringId = r.id, copia campos.
   // pula ids em existingIds. r.active == false → [].
-  // status: cardId != null → paid; accountId: forProjection ? planned : planned.
+  // status: cardId != null → paid. Conta: forProjection → planned;
+  // materialização (forProjection: false) → paid se date < to && !isBoleto, senão planned
+  // (boleto exige confirmação; ocorrência de hoje fica provisionada).
 ```
 No boot (`bootstrap.dart`): materializa ocorrências de `max(startDate, materializedUntil + 1 dia)` até hoje
 (`forProjection: false`), grava, e atualiza `materializedUntil = hoje` na regra. Ocorrências futuras **não** são gravadas: entram na previsão via projeção.
