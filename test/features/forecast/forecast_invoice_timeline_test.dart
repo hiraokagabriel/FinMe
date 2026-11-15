@@ -127,4 +127,54 @@ void main() {
     expect(negative.style?.color, AppColors.light.danger);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('linhas em 390x800 sem overflow com saldo longo', (tester) async {
+    tester.view.physicalSize = const Size(390, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final s = await tester.runAsync(
+      () => bootstrap(
+        storeFactory: (_) => MemoryRecordStore(),
+        clock: () => DateTime(2026, 11, 14),
+      ),
+    );
+    const account = Account(
+      id: 'acc1',
+      name: 'Conta Principal',
+      bankName: 'Banco Alfa',
+      type: AccountType.checking,
+      initialBalanceCents: 0,
+      colorValue: 0xFF1565C0,
+    );
+    final items = [
+      _due(
+        card: _card('g', 'Cartão Gama Platinum Internacional'),
+        date: DateTime(2026, 11, 25),
+        dueDate: DateTime(2026, 11, 25),
+        amountCents: 30000,
+        accountId: 'acc1',
+        balanceAfterCents: -123456789012,
+      ),
+    ];
+
+    await tester.pumpWidget(
+      AppScope(
+        services: s!,
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: Scaffold(
+            body: InvoiceTimelineSection(
+              items: items,
+              accounts: {'acc1': account},
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Cartão Gama Platinum Internacional'), findsOneWidget);
+    expect(find.text('Saldo após '), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }

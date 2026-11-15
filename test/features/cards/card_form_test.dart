@@ -161,6 +161,123 @@ void main() {
     expect(s.cards.all.single, initial);
   });
 
+  testWidgets('vigência não pode ser anterior a lançamento do cartão', (
+    tester,
+  ) async {
+    final initial = card();
+    final s = await servicesWith(tester, initial: initial);
+    await tester.runAsync(
+      () => s.transactions.upsert(
+        Transaction(
+          id: 't_futura',
+          type: TransactionType.expense,
+          amountCents: 5000,
+          date: DateTime(2026, 11, 20),
+          description: 'Compra futura',
+          cardId: 'c1',
+        ),
+      ),
+    );
+    await openForm(tester, s, initial);
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Dia de vencimento'),
+      '20',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Salvar'));
+    await tester.pumpAndSettle();
+    // Default já é 21/11; escolhe 20/11 (igual ao lançamento) no date picker.
+    await tester.tap(find.text(formatDate(DateTime(2026, 11, 21))));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byType(DatePickerDialog),
+        matching: find.text('20'),
+      ),
+    );
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Salvar').last);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Há lançamentos após esta data; escolha a partir de 21/11'),
+      findsOneWidget,
+    );
+    expect(find.text('Vale a partir de'), findsOneWidget);
+    expect(s.cards.all.single, initial);
+  });
+
+  testWidgets('compra parcelada 10x hoje: vigência abre a partir de amanhã', (
+    tester,
+  ) async {
+    final initial = card();
+    final s = await servicesWith(tester, initial: initial);
+    await tester.runAsync(() async {
+      // Parcelas 2 a 10 são futuras e não devem travar a vigência.
+      for (var i = 1; i <= 10; i++) {
+        await s.transactions.upsert(
+          Transaction(
+            id: 'p$i',
+            type: TransactionType.expense,
+            amountCents: 5000,
+            date: DateTime(2026, 10 + i, 14),
+            description: 'Notebook 10x',
+            cardId: 'c1',
+            installmentIndex: i,
+            installmentCount: 10,
+          ),
+        );
+      }
+    });
+    await openForm(tester, s, initial);
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Dia de vencimento'),
+      '20',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Salvar'));
+    await tester.pumpAndSettle();
+
+    expect(find.text(formatDate(DateTime(2026, 11, 15))), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Salvar').last);
+    await tester.pumpAndSettle();
+
+    final saved = s.cards.all.single;
+    expect(saved.dueDay, 20);
+    expect(saved.cycleHistory, [
+      CardCycle(until: DateTime(2026, 11, 15), closingDay: 5, dueDay: 12),
+    ]);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('vigência abre no dia seguinte a lançamento futuro', (
+    tester,
+  ) async {
+    final initial = card();
+    final s = await servicesWith(tester, initial: initial);
+    await tester.runAsync(
+      () => s.transactions.upsert(
+        Transaction(
+          id: 't_futura',
+          type: TransactionType.expense,
+          amountCents: 5000,
+          date: DateTime(2026, 11, 20),
+          description: 'Compra futura',
+          cardId: 'c1',
+        ),
+      ),
+    );
+    await openForm(tester, s, initial);
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Dia de vencimento'),
+      '20',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Salvar'));
+    await tester.pumpAndSettle();
+
+    expect(find.text(formatDate(DateTime(2026, 11, 21))), findsOneWidget);
+    expect(find.textContaining('Há lançamentos'), findsNothing);
+  });
+
   testWidgets('sem transações: troca só os dias e não pergunta vigência', (
     tester,
   ) async {

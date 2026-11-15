@@ -32,10 +32,14 @@ class Ledger extends ChangeNotifier {
     required this.settings,
     required this.clock,
     this.onDayChanged,
+    this.scheduleMidnightTimer = true,
   }) {
     _cacheDay = dateOnly(clock());
     for (final source in _sources) {
       source.addListener(_invalidate);
+    }
+    if (scheduleMidnightTimer) {
+      _scheduleMidnight();
     }
   }
 
@@ -50,7 +54,12 @@ class Ledger extends ChangeNotifier {
   /// Chamado na virada de dia (bootstrap passa `materializeRecurring`). Evita import circular.
   final Future<void> Function()? onDayChanged;
 
+  /// Falso em teste: sem ele não sobra `Timer` pendente. Bootstrap mantém true.
+  final bool scheduleMidnightTimer;
+
   late DateTime _cacheDay;
+  Timer? _midnightTimer;
+  bool _disposed = false;
   Map<String, int>? _balances;
   Map<String, PaymentCard>? _cardsById;
   Map<String, Account>? _accountsById;
@@ -83,6 +92,11 @@ class Ledger extends ChangeNotifier {
     }
     _cacheDay = day;
     _clearCache();
+    scheduleMicrotask(() {
+      if (!_disposed) {
+        notifyListeners();
+      }
+    });
     final callback = onDayChanged;
     if (callback != null) {
       scheduleMicrotask(
@@ -91,6 +105,19 @@ class Ledger extends ChangeNotifier {
         }),
       );
     }
+  }
+
+  /// Vira o dia mesmo sem leitura: timer até a meia-noite (+1s), que se reagenda.
+  void _scheduleMidnight() {
+    final now = clock();
+    final midnight = DateTime(now.year, now.month, now.day + 1);
+    _midnightTimer = Timer(
+      midnight.difference(now) + const Duration(seconds: 1),
+      () {
+        _ensureFresh();
+        _scheduleMidnight();
+      },
+    );
   }
 
   DateTime get today {
@@ -163,6 +190,8 @@ class Ledger extends ChangeNotifier {
   /// Vencimentos de fatura em 60 dias com saldo-após da conta de pagamento.
   List<timeline.InvoiceDue> get invoiceTimeline {
     _ensureFresh();
+    // forecastMonths >= 3 (clamp em AppSettings) dá 59 dias no pior caso (hoje 31/jan):
+    // o 60º dia pode ficar de fora. Subir o mínimo para 4 cobriria sempre.
     return _invoiceTimeline ??= timeline.invoiceTimeline(
       forecast: forecast,
       invoices: _creditInvoices,
@@ -292,6 +321,8 @@ class Ledger extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    _midnightTimer?.cancel();
     for (final source in _sources) {
       source.removeListener(_invalidate);
     }

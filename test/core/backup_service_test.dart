@@ -44,6 +44,60 @@ void main() {
     expect(dst.settings.value.onboardingDone, isTrue);
   });
 
+  test('import descarta regra e transferência com vínculo órfão', () async {
+    final src = await _bootstrap();
+    final dst = await _bootstrap(demo: false);
+    final map =
+        jsonDecode(BackupService.exportJson(src)) as Map<String, dynamic>;
+    final rule = (map['recurring'] as List).first as Map<String, dynamic>;
+    final accountId = src.accounts.all.first.id;
+    final transfer = Transaction(
+      id: 'tr_ok',
+      type: TransactionType.transfer,
+      amountCents: 100,
+      date: _now(),
+      description: 'Transferência',
+      accountId: accountId,
+      toAccountId: accountId,
+    );
+    final orphanTransfer = Transaction(
+      id: 'tr_orfa',
+      type: TransactionType.transfer,
+      amountCents: 100,
+      date: _now(),
+      description: 'Transferência órfã',
+      accountId: accountId,
+      toAccountId: 'conta_fantasma',
+    );
+    map['recurring'] = [
+      ...(map['recurring'] as List),
+      {
+        ...rule,
+        'id': 'rec_orfa_conta',
+        'accountId': 'conta_fantasma',
+        'cardId': null,
+      },
+      {
+        ...rule,
+        'id': 'rec_orfa_cartao',
+        'accountId': null,
+        'cardId': 'cartao_fantasma',
+      },
+    ];
+    map['transactions'] = [
+      ...(map['transactions'] as List),
+      transfer.toMap(),
+      orphanTransfer.toMap(),
+    ];
+
+    await BackupService.importJson(dst, jsonEncode(map));
+
+    expect(dst.recurring.byId('rec_orfa_conta'), isNull);
+    expect(dst.recurring.byId('rec_orfa_cartao'), isNull);
+    expect(dst.transactions.byId('tr_orfa'), isNull);
+    expect(dst.transactions.byId('tr_ok'), isNotNull);
+  });
+
   test('JSON inválido ou versão errada lança e não altera dados', () async {
     final s = await _bootstrap();
     final before = s.transactions.all.length;

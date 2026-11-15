@@ -9,6 +9,8 @@ import '../../accounts/domain/account.dart';
 import '../domain/invoice_timeline.dart';
 
 const _listHeight = 420.0;
+// Row não quebra filhos sem Flexible: a coluna de valores precisa de teto para o Wrap do saldo quebrar em 390px.
+const _valuesMaxWidth = 180.0;
 
 /// Modo Ultra: faturas dos próximos 60 dias agrupadas por dia, com conta e saldo previsto após o vencimento.
 class InvoiceTimelineSection extends StatelessWidget {
@@ -127,31 +129,34 @@ class _InvoiceRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: AppSpace.sm),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              MoneyText(
-                due.amountCents,
-                style: textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: _valuesMaxWidth),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                MoneyText(
+                  due.amountCents,
+                  style: textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-              ),
-              if (balance == null)
-                Text('—', style: textTheme.bodySmall)
-              else
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('Saldo após ', style: textTheme.bodySmall),
-                    MoneyText(
-                      balance,
-                      style: textTheme.bodySmall?.copyWith(
-                        color: balance < 0 ? c.danger : null,
+                if (balance == null)
+                  Text('—', style: textTheme.bodySmall)
+                else
+                  Wrap(
+                    alignment: WrapAlignment.end,
+                    children: [
+                      Text('Saldo após ', style: textTheme.bodySmall),
+                      MoneyText(
+                        balance,
+                        style: textTheme.bodySmall?.copyWith(
+                          color: balance < 0 ? c.danger : null,
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-            ],
+                    ],
+                  ),
+              ],
+            ),
           ),
         ],
       ),

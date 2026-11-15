@@ -276,6 +276,7 @@ DateTime purchaseDueDate(DateTime purchase, PaymentCard card);
 ```
 Sem histórico, `cycleOn` devolve sempre o ciclo atual → comportamento idêntico ao anterior (testes de T-006 passam sem mudança).
 Transição: duas faturas que caem no mesmo `dueMonth` (ciclo antigo + novo) **se fundem** numa só (id e `invoiceKey` estáveis).
+Na fatura fundida, as datas vêm do ciclo do item mais recente (`_toInvoice`): a 1ª compra do ciclo novo muda vencimento e fechamento. `purchaseDueDate` usa o ciclo da própria compra, então pode divergir do vencimento final da fatura fundida.
 
 ### 5.2 Fatura — `features/cards/domain/invoice.dart`
 ```dart

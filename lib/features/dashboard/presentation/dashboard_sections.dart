@@ -431,7 +431,9 @@ class CoverageBanner extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '$count ${count == 1 ? 'fatura' : 'faturas'} nos próximos 60 dias sem saldo previsto na conta de pagamento',
+                    count == 1
+                        ? '1 fatura precisa de atenção (sem saldo previsto ou sem conta de pagamento)'
+                        : '$count faturas precisam de atenção (sem saldo previsto ou sem conta de pagamento)',
                     style: textTheme.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w600,
                     ),

@@ -138,16 +138,21 @@ class BackupService {
           _maps(data, 'categories'),
           TransactionCategory.fromMap,
         ),
-        // Lançamento preso a conta ou cartão ausente no backup é descartado.
+        // Lançamento ou regra presa a conta/cartão ausente no backup é descartado;
+        // transferência também cai se a conta de destino não existir.
         transactions: _rows([
           for (final row in _maps(data, 'transactions'))
             if (_linked(row['accountId'], accountIds) &&
-                _linked(row['cardId'], cardIds))
+                _linked(row['cardId'], cardIds) &&
+                (row['type'] != TransactionType.transfer.name ||
+                    _linked(row['toAccountId'], accountIds)))
               _unlinkedCategory(row, categoryIds),
         ], Transaction.fromMap),
         recurring: _rows([
           for (final row in _maps(data, 'recurring'))
-            _unlinkedCategory(row, categoryIds),
+            if (_linked(row['accountId'], accountIds) &&
+                _linked(row['cardId'], cardIds))
+              _unlinkedCategory(row, categoryIds),
         ], RecurringRule.fromMap),
         // Backup de instalação nova não devolve o usuário ao onboarding.
         settings: AppSettings.fromMap(

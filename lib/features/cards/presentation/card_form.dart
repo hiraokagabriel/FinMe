@@ -64,6 +64,24 @@ class _CardFormState extends State<_CardForm> {
     return id != null && s.transactions.all.any((t) => t.cardId == id);
   }
 
+  /// Dia do lançamento mais recente do cartão editado (null se não há nenhum).
+  /// Parcelas 2+ são ancoradas na fatura da parcela 1 (SPEC §5.2), então não contam.
+  DateTime? _lastTransactionDay(AppServices s) {
+    final id = widget.initial?.id;
+    if (id == null) {
+      return null;
+    }
+    DateTime? last;
+    for (final t in s.transactions.all) {
+      if (t.cardId == id &&
+          (t.installmentIndex ?? 1) == 1 &&
+          (last == null || t.date.isAfter(last))) {
+        last = t.date;
+      }
+    }
+    return last == null ? null : DateTime(last.year, last.month, last.day);
+  }
+
   bool _reorganizes(AppServices s) {
     final old = widget.initial;
     return old != null &&
@@ -342,6 +360,7 @@ class _CardFormState extends State<_CardForm> {
         context: context,
         builder: (_) => _CycleChangeDialog(
           today: s.ledger.today,
+          lastTransactionDay: _lastTransactionDay(s),
           buildCard: (from) => draft.withCycleChange(
             closingDay: closing,
             dueDay: due,
@@ -383,10 +402,16 @@ Iterable<String> _bankOptions(String text, List<String> names) {
 
 /// Pergunta a partir de quando vale a nova regra de fechamento/vencimento.
 /// Só fecha com um cartão válido; [ArgumentError] de data mostra erro e mantém o diálogo.
+/// A vigência precisa ser posterior ao último lançamento do cartão ([lastTransactionDay]).
 class _CycleChangeDialog extends StatefulWidget {
-  const _CycleChangeDialog({required this.today, required this.buildCard});
+  const _CycleChangeDialog({
+    required this.today,
+    required this.lastTransactionDay,
+    required this.buildCard,
+  });
 
   final DateTime today;
+  final DateTime? lastTransactionDay;
   final PaymentCard Function(DateTime effectiveFrom) buildCard;
 
   @override
@@ -394,10 +419,29 @@ class _CycleChangeDialog extends StatefulWidget {
 }
 
 class _CycleChangeDialogState extends State<_CycleChangeDialog> {
-  late DateTime _from = widget.today;
+  late DateTime _from = _minFrom();
   String? _error;
 
+  /// Menor vigência válida: hoje, ou o dia seguinte ao último lançamento se ele for futuro.
+  DateTime _minFrom() {
+    final last = widget.lastTransactionDay;
+    if (last == null) {
+      return widget.today;
+    }
+    final next = DateTime(last.year, last.month, last.day + 1);
+    return next.isAfter(widget.today) ? next : widget.today;
+  }
+
   void _confirm() {
+    final last = widget.lastTransactionDay;
+    if (last != null && !_from.isAfter(last)) {
+      final next = DateTime(last.year, last.month, last.day + 1);
+      setState(
+        () => _error =
+            'Há lançamentos após esta data; escolha a partir de ${formatShortDate(next)}',
+      );
+      return;
+    }
     try {
       Navigator.of(context).pop(widget.buildCard(_from));
     } on ArgumentError catch (e) {

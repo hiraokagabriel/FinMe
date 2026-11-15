@@ -170,58 +170,32 @@ As descrições abaixo servem como **referência de intenção visual** para ori
 
 ---
 
-## Estrutura de código e pastas
+## Estrutura de código (v2)
 
-A estrutura do projeto é organizada por núcleo (`core`) e por funcionalidades (`features`), com camadas de dados, domínio e apresentação quando fizer sentido.
+Fontes da verdade: `docs/SPEC.md` (domínio e arquitetura) e `docs/BACKLOG.md` (tarefas). `CONTEXT.md` descreve o estado implementado.
 
-Estrutura principal em `lib/`:
+- `lib/main.dart`: `runApp(bootstrap)`.
+- `lib/app/`: `bootstrap.dart` (boxes `fm_*`, repositórios, seed, recorrências), `app.dart` (`FinMeApp`), `app_scope.dart` (`AppServices` + `AppScope`), `ledger.dart` (visões derivadas memoizadas), `home_shell.dart` (sidebar/drawer e páginas), `seed.dart` (dados fictícios).
+- `lib/core/`: `models/` (`YearMonth`, `AppSettings`), `services/` (`RecordStore`, `CollectionRepository`, `SettingsController`, `BackupService`), `theme/` (`AppColors`, `AppTheme`, `AppSpace`/`AppRadius`, paletas), `utils/` (formatters, date_utils, id), `widgets/` (widgets compartilhados).
+- `lib/features/<f>/`: `accounts`, `cards`, `categories`, `transactions`, `recurring`, `forecast` com `domain/` e `presentation/`; `dashboard`, `settings` e `onboarding` só com `presentation/`.
 
-- `lib/app/`
-  - `app.dart`: widget raiz (`MaterialApp`) e inicialização global.
-  - `router.dart`: definição de rotas e navegação (inclui `/onboarding` apontando para `OnboardingPage`).
+Ao adicionar código:
 
-- `lib/core/`
-  - `models/`: modelos genéricos e compartilhados (ex.: tipos de valor monetário, intervalos de datas).
-  - `services/`: serviços reutilizáveis (ex.: abstrações de storage local, logger, `HiveInit` com flag `onboardingDone`, `AppModeController`).
-  - `utils/`: helpers e funções utilitárias.
-  - `theme/`: temas, cores, tipografia e estilos globais.
+- Coloque na feature correta. Regra de domínio vai em `domain/`; widget e tela vão em `presentation/`.
+- Lógica financeira fica fora da UI, em `domain/` ou no `Ledger`. Derivados caros são memoizados no `Ledger`, nunca em `build`.
+- Leitura de dados na UI: `AppScope.of(context)` + `ListenableBuilder(listenable: ledger)`.
 
-- `lib/features/`
-  - `cards/`
-    - `data/`: repositórios e fontes de dados de cartões (ex.: storage local).
-    - `domain/`: entidades e regras de negócio de cartões/bancos (limites, vencimentos, etc.).
-    - `presentation/`: widgets e telas relacionados a cartões.
-  - `transactions/`
-    - `data/`: repositórios de receitas, despesas e boletos.
-    - `domain/`: regras de negócio para transações e provisionamento.
-    - `presentation/`: telas de listagem, filtros e edição de transações.
-  - `categories/`
-    - `data/`, `domain/`, `presentation/` para categorias de despesas/receitas.
-  - `dashboard/`
-    - `presentation/`: tela inicial e visões consolidadas (por período, por categoria, etc.).
-  - `settings/`
-    - `presentation/`: telas de configuração, incluindo toggle entre Modo Simples e Modo Ultra.
-  - `goals/`
-    - `data/`, `domain/`, `presentation/` para metas.
-  - `reports/`
-    - `presentation/` para relatórios e exportação CSV.
-  - `accounts/`
-    - `data/`, `domain/`, `presentation/` para múltiplas contas/carteiras.
-  - `transfer/`
-    - `presentation/` para transferência entre contas.
-  - `onboarding/`
-    - `presentation/`: `OnboardingPage` com splash + seleção de modo e integração com `AppModeController`/`HiveInit`.
+## Workflow com agentes
 
-Ao sugerir novos arquivos:
-
-- Prefira colocá-los dentro do **módulo de feature correto** (`cards`, `transactions`, `categories`, `dashboard`, `settings`, `onboarding`, etc.).
-- Separe responsabilidades:
-  - **`data`**: acesso a dados, storage, repositórios.
-  - **`domain`**: modelos de domínio e regras de negócio.
-  - **`presentation`**: widgets, telas, lógica de UI.
-- Evite criar pastas paralelas fora desse padrão sem forte justificativa.
-
-> Nota para Claude: ao propor refactors, tente alinhar novos arquivos a essa estrutura em vez de introduzir arquiteturas completamente diferentes.
+- Antes de codar: leia a tarefa em `docs/BACKLOG.md` e a seção do contrato em `docs/SPEC.md`. Mudou o domínio? Atualize a SPEC primeiro.
+- Fluxo autônomo: `/finme-auto [T-XXX|feature]` (skill em `.claude/skills/finme-auto`), que orquestra planner, coders, verifier e reviewer.
+- Portão obrigatório: `bash tool/check.sh` deve terminar com `CHECK OK`. Não dê tarefa por concluída sem ele.
+- SDK Flutter fora do PATH: `E:\Projetos\FinMe\flutter\bin`. O `tool/check.sh` acha sozinho; no Git Bash use `export PATH=/e/Projetos/FinMe/flutter/bin:$PATH`.
+- Dinheiro é `int` em centavos. Formatação só em `lib/core/utils/formatters.dart`.
+- `domain/`, `core/models/` e `core/utils/` são Dart puro (sem `package:flutter`).
+- Cores só via `context.colors` (tokens de `lib/core/theme/`).
+- Sem `withOpacity` (use `withValues(alpha:)`) e sem `DropdownButtonFormField.value` (use `initialValue`).
+- Não adicione dependências. As permitidas são `hive`, `hive_flutter`, `path_provider`, `fl_chart`, `csv` e `file_selector`.
 
 ---
 
@@ -259,44 +233,6 @@ Ao escrever código, comentários ou documentação, use essa linguagem de domí
 
 ---
 
-## Estilo de código e boas práticas
-
-- Siga o padrão de estilo recomendado pelo Flutter/Dart:
-  - Use `dart format`/`flutter format` se for necessário formatar código.
-- Prefira nomes claros e específicos:
-  - `CardModel`, `Transaction`, `ExpenseCategory`, etc.
-- Mantenha widgets pequenos e reutilizáveis, evitando telas monolíticas com muita lógica.
-
-Quando sugerir refactors:
-
-- Extrair lógica de negócio de dentro de widgets para classes de serviço ou blocos/providers (se o projeto adotar algum gerenciador de estado).
-- Evitar duplicação de lógica entre Modo Simples e Modo Ultra – tente compartilhar o máximo possível de domínio e mudar apenas a apresentação.
-
----
-
-## Workflow sugerido com Claude
-
-Quando for trabalhar neste repositório:
-
-1. **Localizar o lugar certo para a mudança**
-   - Antes de criar arquivos novos, tente encontrar:
-     - Modelos existentes (cartões, transações, categorias).
-     - Códigos de UI já relacionados com o que está sendo alterado.
-
-2. **Propor mudanças pequenas e incrementais**
-   - Prefira PRs/commits focados (ex.: "Adicionar modelagem de boleto provisionado").
-   - Evitar refactors massivos sem necessidade.
-
-3. **Não inventar integrações externas**
-   - Não adicionar integrações com bancos, APIs externas ou scraping sem que isso esteja explicitamente pedido no código ou issues.
-   - Manter o app focado em dados fornecidos pelo usuário.
-
-4. **Privacidade e segurança**
-   - Não criar fluxos que armazenem dados sensíveis em texto plano fora do escopo do app.
-   - Não incluir chaves, credenciais ou segredos em código ou documentação.
-
----
-
 ## O que evitar
 
 - Comentários genéricos como "escreva testes" ou "use boas práticas" sem contexto.
@@ -306,16 +242,3 @@ Quando for trabalhar neste repositório:
 - Incluir qualquer tipo de dado real (ex.: cartões reais, bancos reais, extratos reais) em exemplos de código.
 - Usar valores hex diretamente em widgets — sempre consuma as cores via tokens definidos em `lib/core/theme/`.
 - Adicionar gradientes decorativos, sombras dramáticas ou elementos puramente ornamentais.
-
----
-
-## Futuras extensões do CLAUDE.md
-
-Conforme o projeto crescer, este arquivo pode ser expandido com:
-
-- Comandos específicos de build e release (por exemplo, scripts para empacotar `.exe`).
-- Padrões de commit e branch naming.
-- Estratégia de testes (unitários, widget, integração).
-- Convenções de navegação e temas de UI.
-
-Mantenha este arquivo **curto, direto e atualizado**. Se algo deixar de ser válido no código, atualize o CLAUDE.md para evitar orientações obsoletas.

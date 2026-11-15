@@ -77,6 +77,21 @@ void main() {
       expect(parsed.cycleHistory, [changedCard().cycleHistory.single]);
     });
 
+    test('ciclos fora de ordem no backup são ordenados por until', () {
+      final a = CardCycle(
+        until: DateTime(2026, 12, 1),
+        closingDay: 5,
+        dueDay: 12,
+      );
+      final b = CardCycle(
+        until: DateTime(2027, 2, 1),
+        closingDay: 10,
+        dueDay: 20,
+      );
+      final map = card().toMap()..['cycleHistory'] = [b.toMap(), a.toMap()];
+      expect(PaymentCard.fromMap(map).cycleHistory, [a, b]);
+    });
+
     test('round-trip com 2 ciclos preserva igualdade e hashCode', () {
       final two = changedCard().withCycleChange(
         closingDay: 10,
@@ -229,5 +244,66 @@ void main() {
         DateTime(2026, 12, 12),
       );
     });
+  });
+
+  group('fatura fundida (regressão)', () {
+    // Fecha 5/vence 12 até 30/11; fecha 10/vence 20 a partir de 01/12. Ambas caem em dez/2026.
+    final c = card().withCycleChange(
+      closingDay: 10,
+      dueDay: 20,
+      effectiveFrom: DateTime(2026, 12, 1),
+    );
+    final oldPurchase = tx(
+      'old',
+      TransactionType.expense,
+      1000,
+      DateTime(2026, 11, 20),
+    );
+    final newPurchase = tx(
+      'new',
+      TransactionType.expense,
+      2000,
+      DateTime(2026, 12, 2),
+    );
+
+    test(
+      'só com a compra do ciclo antigo: fatura vence 12/12, fecha 05/12',
+      () {
+        final dec = invoiceOf(
+          InvoiceService.build(card: c, transactions: [oldPurchase]),
+          '2026-12',
+        );
+        expect(dec.dueDate, DateTime(2026, 12, 12));
+        expect(dec.closingDate, DateTime(2026, 12, 5));
+      },
+    );
+
+    test(
+      'entra a 1ª compra do ciclo novo: fatura fundida passa a vencer 20/12, fecha 10/12',
+      () {
+        final invoices = InvoiceService.build(
+          card: c,
+          transactions: [oldPurchase, newPurchase],
+        );
+        expect(invoices, hasLength(1));
+        expect(invoices.single.items, hasLength(2));
+        expect(invoices.single.dueDate, DateTime(2026, 12, 20));
+        expect(invoices.single.closingDate, DateTime(2026, 12, 10));
+      },
+    );
+
+    test(
+      'purchaseDueDate segue o ciclo da compra, não o da fatura fundida',
+      () {
+        expect(
+          purchaseDueDate(DateTime(2026, 11, 20), c),
+          DateTime(2026, 12, 12),
+        );
+        expect(
+          purchaseDueDate(DateTime(2026, 12, 2), c),
+          DateTime(2026, 12, 20),
+        );
+      },
+    );
   });
 }

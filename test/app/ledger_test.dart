@@ -2,6 +2,7 @@ import 'package:finme/app/app_scope.dart';
 import 'package:finme/app/bootstrap.dart';
 import 'package:finme/app/ledger.dart';
 import 'package:finme/app/seed.dart';
+import 'package:finme/core/models/app_settings.dart';
 import 'package:finme/core/services/record_store.dart';
 import 'package:finme/core/utils/date_utils.dart';
 import 'package:finme/features/recurring/domain/recurring_rule.dart';
@@ -155,5 +156,52 @@ void main() {
     ledger.forecast;
     await Future<void>.delayed(Duration.zero);
     expect(calls, 1);
+  });
+
+  Ledger ledgerAt(DateTime Function() clock, {bool midnightTimer = false}) =>
+      Ledger(
+        accounts: s.accounts,
+        cards: s.cards,
+        categories: s.categories,
+        transactions: s.transactions,
+        recurring: s.recurring,
+        settings: s.settings,
+        clock: clock,
+        scheduleMidnightTimer: midnightTimer,
+      );
+
+  test('virada de dia notifica listeners ao ler um getter', () async {
+    var day = _now();
+    final ledger = ledgerAt(() => day);
+    addTearDown(ledger.dispose);
+    var notified = 0;
+    ledger.addListener(() => notified++);
+
+    ledger.today;
+    await Future<void>.delayed(Duration.zero);
+    expect(notified, 0);
+
+    day = DateTime(2026, 11, 15);
+    ledger.today;
+    await Future<void>.delayed(Duration.zero);
+    expect(notified, 1);
+  });
+
+  test('timer da meia-noite vira o dia sem leitura da UI', () async {
+    var now = DateTime(2026, 11, 14, 23, 59, 59, 900);
+    final ledger = ledgerAt(() => now, midnightTimer: true);
+    addTearDown(ledger.dispose);
+    var notified = 0;
+    ledger.addListener(() => notified++);
+
+    now = DateTime(2026, 11, 15, 0, 0, 1);
+    // Timer dispara em ~1,1s (100ms até a meia-noite + 1s de folga).
+    await Future<void>.delayed(const Duration(seconds: 2));
+    expect(notified, 1);
+  });
+
+  test('forecastMonths abaixo de 3 vira 3 (clamp de AppSettings)', () async {
+    await s.settings.update((st) => st.copyWith(forecastMonths: 1));
+    expect(s.ledger.forecast.months, hasLength(AppSettings.minForecastMonths));
   });
 }

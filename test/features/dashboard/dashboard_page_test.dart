@@ -183,10 +183,11 @@ void main() {
     await _pump(tester, s, desktop);
 
     expect(tester.takeException(), isNull);
-    final noun = n == 1 ? 'fatura' : 'faturas';
     expect(
       find.text(
-        '$n $noun nos próximos 60 dias sem saldo previsto na conta de pagamento',
+        n == 1
+            ? '1 fatura precisa de atenção (sem saldo previsto ou sem conta de pagamento)'
+            : '$n faturas precisam de atenção (sem saldo previsto ou sem conta de pagamento)',
       ),
       findsOneWidget,
     );

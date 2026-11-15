@@ -166,12 +166,13 @@ class _CreditInfo extends StatelessWidget {
     final secondary = TextStyle(fontSize: 12, color: c.textSecondary);
     final current = ledger.currentInvoiceFor(card.id);
     final used = ledger.usedLimitFor(card.id);
+    final cycle = card.cycleOn(ledger.today);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          'Vence dia ${card.dueDay} · fecha dia ${card.closingDay}',
+          'Vence dia ${cycle.dueDay} · fecha dia ${cycle.closingDay}',
           style: secondary,
         ),
         const SizedBox(height: AppSpace.sm),

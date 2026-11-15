@@ -94,7 +94,7 @@ files: `lib/features/{cards,accounts,recurring}/presentation/*_form.dart|*_dialo
 files: `test/app/smoke_test.dart`, ajustes mecânicos
 aceite: app sobe com seed demo em memória, navega 8 páginas nos modos Simples e Ultra, abre form de transação; `CHECK OK`.
 
-### T-021 · Documentação · `todo` · deps: T-020
+### T-021 · Documentação · `done` · deps: T-020
 files: `CONTEXT.md`, `CLAUDE.md` (estrutura), `README.md`, `ROADMAP.md`
 
 ## Fase 5 — Previsibilidade avançada

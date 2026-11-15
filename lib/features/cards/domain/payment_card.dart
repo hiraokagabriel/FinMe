@@ -230,6 +230,8 @@ List<CardCycle> _parseCycles(Object? raw) {
       // Item inválido: ignorado para não perder o cartão inteiro.
     }
   }
+  // cycleOn depende da ordem por until (primeiro ciclo que cobre a data vence).
+  cycles.sort((a, b) => a.until.compareTo(b.until));
   return cycles;
 }
 
