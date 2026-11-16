@@ -51,6 +51,8 @@ lib/
     rules/{domain,presentation}        # Fase 8: regras de categorização/renomeação
     importing/{domain,presentation}    # Fase 8: CSV/OFX, categorização em cascata, prévia
     goals/{domain,presentation}        # Fase 10: metas/caixinhas (reserva virtual dentro de uma conta)
+    net_worth/{domain,presentation}    # Fase 11: ativos manuais com snapshots e patrimônio líquido (página Patrimônio)
+    debts/{domain,presentation}        # Fase 11: devo / me devem (pessoa, valor, pagamentos que geram transação)
     dashboard/presentation
     settings/presentation
     onboarding/presentation
@@ -152,6 +154,7 @@ parcial; o erro original sobe para a UI ("Erro ao importar").
 Boxes Hive (nomes novos, ignoram dados antigos): `fm_accounts`, `fm_cards`, `fm_categories`, `fm_transactions`, `fm_recurring`, `fm_settings`.
 Fase 8: `fm_rules` (`TransactionRule`, §4.6), `fm_import_profiles` (`ImportProfile`, §4.7), `fm_dictionary` (`DictionaryEntry`, §4.8).
 Fase 10: `fm_goals` (`Goal`, §4.9).
+Fase 11: `fm_assets` (`Asset`, §4.10), `fm_debts` (`Debt`, §4.11).
 No boot, `fm_dictionary` vazia é semeada com `defaultDictionary()` (§5.13). Shortcut: apagar todas as entradas do dicionário
 faz o padrão voltar no próximo boot (equivale a "restaurar padrão").
 
@@ -168,8 +171,18 @@ os movimentos vão dentro de cada meta). `BackupService.version` continua `1`. N
 transação e `tags` de regra viajam dentro dos próprios mapas (`fromMap` tolerante: backup antigo sem eles importa normalmente;
 `parentId` inválido não é corrigido no import — a árvore o trata como raiz, §5.20). `goals` entra no retrato e na restauração do
 import tudo-ou-nada. "Apagar todos os dados" faz `goals.replaceAll([])`.
+Meta com `targetCents` nulo, não numérico ou `<= 0` no backup → `FormatException('Backup com meta de alvo inválido')` antes de gravar;
+no boot, `Goal.fromMap` lança `FormatException` e o registro é pulado (`progress` = 0 se alvo `<= 0`).
 CSV de transações (`transactionsCsv`): a coluna "Categoria" passa a usar o rótulo `'Pai › Filha'` (`CategoryTree.label`) e ganha a
 última coluna "Tags" (`t.tags.join(', ')`).
+
+**Fase 11: `fm_assets` e `fm_debts`.** Boxes novas `fm_assets` (`Asset`, §4.10; snapshots dentro de cada ativo) e `fm_debts` (`Debt`, §4.11;
+pagamentos dentro de cada dívida). `exportJson` grava `'assets'` e `'debts'` (listas de `toMap()`). `BackupService.version` continua `1`.
+No import: chave ausente (backup antigo) → `[]`. Nenhum vínculo é validado: `DebtPayment.transactionId` que não existe no backup fica como está
+(desfazer esse pagamento só não acha transação para excluir, §5.25). As duas coleções entram no retrato e na restauração do import tudo-ou-nada.
+"Apagar todos os dados" faz `assets.replaceAll([])` e `debts.replaceAll([])`; a mensagem de confirmação passa a
+'Contas, cartões, lançamentos, recorrências, metas, ativos, dívidas, regras e perfis de importação serão removidos. O dicionário volta ao padrão. Esta ação não pode ser desfeita.'
+CSV não muda (as transações de quitação já são transações comuns).
 
 ### 3.6 Configurações
 ```dart
@@ -469,6 +482,74 @@ class Goal {
 }
 ```
 
+### 4.10 `features/net_worth/domain/asset.dart` (Fase 11)
+Ativo manual (fora das contas): investimento não controlado como conta, imóvel, veículo, outro. O valor é **declarado** por snapshots datados;
+o valor numa data é o do último snapshot até ela. Nenhuma ação de ativo cria transação.
+```dart
+enum AssetKind { investment, realEstate, vehicle, other }
+String assetKindLabel(AssetKind k); // 'Investimento', 'Imóvel', 'Veículo', 'Outro'
+class AssetSnapshot {
+  AssetSnapshot({required this.id, required DateTime date, required this.valueCents, this.note}); // date → dateOnly
+  final String id;
+  final DateTime date;
+  final int valueCents;    // >= 0 (validado na escrita, §5.24)
+  final String? note;
+  // toMap {'id', 'date': dateKey, 'valueCents', 'note'?}; fromMap; ==/hashCode por campos
+}
+class Asset {
+  Asset({required this.id, required this.name, required this.kind, List<AssetSnapshot> snapshots = const [], this.archived = false});
+    // snapshots ordenados por date asc, imutável; no máximo 1 por data (se o construtor receber 2 na mesma data, vale o último da lista recebida)
+  final String id, name;
+  final AssetKind kind;
+  final List<AssetSnapshot> snapshots;
+  final bool archived;               // "encerrado" (vendido/baixado): só some da lista padrão; o histórico continua valendo (§5.24)
+  AssetSnapshot? get latest;         // snapshots.last ou null
+  int get currentValueCents;         // latest?.valueCents ?? 0
+  int valueAt(DateTime date);        // valueCents do último snapshot com date <= dateOnly(date); nenhum → 0
+  int? get lastChangeCents;          // latest − penúltimo; null com < 2 snapshots
+  Asset withSnapshot(AssetSnapshot s);   // substitui o snapshot da mesma data (se houver) e reordena
+  Asset withoutSnapshot(String snapshotId);
+  // copyWith (sem anuláveis), toMap ('snapshots' lista de mapas), fromMap tolerante (snapshots ausente/inválido → [], item
+  // inválido ignorado; kind desconhecido → investment; archived ausente → false); ==/hashCode (lista elemento a elemento)
+}
+```
+
+### 4.11 `features/debts/domain/debt.dart` (Fase 11)
+Devo / me devem: valor combinado com uma pessoa (texto livre). Registrar a dívida **não** cria transação; cada pagamento (quitação total ou
+parcial) cria uma transação na conta escolhida e guarda o id dela (§5.25).
+```dart
+enum DebtDirection { iOwe, owedToMe }   // iOwe primeiro: fromMap com valor desconhecido cai no lado conservador
+class DebtPayment {
+  DebtPayment({required this.id, required DateTime date, required this.amountCents, this.transactionId}); // date → dateOnly
+  final String id;
+  final DateTime date;
+  final int amountCents;          // > 0
+  final String? transactionId;    // transação gerada na quitação; null só em dado antigo/importado sem ela
+  // toMap {'id', 'date', 'amountCents', 'transactionId'?}; fromMap; ==/hashCode por campos
+}
+class Debt {
+  Debt({required this.id, required String person, required this.direction, required this.amountCents, required DateTime date,
+    this.description, DateTime? dueDate, List<DebtPayment> payments = const []});
+    // person → trim; date/dueDate → dateOnly; description vazia/só espaços → null; payments ordenados por (date, id) asc, imutável
+  final String id;
+  final String person;
+  final DebtDirection direction;
+  final int amountCents;          // > 0, valor total combinado
+  final DateTime date;            // data em que a dívida passou a existir
+  final String? description;
+  final DateTime? dueDate;        // vencimento opcional
+  final List<DebtPayment> payments;
+  int get paidCents;              // soma de payments
+  int get remainingCents;         // max(0, amountCents − paidCents)
+  bool get settled;               // remainingCents == 0 ("quitado" é derivado; não há flag gravada)
+  int remainingAt(DateTime d);    // dateOnly(d) < date → 0; senão max(0, amountCents − soma dos pagamentos com date <= d)
+  Debt withPayment(DebtPayment p);
+  Debt withoutPayment(String paymentId);
+  // copyWith (description e dueDate com _keep), toMap ('payments' lista de mapas; 'description'/'dueDate' só se não nulos),
+  // fromMap tolerante (payments ausente/inválido → [], item inválido ignorado); ==/hashCode (lista elemento a elemento)
+}
+```
+
 ## 5. Regras financeiras (domínio puro)
 
 ### 5.1 Ciclo de fatura — `features/cards/domain/invoice_cycle.dart`
@@ -657,6 +738,7 @@ class ForecastService {
     required List<Transaction> transactions, required List<RecurringRule> recurring,
     required DateTime today, int months = 6,
     int minDays = 0, // Fase 6 (T-041): horizonte cobre pelo menos today + minDays
+    Iterable<ForecastEvent> extraEvents = const [], // Fase 11: eventos prontos de fora (dívidas "devo", §5.25)
   });
 }
 ```
@@ -669,6 +751,9 @@ Algoritmo:
    - Transações `planned` de conta (income/expense/transfer, inclusive débito) com data ≤ fim. Atrasadas (data < today) entram **em today**. `isBoleto` → kind `boleto`.
    - Recorrências: `occurrenceTransactions(r, today, fim, idsExistentes, forProjection: true)`. De conta → evento (`isProjected: true`). De cartão de crédito → vão para `projected` da fatura.
    - Faturas: para cada cartão de crédito, `InvoiceService.build(card, transactions, projected)`; cada fatura com `remainingCents > 0` e `dueDate ≤ fim` gera evento `invoice` de `-remaining` em `max(dueDate, today)` na conta `card.paymentAccountId` (pode ser `null`: conta só no consolidado).
+   - Extras (Fase 11): cada `e` de `extraEvents` com `dateOnly(e.date) > fim` é ignorado; os demais entram como `ForecastEvent` novo com os
+     mesmos campos e `date = max(dateOnly(e.date), today)` (atrasado cai em hoje). `accountId` é copiado como está (`null` = só no consolidado).
+     `extraEvents` vazio → comportamento anterior.
 4. `transfer` não entra em income/expense mensal e tem efeito zero no consolidado.
 5. `months[i]`: soma por mês de eventos; `endBalanceCents` = saldo consolidado no último dia do mês.
 6. `daily`: saldo consolidado acumulado dia a dia; `firstNegativeDate` = primeiro dia < 0.
@@ -1289,8 +1374,12 @@ Regras (todas com datas `dateOnly`; dias por `DateTime.utc`):
    fatura não quitada, inclusive recorrências de cartão projetadas, e cai em `max(dueDate, today)` → vencidas entram. Vencimento no próprio dia da
    receita **entra** (inclusivo).
 6. **Provisionados** (`plannedEvents`): eventos com `amountCents < 0`, `kind` em {`expense`, `boleto`} e `date <= untilDate`: despesas `planned` de
-   conta (inclusive débito; atrasadas já caem em hoje) e ocorrências projetadas de recorrência de despesa de conta. Transferências (`transfer`)
-   e entradas nunca entram.
+   conta (inclusive débito; atrasadas já caem em hoje) e ocorrências projetadas de recorrência de despesa de conta. Entradas nunca entram.
+   Transferências (`transfer`) só entram quando saem de conta elegível (regra 4) para conta **não** elegível (investimento, arquivada ou
+   inexistente): o dinheiro sai do conjunto disponível (decisão do orquestrador na revisão da Fase 10). Entre elegíveis, ou vindas de não
+   elegível, ficam fora.
+   Fase 11: as dívidas "devo" com vencimento chegam como eventos `expense` sem conta (§5.25, `debtForecastEvents`) e por isso **entram aqui
+   sem mudança em `spendable.dart`**: "devo" com saldo em aberto e vencimento até `untilDate` (vencida → hoje) reduz o livre. "Me devem" nunca entra.
 7. `invoicesCents` / `plannedCents` = soma de `−amountCents` dos respectivos eventos.
 8. **Reservas**: `reservedCents = Σ por conta em forecast.currentBalances de min(reservedByAccount[id] ?? 0, max(0, saldo))`
    (conta arquivada ou ausente não entra; reserva acima do saldo não desconta de novo, §5.22 regra 3).
@@ -1305,6 +1394,153 @@ provisionados = 25000 + 5000 + 150000 (aluguel 01/12) = 180000; reservas 40000 �
 Com a meta reservando 400000 em A (saldo 300000): reserva efetiva 300000 → livre `350000 − 80000 − 180000 − 300000 = −210000`, `overcommitted`, por dia 0.
 Hoje = 30/11 sem salário → `days == 1`. Salário amanhã (hoje 04/12) → `days == 1`; salário hoje (hoje 05/12) → próxima é 05/01 (hoje não conta).
 Custo: O(eventos + regras de receita × ocorrências no horizonte). Chamado só pelo Ledger (memoizado).
+
+### 5.24 Ativos — `features/net_worth/domain/asset.dart` (Fase 11)
+Dart puro; entidade em §4.10.
+```dart
+String? assetSnapshotError({required int valueCents, required DateTime date, required DateTime today});
+  // em ordem: valueCents < 0 → 'Informe um valor maior ou igual a zero'; dateOnly(date) > dateOnly(today) → 'A data não pode ser no futuro'; senão null
+String? removeSnapshotError(Asset asset, String snapshotId);
+  // o id existe e asset.snapshots.length <= 1 → 'O ativo precisa de pelo menos um valor'; senão null
+Asset closeAsset(Asset asset, {required DateTime date, required String snapshotId});
+  // asset.withSnapshot(AssetSnapshot(id: snapshotId, date: date, valueCents: 0, note: 'Encerrado')).copyWith(archived: true)
+int assetsValueAt(Iterable<Asset> assets, DateTime date); // soma de valueAt(date) de TODOS os ativos (encerrados inclusive)
+```
+Regras:
+1. Valor numa data = último snapshot até ela (sem interpolação). Antes do 1º snapshot o ativo vale 0 (não existia no patrimônio).
+2. Um snapshot por data: atualizar o valor numa data que já tem snapshot substitui o valor (o id novo vence).
+3. Snapshot só com data <= hoje (o patrimônio é histórico, não previsão).
+4. **Encerrar** (vendido, baixado) = snapshot de valor 0 na data + `archived: true`. O histórico anterior continua contando nos meses passados;
+   `archived` só tira o ativo da lista padrão. Reativar = `archived: false` (o snapshot 0 fica; o usuário atualiza o valor).
+5. Excluir um ativo apaga o histórico: os meses passados do gráfico mudam (a UI avisa na confirmação).
+Exemplos (teste obrigatório; hoje 15/11/2026): 'Carro' (`vehicle`) com snapshots 01/08/2026 4000000 e 01/11/2026 3800000 →
+`valueAt(31/07/2026) == 0`, `valueAt(01/08/2026) == 4000000`, `valueAt(31/10/2026) == 4000000`, `valueAt(15/11/2026) == 3800000`, `currentValueCents == 3800000`,
+`lastChangeCents == -200000`; `withSnapshot(AssetSnapshot(id: 'n', date: 01/11/2026, valueCents: 3700000))` → continua com 2 snapshots e `valueAt(15/11) == 3700000`;
+`closeAsset(carro, date: 15/11/2026, snapshotId: 'c')` → `archived`, `valueAt(15/11) == 0`, `valueAt(31/10) == 4000000`. 'Tesouro' (`investment`) com snapshot
+10/10/2026 200000: `assetsValueAt([carro, tesouro], 31/10/2026) == 4200000`, `(30/09/2026) == 4000000`. `assetSnapshotError(valueCents: -1, ...)` → erro de valor;
+`(0, date: 16/11/2026, today: 15/11/2026)` → 'A data não pode ser no futuro'; `(0, date: 15/11/2026, ...)` → null. `removeSnapshotError` com 1 snapshot → erro; com 2 → null.
+
+### 5.25 Devo / me devem — `features/debts/domain/debt_math.dart` (Fase 11)
+Dart puro; entidade em §4.11. Usa `formatMoney`, `foldText` (§3.7), `Transaction` (§4.4) e `ForecastEvent` (§5.7).
+```dart
+String? debtPaymentError({required Debt debt, required int amountCents, required DateTime date, required DateTime today});
+  // em ordem: amountCents <= 0 → 'Informe um valor maior que zero'; amountCents > debt.remainingCents → 'Restante: ${formatMoney(debt.remainingCents)}';
+  // dateOnly(date) > dateOnly(today) → 'A data não pode ser no futuro'; dateOnly(date) < debt.date → 'Data antes do registro da dívida'; senão null
+String debtTransactionDescription(Debt debt);
+  // owedToMe → 'Recebido de {person}'; iOwe → 'Pago a {person}'; com description → + ' · {description}'
+({Debt debt, Transaction transaction}) settleDebt(Debt debt, {required String paymentId, required String transactionId,
+  required int amountCents, required DateTime date, required String accountId, String? categoryId});
+  // transaction = Transaction(id: transactionId, type: owedToMe ? income : expense, amountCents, date, description: debtTransactionDescription(debt),
+  //   accountId: accountId, categoryId: categoryId, status: paid); debt = debt.withPayment(DebtPayment(id: paymentId, date, amountCents, transactionId)).
+  // Não valida (a UI chama debtPaymentError antes).
+({Debt debt, String? transactionId}) undoDebtPayment(Debt debt, String paymentId);
+  // (debt.withoutPayment(paymentId), transactionId do pagamento removido); id inexistente → (debt igual, null)
+bool isDebtOverdue(Debt debt, DateTime today); // dueDate != null && dateOnly(today) > dueDate && !settled
+({int receivableCents, int payableCents}) debtTotalsAt(Iterable<Debt> debts, DateTime date); // soma de remainingAt(date) por direção
+List<ForecastEvent> debtForecastEvents(Iterable<Debt> debts);
+  // só iOwe com dueDate != null e remainingCents > 0 → ForecastEvent(date: dueDate, amountCents: -remainingCents,
+  //   description: 'Devo a {person}' (+ ' · {description}'), kind: ForecastEventKind.expense, sourceId: debt.id, accountId: null)
+class PersonDebtSummary {
+  const PersonDebtSummary({required this.person, required this.receivableCents, required this.payableCents, required this.openCount});
+  final String person; final int receivableCents, payableCents, openCount;
+  int get netCents => receivableCents - payableCents;   // > 0: a pessoa me deve no líquido
+}
+List<PersonDebtSummary> debtsByPerson(Iterable<Debt> debts);
+  // só dívidas com remainingCents > 0, agrupadas por foldText(person); person exibido = o da dívida mais recente do grupo (maior (date, id));
+  // somas de remainingCents por direção; ordem: netCents.abs() desc, depois foldText(person) asc
+List<String> debtPeople(Iterable<Debt> debts);
+  // sugestões do campo Pessoa: todas as dívidas (quitadas inclusive), distintas por foldText(person); grafia da mais recente;
+  // ordem: data da dívida mais recente da pessoa desc (empate: foldText asc)
+```
+Regras:
+1. Registrar a dívida não cria transação nem mexe em saldo. "Me devem" é ativo (a receber) e "devo" é passivo (a pagar) no patrimônio (§5.26).
+2. **Pagamento parcial permitido**, com histórico: vários pagamentos, restante = valor − pagos. `settled` quando o restante chega a 0.
+   Pagamento acima do restante é bloqueado (sem troco nem crédito). Data do pagamento entre a data da dívida e hoje.
+3. **Quitar** = registrar um pagamento (total ou parcial): cria uma transação **paga** na conta escolhida — `income` quando me devem (entra dinheiro),
+   `expense` quando devo (sai) — com categoria opcional, e grava o id dela no pagamento. Patrimônio neutro: conta ± valor, a receber/a pagar ∓ valor.
+4. **Desfazer** = remover o pagamento e excluir a transação ligada (se ainda existir). Editar ou excluir essa transação pela tela de Transações
+   **não** altera a dívida (limite conhecido): o histórico de pagamentos no Ultra mostra 'Transação excluída' quando o id não existe mais.
+5. Editar dívida: valor >= pago; direção travada se há pagamentos. Excluir dívida com pagamentos é bloqueado ('Desfaça os pagamentos antes de excluir').
+6. **Previsão e "posso gastar"** (decisão): "devo" com vencimento e restante > 0 vira evento `expense` **sem conta** no vencimento (vencida → hoje,
+   pelo `extraEvents` de §5.7). Entra no saldo consolidado previsto, nos meses, em "A pagar em 30 dias" e no "posso gastar" (§5.23 regra 6) quando vence
+   até a próxima receita. Sem conta porque a dívida não diz de onde o dinheiro sai: fica só no consolidado (igual a fatura de cartão sem conta).
+   "Devo" sem vencimento só pesa no patrimônio (sem data não há como prever). **"Me devem" nunca entra na previsão nem no "posso gastar"**:
+   dinheiro de terceiros é incerto; contar com ele mostraria folga que pode não existir (mesma postura conservadora das receitas avulsas, §5.23 regra 2).
+7. Pessoa é texto livre; agrupamento e sugestões ignoram maiúsculas, acentos e espaços nas pontas (`foldText` após `trim`).
+Exemplos (teste obrigatório; hoje 15/11/2026):
+- d1 = 'Ana', `owedToMe`, 50000, data 01/10/2026, vencimento 30/11/2026, descrição 'Show'. `debtPaymentError`: 50001 → 'Restante: R$ 500,00'; 0 → 'Informe um valor
+  maior que zero'; 20000 em 16/11 → 'A data não pode ser no futuro'; 20000 em 30/09 → 'Data antes do registro da dívida'; 20000 em 10/11 → null.
+- `settleDebt(d1, paymentId: 'p1', transactionId: 't1', amountCents: 20000, date: 10/11/2026, accountId: 'A')` → transação `income` 20000, 10/11, 'Recebido de Ana · Show',
+  conta 'A', `paid`, sem categoria; dívida `paidCents 20000`, `remainingCents 30000`, `settled` false; `remainingAt(15/11) == 30000`, `remainingAt(31/10) == 50000`,
+  `remainingAt(30/09) == 0`. Segundo pagamento 30000 em 15/11 ('p2') → `settled`, `isDebtOverdue` false. `undoDebtPayment(d1 com p1 e p2, 'p1')` →
+  `remainingCents 20000` e `transactionId 't1'`; `undoDebtPayment(..., 'x')` → dívida igual e `null`.
+- d2 = 'Bruno', `iOwe`, 80000, data 20/09/2026, vencimento 01/12/2026 → evento 01/12 −80000 'Devo a Bruno'. d3 = 'Bruno', `iOwe`, 10000, data 01/11, vencimento 10/11 →
+  evento em 10/11 (a previsão o move para 15/11) e `isDebtOverdue` true. d4 = 'Carla', `iOwe`, 5000, data 05/10, sem vencimento → sem evento.
+  d1 → sem evento (me devem). d6 = 'Dani', `iOwe`, 7000, data 01/08, vencimento 01/12, pago 7000 → sem evento (quitada).
+- `debtTotalsAt([d1 só com p1, d2, d3, d4], 15/11) == (receivableCents: 30000, payableCents: 95000)`; em 30/09 → `(0, 80000)`.
+- `debtsByPerson([d1 só com p1, d2, d3, d4, d6])` → Bruno (a pagar 90000, líquido −90000, 2 em aberto), Ana (a receber 30000, líquido 30000, 1), Carla (a pagar 5000, líquido −5000, 1);
+  Dani fora. Com mais 'ANA ' `iOwe` 10000 em 05/11: um grupo 'ANA' (grafia da mais recente) com a receber 30000, a pagar 10000, líquido 20000, 2 em aberto.
+- `debtPeople([d1, d2, d3, d4, d6])` → `['Bruno', 'Carla', 'Ana', 'Dani']`.
+- Posso gastar (via Ledger): conta A 300000, recorrência de receita 'Salário' em A todo dia 5, d2 (devo 80000, vence 01/12) e d5 = 'Eva' `owedToMe` 50000 vencendo 20/11
+  → `plannedCents == 80000`, `freeCents == 220000`, `days == 20`, `perDayCents == 11000` (d5 não entra).
+
+### 5.26 Patrimônio líquido — `features/net_worth/domain/net_worth.dart` (Fase 11)
+Dart puro. Reusa `monthlyHistory` (§5.10), `assetsValueAt` (§5.24) e `debtTotalsAt` (§5.25).
+```dart
+class NetWorthPoint {
+  const NetWorthPoint({required this.month, required this.date, required this.accountsCents, required this.assetsCents,
+    required this.receivableCents, required this.payableCents, required this.cardDebtCents});
+  final YearMonth month;
+  final DateTime date;          // month.lastDay; no mês de today, today
+  final int accountsCents;      // saldo das contas não arquivadas, todos os tipos (investimento inclusive)
+  final int assetsCents;        // ativos manuais
+  final int receivableCents;    // "me devem" em aberto
+  final int payableCents;       // "devo" em aberto (>= 0)
+  final int cardDebtCents;      // dívida de cartão (>= 0)
+  int get liabilitiesCents => payableCents + cardDebtCents;
+  int get netCents => accountsCents + assetsCents + receivableCents - payableCents - cardDebtCents;
+}
+DateTime cardPurchaseDate(Transaction t);
+  // installmentIndex != null && > 1 → addMonthsClamped(t.date, -(installmentIndex - 1)); senão dateOnly(t.date)
+int cardDebtAt({required Iterable<PaymentCard> cards, required Iterable<Transaction> transactions, required DateTime date,
+  bool allPayments = false});
+List<NetWorthPoint> netWorthHistory({required Iterable<Account> accounts, required Iterable<PaymentCard> cards,
+  required Iterable<Transaction> transactions, required Iterable<Asset> assets, required Iterable<Debt> debts,
+  required DateTime today, int months = 24}); // ordem cronológica; length == months; último = mês de today
+```
+**Dívida de cartão (decisão).** É o **saldo devedor já contratado** nos cartões de crédito: toda compra lançada — **inclusive as parcelas futuras de
+compras já feitas** — menos estornos, menos pagamentos de fatura. Recorrências projetadas (ainda não materializadas) não entram: a assinatura do
+mês que vem ainda não é dívida. Por quê: patrimônio é a foto de ativos − passivos numa data, e a parcela futura de uma compra já feita é um passivo
+contratado. Contar só faturas abertas/fechadas não pagas faria o patrimônio mentir: comprar em 12× de R$ 1.200,00 baixaria só R$ 100,00 hoje e o
+patrimônio "cairia" R$ 100,00 por mês nos 11 meses seguintes sem nada acontecer. Com o saldo devedor total, a compra derruba o patrimônio uma vez,
+no mês da compra, e pagar a fatura é neutro (conta −, dívida −). É o "limite usado" (§5.2) sem as recorrências projetadas.
+`cardDebtAt`, por cartão `kind == credit` (arquivados inclusive; débito fica de fora porque já afeta a conta), soma
+`max(0, compras − estornos − pagamentos)`, com:
+- compras = `amountCents` das `expense` com `cardId` do cartão e `cardPurchaseDate(t) <= date` (status ignorado: lançamento em crédito sempre conta, §4.4);
+- estornos = idem para `income` no cartão;
+- pagamentos = `amountCents` das `invoicePayment` com `cardId` do cartão e (`allPayments` ou `dateOnly(t.date) <= date`).
+`cardPurchaseDate` devolve a data da compra de uma parcela (a parcela i fica gravada i−1 meses depois da compra, §5.3). Com dia clampado
+(31/01 em 3× → 2ª parcela 28/02 → compra calculada 28/01) o erro fica dentro do mesmo mês, irrelevante para pontos de fim de mês.
+`netWorthHistory`:
+1. `hist = monthlyHistory(accounts: accounts, cards: cards, transactions: transactions, today: today, months: months)`; `accountsCents` do ponto i =
+   `hist[i].endBalanceCents` (mês passado: corte no último dia; mês atual: todas as transações pagas, igual a `Forecast.currentTotalCents` — §5.10 regra 2).
+2. `date` = `month.lastDay` para meses passados e `dateOnly(today)` para o último.
+3. `assetsCents = assetsValueAt(assets, date)`; `(receivableCents, payableCents) = debtTotalsAt(debts, date)`.
+4. `cardDebtCents = cardDebtAt(cards, transactions, date: date, allPayments: é o último ponto)` — no mês atual os pagamentos de fatura contam sem
+   corte de data, como as contas (regra 1), para que um pagamento lançado com data futura seja neutro.
+5. Custo O((T + ativos + dívidas) × months). Chamado só pelo Ledger (memoizado; 24 meses).
+Exemplo (teste obrigatório; hoje 15/11/2026, `months: 3` → set, out, nov):
+contas: A (corrente, inicial 100000), Inv (`investment`, inicial 500000), X (arquivada, inicial 999999). Transações: receita paga em A 300000 em 05/10;
+despesa paga em A 50000 em 10/11; despesa provisionada em A 70000 em 20/11 (não conta); receita paga em A 20000 em 10/11 (quitação parcial de d1).
+Cartão K (crédito, fecha 28, vence 5, paga por A): compra 30000 em 05/09; compra de 120000 em 3× em 15/10 (`buildInstallments`: 40000 em 15/10, 15/11, 15/12);
+`invoicePayment` 30000 de A em 05/10 (`invoiceKey '2026-10'`). Ativos: Carro e Tesouro de §5.24. Dívidas: d1 só com p1 e d2 de §5.25.
+- set (30/09): contas 600000; ativos 4000000; a receber 0 (d1 é de 01/10); a pagar 80000; cartão 30000 → **líquido 4490000**.
+- out (31/10): contas 870000 (A 100000 + 300000 − 30000; Inv 500000); ativos 4200000; a receber 50000; a pagar 80000; cartão 30000 + 120000 − 30000 = 120000
+  → **líquido 4920000**.
+- nov (15/11): contas 840000 (A 340000; Inv 500000) == `Forecast.currentTotalCents`; ativos 4000000; a receber 30000; a pagar 80000; cartão 120000 → **líquido 4670000**.
+  `deltaRatio(4920000, 4670000)` ≈ −0,0508.
+Variações: estorno de 10000 no cartão K em 12/11 → cartão de nov 110000; `invoicePayment` de 40000 de A com data 20/11 → nov: cartão 80000 e contas 800000,
+líquido igual (4670000); pagamento de 50000 contra dívida de 30000 → cartão 0 (nunca negativo); `cardPurchaseDate` da 2ª parcela de compra de 31/01/2026 em 3× → 28/01/2026.
 
 ## 6. Camada de app
 
@@ -1325,6 +1561,9 @@ class AppServices {
   final CollectionRepository<DictionaryEntry> dictionary;
   // Fase 10 (obrigatório no construtor):
   final CollectionRepository<Goal> goals;     // box fm_goals
+  // Fase 11 (obrigatórios no construtor):
+  final CollectionRepository<Asset> assets;   // box fm_assets
+  final CollectionRepository<Debt> debts;     // box fm_debts
 }
 class AppScope extends InheritedWidget {
   static AppServices of(BuildContext context); // dependOn não é necessário (serviços são estáveis)
@@ -1370,6 +1609,16 @@ class Ledger extends ChangeNotifier {
     // spendableToday(forecast: forecast, recurring: recurring.all, accountsById: accountsById, reservedByAccount: reservedByAccount,
     //   horizonEnd: ForecastService.horizonEnd(today: today, months: settings.value.forecastMonths, minDays: invoiceTimelineDays))
   List<String> get allTags;                          // tagUsage(transactions.all).map((u) => u.tag) — mais usadas primeiro
+  // Fase 11 (memoizados como os demais; zerados em _clearCache):
+  Ledger({..., CollectionRepository<Asset>? assets, CollectionRepository<Debt>? debts});
+    // opcionais como goals; null = []; presentes entram em _sources
+  Forecast get forecast;                             // + extraEvents: debtForecastEvents(debts?.all ?? const []) (§5.25 regra 6)
+  static const int netWorthMonths = 24;
+  List<NetWorthPoint> get netWorthHistory;
+    // netWorthHistory(accounts: accounts.all, cards: cards.all, transactions: transactions.all, assets: assets?.all ?? [],
+    //   debts: debts?.all ?? [], today: today, months: netWorthMonths); last = patrimônio de hoje
+  List<PersonDebtSummary> get debtsByPerson;         // debt_math.debtsByPerson(debts?.all ?? [])
+  List<String> get debtPeople;                       // debt_math.debtPeople(debts?.all ?? [])
 }
 ```
 Cada getter é preguiçoso e memoizado; o cache inteiro é invalidado quando qualquer repo/settings notifica
@@ -1404,6 +1653,20 @@ Cada getter é preguiçoso e memoizado; o cache inteiro é invalidado quando qua
   excluir meta → `confirmDialog` ("A reserva de R$ X volta a ficar livre.") e `goals.delete(id)`. Nenhuma ação de meta cria transação.
 - Excluir conta (Fase 10): conta com metas (arquivadas ou não) entra no `inUse` de `accounts_page.dart` — só arquivar; SnackBar passa a
   'Conta usada por lançamentos, cartões, recorrências ou metas. Arquive em vez de excluir.'
+- Ativos (Fase 11, `features/net_worth/presentation/asset_dialogs.dart`): criar → `assets.upsert(Asset(id: newId(), name, kind,
+  snapshots: [AssetSnapshot(id: newId(), date, valueCents)]))`; editar nome/tipo → `assets.upsert(asset.copyWith(...))`; atualizar valor →
+  `assetSnapshotError` e `assets.upsert(asset.withSnapshot(AssetSnapshot(id: newId(), ...)))`; remover snapshot → `removeSnapshotError` e
+  `assets.upsert(asset.withoutSnapshot(id))`; encerrar → `confirmDialog` ('Encerrar ativo?', 'O valor passa a R$ 0,00 a partir de hoje. O histórico é mantido.')
+  e `assets.upsert(closeAsset(asset, date: ledger.today, snapshotId: newId()))`; reativar → `assets.upsert(asset.copyWith(archived: false))`;
+  excluir → `confirmDialog` ('Excluir ativo?', 'O histórico de valores será apagado e o patrimônio dos meses passados muda.') e `assets.delete(id)`.
+  Nenhuma ação de ativo cria transação.
+- Dívidas (Fase 11, `features/debts/presentation/debt_dialogs.dart`): criar/editar → `debts.upsert(debt)`. Quitar → `debtPaymentError` (hoje = `ledger.today`);
+  `r = settleDebt(debt, paymentId: newId(), transactionId: newId(), ...)`; `await transactions.upsert(r.transaction)`; depois `await debts.upsert(r.debt)` —
+  se esta falhar, `await transactions.delete(r.transaction.id)` (compensação) e SnackBar 'Não foi possível registrar o pagamento.'. Sucesso: SnackBar
+  'Dívida quitada · transação criada em {conta}' (`r.debt.settled`) ou 'Pagamento registrado · transação criada em {conta}'.
+  Desfazer pagamento → `confirmDialog` ('Desfazer pagamento?', 'O pagamento de R$ X de dd/mm sai do histórico e a transação ligada é excluída.');
+  `r = undoDebtPayment(debt, id)`; se `r.transactionId` existe em `transactions` → `await transactions.delete(r.transactionId!)`; depois `await debts.upsert(r.debt)`.
+  Excluir dívida → com pagamentos: SnackBar 'Desfaça os pagamentos antes de excluir' (nada muda); sem: `confirmDialog` e `debts.delete(id)`.
 - Excluir categoria (Fase 10): com filhas → bloqueado com SnackBar 'Mova ou exclua as subcategorias antes'. Limpar a categoria dos dependentes usa
   `t.copyWith(categoryId: null)` (preserva `tags`, `externalId`, `importedDescription`).
 
@@ -1446,7 +1709,8 @@ Fase 7 (arquivos novos, exportados por `widgets.dart`):
 
 ### 7.3 Shell e telas
 `HomeShell`: só desktop, sempre com sidebar (`colors.sidebar`). Largura ≥ 900 → sidebar 220px com itens ícone+rótulo, item ativo com `primarySubtle`, rodapé com toggle "Modo: Simples/Ultra"; Ultra mostra badge de contagem (faturas vencidas/pendências). < 900 → sidebar colapsada de 64px só com ícones (rótulo em `Tooltip`; badge vira ponto `danger` 8px; rodapé vira `IconButton` de modo com tooltip "Modo: Simples/Ultra"). Largura animada com `AnimatedContainer` (`AppMotion.normal`). Sem `Drawer` nem `AppBar`.
-Páginas (índice): 0 Painel, 1 Previsão, 2 Cartões, 3 Contas, 4 Transações, 5 Importar (Fase 8), 6 Recorrentes, 7 Categorias, 8 Ajustes.
+Páginas (índice): 0 Painel, 1 Previsão, 2 Cartões, 3 Contas, 4 Transações, 5 Importar (Fase 8), 6 Recorrentes, 7 Categorias, 8 Ajustes,
+9 Patrimônio (Fase 11; na sidebar aparece logo depois de Contas, sem atalho numérico — ver "Patrimônio e devo/me devem (Fase 11)").
 Botão global "Nova transação" (FAB / botão no cabeçalho).
 
 | Tela | Simples | Ultra |
@@ -1759,7 +2023,7 @@ Linha (key `goal-<id>`): nome; barra de progresso (altura 6, fundo `textSecondar
 largura animada `AppMotion.normal`); 'R$ X de R$ Y' (`MoneyText`) + `formatPercent(progress)`; `IconButton(Icons.add_circle_outline, tooltip: 'Aportar')`.
 Ultra: + conta (`BankAvatar` + nome; 'Conta arquivada' `warning`), 'até dd/mm/aaaa' se `targetDate`; 'Aporte mensal necessário: R$ Z'
 (`monthlyContributionNeeded`), 'Meta atingida' (`success`) ou 'Data-alvo passou' (`warning`, `isGoalOverdue`); `StatusBadge` `warning`
-'Reserva acima do saldo: faltam R$ X' quando `overReservedCents(saldo da conta, reservado da conta) > 0`; menu: Aportar, Retirar, Histórico, Editar,
+'Reserva maior que o saldo da conta: faltam R$ X' quando `overReservedCents(saldo da conta, reservado da conta) > 0`; menu: Aportar, Retirar, Histórico, Editar,
 Arquivar/Desarquivar, Excluir. Arquivadas só com "Mostrar arquivadas" (Ultra), em `textSecondary`. Simples: só metas não arquivadas, sem menu.
 Form (`showDialog`, máx. 520): nome (obrigatório, 'Informe o nome'), conta (`DropdownButtonFormField`, `initialValue`, só contas ativas; obrigatória),
 alvo (`MoneyField`, > 0, 'Informe um alvo maior que zero'), `CheckboxListTile` 'Com data-alvo' + `DateField`. Na edição, trocar a conta é permitido
@@ -1769,16 +2033,148 @@ texto de apoio 'Disponível para reservar nesta conta: R$ A' (aporte) ou 'Reserv
 'Salvar' grava e fecha. Histórico: `AlertDialog` com movimentos por data desc ('dd/mm/aaaa', '+R$'/'−R$' com `MoneyText(signed: true)`, nota) e
 `IconButton(Icons.delete_outline)` por linha (bloqueado com SnackBar do `removeMovementError`).
 
+#### Patrimônio e devo/me devem (Fase 11)
+Decisões de navegação: **página nova "Patrimônio"** (índice 9, `Icons.account_balance_outlined`). Ativos e dívidas não cabem como seção de Contas
+(Contas já tem metas e a página ficaria longa) e o patrimônio precisa de gráfico. Na sidebar o item aparece **logo depois de Contas**
+(`const _sidebarOrder = [0, 1, 2, 3, 9, 4, 5, 6, 7, 8]`; a lista itera essa ordem, `onSelect`/badges continuam pelo índice). Sem atalho numérico:
+`GoToPageIntent` continua 0..8 e '1'..'9' continuam nas mesmas páginas. `_NavTile.number` vira `int?`: `null` → sidebar larga sem `Tooltip`; colapsada,
+tooltip só com o rótulo ('Patrimônio'). Acesso pela sidebar e pela paleta ('Ir para Patrimônio', sem `shortcut` — `buildAppCommands` já omite para i >= 9).
+Badge Ultra no item Patrimônio = número de dívidas `iOwe` com `isDebtOverdue`. Visual da Fase 7: KPI em `AppText.kpi`, valores tabulares (`MoneyText`),
+tokens via `context.colors`, `BankAvatar` onde houver conta, `EmptyState` com ação, animações com `AppMotion`. Dados só de `ledger.netWorthHistory`,
+`ledger.debtsByPerson`, `ledger.debtPeople`, `services.assets.all` e `services.debts.all` — nada calculado em `build` além de filtrar/ordenar listas.
+
+| Recurso | Simples | Ultra |
+|---|---|---|
+| KPI "Patrimônio líquido" | valor (`danger` se < 0) + 1 linha de apoio 'Contas R$ A · Ativos R$ B · A receber R$ C · Dívidas R$ D' (D = `liabilitiesCents`) | + `DeltaBadge` vs. mês anterior, variação em R$ (`MoneyText(signed: true)`) e `Sparkline` dos 12 últimos `netCents` |
+| Evolução (gráfico) | — | `SectionCard` 'Evolução' com `NetWorthChart` e seletor 12/24 meses |
+| Composição | — | `SectionCard` 'Composição' com os 5 componentes, total e variação vs. mês anterior |
+| Ativos | nome, tipo, valor atual, botão 'Atualizar valor' | + 'Atualizado em dd/mm/aaaa', última variação, menu (Atualizar valor, Histórico, Editar, Encerrar/Reativar, Excluir), 'Mostrar encerrados', total |
+| Devo / me devem | totais 'Me devem R$ X · Devo R$ Y', dívidas em aberto (pessoa, 'Me deve'/'Devo', restante, vencimento/'Vencida') e botão 'Quitar' | + 'Por pessoa', filtros (direção, pessoa, 'Mostrar quitadas'), descrição, data, pago/total, menu (Quitar, Pagamentos, Editar, Excluir) |
+| Painel | — | 6º KPI 'Patrimônio líquido' com delta e sparkline de 6 meses |
+| Paleta Ctrl+K | 'Ir para Patrimônio', 'Novo ativo', 'Nova dívida (devo / me devem)' | idem |
+
+**`NetWorthPage`** (`features/net_worth/presentation/net_worth_page.dart`, `StatefulWidget`; estado `_months` 12|24, padrão 12):
+`ListenableBuilder(ledger)` > `ListView` com `PageHeader(title: 'Patrimônio', actions: [OutlinedButton.icon(Icons.handshake_outlined, 'Nova dívida')
+→ showDebtForm, FilledButton.icon(Icons.add, 'Novo ativo') → showAssetForm])`, depois (padding `AppSpace.xl`, gap `AppSpace.lg`):
+1. KPI (key `net-worth-kpi`): `KpiTile(label: 'Patrimônio líquido', cents: last.netCents, color: last.netCents < 0 ? danger : null, trend: ...)` com
+   `last = ledger.netWorthHistory.last` e `prev` = penúltimo. Ultra `trend`: `Row` com `DeltaBadge(ratio: deltaRatio(prev.netCents, last.netCents))`,
+   `MoneyText(last.netCents − prev.netCents, signed: true, colorBySign: true)` + ' vs. mês anterior' (12 `textSecondary`) e `Sparkline(values: últimos 12 netCents)`.
+   Simples: abaixo do KPI, a linha de apoio da tabela (12 `textSecondary`, valores por `MoneyText`). Largura do KPI 320.
+2. Ultra: `SectionCard(title: 'Evolução', trailing: SegmentedButton<int>(key: 'net-worth-range', {12: '12 meses', 24: '24 meses'}))` com
+   `NetWorthChart(points: history.sublist(history.length − _months), hideValues: settings.hideValues)`.
+3. Ultra: `SectionCard(title: 'Composição')` (key `net-worth-breakdown`): linhas 'Contas', 'Ativos', 'A receber', '− A pagar (devo)', '− Dívida de cartão',
+   divisor, '= Patrimônio líquido' (w600). Colunas: valor atual (`MoneyText` tabular; passivos exibidos positivos) e variação vs. mês anterior da
+   **contribuição ao líquido** (`MoneyText(signed: true, colorBySign: true)`; passivo que cresce aparece negativo). Sob 'Dívida de cartão', apoio 12 px
+   `textSecondary`: 'Faturas em aberto e parcelas futuras já lançadas'.
+4. `const AssetsSection()`.
+5. `const DebtsSection()`.
+
+**`NetWorthChart`** (`features/net_worth/presentation/net_worth_chart.dart`):
+```dart
+class NetWorthChart extends StatelessWidget {
+  const NetWorthChart({super.key, required this.points, required this.hideValues});
+  final List<NetWorthPoint> points; final bool hideValues;
+}
+String netWorthTooltipText(NetWorthPoint p, {required bool hideValues}); // pública para teste
+```
+`LineChart` (fl_chart) altura 220, uma linha `netCents` em `colors.chartBar` (largura 2, sem pontos, sem área, sem gradiente), grade horizontal
+`border`, sem borda externa. Eixo X: `formatMonth(p.month)` em 1 de cada 3 pontos (11 px `textSecondary`); eixo Y: valores por `formatMoney`,
+ocultos (`showTitles: false`) com `hideValues`. Se algum `netCents < 0`, `HorizontalLine` em 0 (`colors.danger` α 0.4, tracejada).
+Tooltip rico no padrão do saldo diário (Fase 7: fundo `surface`, borda `border`, texto 12 `textPrimary`) com `netWorthTooltipText`, linhas separadas por '\n':
+```
+{formatMonthLong(month)}            // + ' (até dd/mm)' quando date != month.lastDay (mês atual)
+Patrimônio líquido: R$ N
+Contas: R$ A
+Ativos: R$ B
+A receber: R$ C
+A pagar: -R$ D
+Dívida de cartão: -R$ E
+```
+(valores por `formatMoney`; passivos com sinal negativo, `formatMoney(-x)`; `hideValues` → todos 'R$ ••••'). Menos de 2 pontos →
+`EmptyState(icon: Icons.show_chart, message: 'Ainda sem histórico para o gráfico.')`.
+
+**`AssetsSection`** (`features/net_worth/presentation/assets_section.dart`, `StatefulWidget`; estado `_showArchived`, só Ultra):
+`SectionCard(title: 'Ativos', trailing: TextButton.icon(Icons.add, 'Novo ativo'))`. Lista = `services.assets.all` não arquivados (Ultra com
+'Mostrar encerrados': todos), ordenados por `currentValueCents` desc e depois nome. Vazio (sem ativos não arquivados): `EmptyState(icon: Icons.home_work_outlined,
+message: 'Nenhum ativo. Cadastre imóveis, veículos e investimentos fora das contas para ver o patrimônio completo.', action: 'Novo ativo')`.
+Linha (key `asset-<id>`): ícone por tipo (`investment` `Icons.trending_up`, `realEstate` `Icons.home_outlined`, `vehicle` `Icons.directions_car_outlined`,
+`other` `Icons.category_outlined`), nome (13), `assetKindLabel` (12 `textSecondary`), `MoneyText(currentValueCents)` à direita e
+`IconButton(Icons.update, tooltip: 'Atualizar valor')` (key `asset-update-<id>`) → `showAssetValueDialog`.
+Ultra: + 'Atualizado em dd/mm/aaaa' (`latest.date`), `MoneyText(lastChangeCents, signed: true, colorBySign: true)` quando não nulo, menu
+(`PopupMenuButton` key `asset-menu-<id>`: 'Atualizar valor', 'Histórico', 'Editar', 'Encerrar' / 'Reativar', 'Excluir'); encerrados em `textSecondary`
+com `StatusBadge('Encerrado', textSecondary)`; `FilterChip` 'Mostrar encerrados' (key `assets-show-archived`) visível só se existe encerrado;
+rodapé 'Total' com a soma de `currentValueCents` dos não arquivados. Simples: sem menu nem encerrados.
+
+**Diálogos de ativo** (`features/net_worth/presentation/asset_dialogs.dart`):
+```dart
+Future<Asset?> showAssetForm(BuildContext context, {Asset? initial});
+Future<void> showAssetValueDialog(BuildContext context, Asset asset);
+Future<void> showAssetHistory(BuildContext context, Asset asset);
+```
+Form (`showDialog`, máx. 520): título 'Novo ativo' / 'Editar ativo'; nome (obrigatório, 'Informe o nome'); tipo (`DropdownButtonFormField<AssetKind>`,
+`initialValue`, rótulos `assetKindLabel`; key `asset-kind`); só na criação: 'Valor atual' (`MoneyField`; vazio/inválido → 'Informe o valor'; depois
+`assetSnapshotError`) e 'Data do valor' (`DateField`, padrão `ledger.today`). Salvar grava (§6.3) e devolve o ativo; Cancelar → `null`.
+Atualizar valor: título 'Atualizar valor · {nome}'; apoio 'Valor atual: R$ X em dd/mm/aaaa'; 'Novo valor' (`MoneyField`), 'Data' (`DateField`, padrão hoje),
+'Observação' opcional; se a data escolhida já tem snapshot: apoio 'Substitui o valor de dd/mm/aaaa'; erro do domínio em `danger`; 'Salvar'.
+Histórico: `AlertDialog` 'Histórico · {nome}', snapshots por data desc: 'dd/mm/aaaa', `MoneyText(valueCents)`, variação vs. o anterior
+(`MoneyText(signed: true, colorBySign: true)`; o primeiro não tem), nota (12 `textSecondary`), `IconButton(Icons.delete_outline)` por linha
+(bloqueado com SnackBar do `removeSnapshotError`). Todos com guarda contra duplo pop (padrão dos diálogos existentes).
+
+**`DebtsSection`** (`features/debts/presentation/debts_section.dart`, `StatefulWidget`; estado Ultra: `DebtDirection? _direction` (null = todas),
+`String? _person` (chave `foldText`), `bool _showSettled`):
+`SectionCard(title: 'Devo / me devem', trailing: TextButton.icon(Icons.add, 'Nova dívida'))`. Primeira linha (key `debt-totals`): 'Me devem ' +
+`MoneyText(last.receivableCents)` (`success`) + ' · Devo ' + `MoneyText(last.payableCents)` (`danger`), com `last = ledger.netWorthHistory.last`.
+Ultra: 'Por pessoa' — tabela densa de `ledger.debtsByPerson` (pessoa, 'Me deve', 'Devo', 'Líquido' com `colorBySign`); tocar numa linha
+(key `debt-person-$i`) aplica o filtro de pessoa (tocar de novo limpa). Filtros Ultra: `SegmentedButton<DebtDirection?>` (key `debt-filter-direction`:
+'Todas' / 'Me devem' / 'Devo'), `DropdownButton<String?>` 'Pessoa' (key `debt-filter-person`, 'Todas' + `ledger.debtPeople`) e `FilterChip`
+'Mostrar quitadas' (key `debt-show-settled`).
+Lista: dívidas em aberto (Ultra com 'Mostrar quitadas': todas) que passam nos filtros, ordenadas por (`dueDate` nulo por último, `dueDate` asc, `date` asc).
+Linha (key `debt-<id>`): pessoa (13), `StatusBadge` 'Me deve' (`success`) / 'Devo' (`warning`), `MoneyText(remainingCents)`, 'vence dd/mm' (12
+`textSecondary`) ou `StatusBadge('Vencida', danger)` (`isDebtOverdue`), `TextButton('Quitar')` (key `debt-settle-<id>`, oculto se `settled`).
+Ultra: + descrição, 'desde dd/mm/aaaa', 'R$ pago de R$ total' quando há pagamentos, quitadas em `textSecondary` com `StatusBadge('Quitada', textSecondary)`, menu
+(key `debt-menu-<id>`: 'Quitar', 'Pagamentos', 'Editar', 'Excluir'). Vazio: `EmptyState(icon: Icons.handshake_outlined, message: 'Nada pendente. Registre o
+que você deve ou o que te devem para acompanhar e quitar com um clique.', action: 'Nova dívida')`. Simples: sem filtros, sem 'Por pessoa', sem menu.
+
+**Diálogos de dívida** (`features/debts/presentation/debt_dialogs.dart`):
+```dart
+Future<Debt?> showDebtForm(BuildContext context, {Debt? initial});
+Future<void> showSettleDebtDialog(BuildContext context, Debt debt);
+Future<void> showDebtPayments(BuildContext context, Debt debt);
+```
+Form (máx. 520): título 'Nova dívida' / 'Editar dívida'; `SegmentedButton<DebtDirection>` (key `debt-direction`: 'Me devem' / 'Devo'; padrão 'Me devem';
+desabilitado com apoio 'Dívida com pagamentos' quando há pagamentos); 'Pessoa' (`Autocomplete<String>`, key `debt-person`, opções = `ledger.debtPeople`
+cujo `foldText` contém o `foldText` digitado, até 8; obrigatório 'Informe a pessoa'); 'Valor' (`MoneyField`; ≤ 0/inválido → 'Informe um valor maior que zero';
+edição com valor < `paidCents` → 'Já pago: R$ X'); 'Data' (`DateField`, padrão `ledger.today`); 'Descrição' opcional; `CheckboxListTile` 'Com vencimento'
++ `DateField` (vencimento < data → 'Vencimento antes da data'). Salvar grava `debts.upsert` (id novo na criação; na edição mantém `payments`) e devolve.
+Quitar (máx. 520): título 'Receber de {pessoa}' (me devem) / 'Pagar a {pessoa}' (devo); apoio 'Restante: R$ X'; 'Valor' (`MoneyField`, inicial = restante
+formatado sem 'R$ '; menor = pagamento parcial); 'Conta' (`DropdownButtonFormField<String>`, key `settle-account`, contas não arquivadas por nome com
+`BankAvatar`, `initialValue` a 1ª); 'Data' (`DateField`, padrão hoje); 'Categoria' opcional (key `settle-category`, 'Sem categoria' + `categoryTree.options(kind)`
+com `label`; kind = income para me devem, expense para devo); apoio 'Cria uma receita na conta' / 'Cria uma despesa na conta'; erro de
+`debtPaymentError` em `danger`; botão 'Confirmar'. Sem conta ativa: texto 'Cadastre uma conta para registrar o pagamento.' e 'Confirmar' desabilitado.
+Pagamentos: `AlertDialog` 'Pagamentos · {pessoa}' com os pagamentos por data desc: 'dd/mm/aaaa', `MoneyText`, descrição da transação ligada
+(`transactions.byId`) ou 'Transação excluída' (`warning`) e `IconButton(Icons.undo, tooltip: 'Desfazer')` (§6.3). Vazio → 'Nenhum pagamento'.
+
+**Painel Ultra**: `DashboardSummary` ganha `int? netWorthCents`, `double? netWorthDelta` e `List<int>? netWorthTrend` (Ultra: de `ledger.netWorthHistory`:
+último `netCents`, `deltaRatio` penúltimo→último, últimos 6 `netCents`; Simples: `null`). `DashboardKpiRow` acrescenta, depois de 'Gasto no mês',
+`KpiTile(label: 'Patrimônio líquido', cents: ..., trend: _Trend(delta, values, higherIsBetter: true))` quando não nulo.
+
+**Paleta**: `buildAppCommands` ganha `required VoidCallback onNewAsset` e `required VoidCallback onNewDebt`; depois de 'Nova recorrência':
+`PaletteEntry(label: 'Novo ativo', icon: Icons.home_work_outlined, keywords: ['patrimônio', 'imóvel', 'veículo', 'investimento', 'bem'])` e
+`PaletteEntry(label: 'Nova dívida (devo / me devem)', icon: Icons.handshake_outlined, keywords: ['devo', 'me devem', 'emprestei', 'empréstimo', 'pessoa', 'quitar'])`.
+O shell passa `() => showAssetForm(context)` e `() => showDebtForm(context)`.
+
 ### 7.4 Onboarding
 Uma tela: escolher modo (Simples/Ultra) + checkbox "Criar dados de exemplo" (fictícios: "Banco Alfa", "Banco Beta"; nunca bancos reais). Grava `onboardingDone`.
 
 ## 8. Testes
 - Unitários obrigatórios para todo `domain/` e `core/utils|models|services`.
 - `test/` espelha `lib/` (`test/features/cards/domain/invoice_cycle_test.dart`).
-- Widget smoke test: app sobe com `MemoryRecordStore` e navega pelas 9 páginas (Fase 8) sem exceção (janela larga 1400×900 e estreita 800×700 com sidebar colapsada).
+- Widget smoke test: app sobe com `MemoryRecordStore` e navega pelas 10 páginas (9 na Fase 8; Patrimônio na Fase 11) sem exceção (janela larga 1400×900 e estreita 800×700 com sidebar colapsada).
 - Fixtures de importação (Fase 8): `test/fixtures/import/` com arquivos **fictícios** (texto exato no BACKLOG, T-074/T-075). Nunca dado real.
 - Atalhos (Fase 9): testes de widget usam `tester.sendKeyEvent` / `sendKeyDownEvent(LogicalKeyboardKey.controlLeft)` e cobrem o caso
   "tecla com foco em campo de texto não dispara".
 - Fase 10: domínio puro com os exemplos de §5.20–5.23 (o de §5.23 monta a `Forecast` com `ForecastService.compute` sobre dados do teste, não à mão).
   `Ledger` testado com repositórios em memória (`goals` incluído).
+- Fase 11: domínio puro com os exemplos de §5.24–5.26 (o de §5.26 monta as compras do cartão com `buildInstallments`); `Ledger` com
+  repositórios em memória (`assets` e `debts` incluídos); smoke test navega as 10 páginas.
 - Portão: `bash tool/check.sh` → `CHECK OK`.

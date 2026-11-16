@@ -4,6 +4,7 @@ import 'package:finme/app/seed.dart';
 import 'package:finme/core/models/app_settings.dart';
 import 'package:finme/core/services/record_store.dart';
 import 'package:finme/core/theme/app_theme.dart';
+import 'package:finme/features/goals/domain/goal.dart';
 import 'package:finme/features/importing/domain/import_profile.dart';
 import 'package:finme/features/importing/domain/merchant_dictionary.dart';
 import 'package:finme/features/rules/domain/transaction_rule.dart';
@@ -98,6 +99,14 @@ void main() {
             categoryName: 'Mercado',
           ),
         );
+        await s.goals.upsert(
+          Goal(
+            id: 'g1',
+            name: 'Reserva',
+            accountId: s.accounts.all.first.id,
+            targetCents: 50000,
+          ),
+        );
       });
       await tester.tap(find.text('Ultra'));
       await tester.pump();
@@ -111,6 +120,7 @@ void main() {
       expect(s.rules.all, isEmpty);
       expect(s.importProfiles.all, isEmpty);
       expect(s.dictionary.all, defaultDictionary());
+      expect(s.goals.all, isEmpty);
       expect(tester.takeException(), isNull);
     },
   );

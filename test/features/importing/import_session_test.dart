@@ -365,6 +365,61 @@ void main() {
     expect(dueOf[10], const YearMonth(2027, 7));
   });
 
+  test('tags da regra vão para a transação criada e para as 8 parcelas', () {
+    const rule = TransactionRule(id: 'r', pattern: 'LOJA Y', tags: ['app']);
+    final s = _session([
+      _line(1, DateTime(2026, 11, 5), 'LOJA Y PARC 3/10', -3000),
+      _line(2, DateTime(2026, 11, 6), 'MERCADO EXEMPLO', -500),
+    ], categorizer: _categorizer(rules: const [rule]));
+    final plan = buildImportPlan(
+      s,
+      target: const ImportTarget(accountId: 'acc_a'),
+      today: _today,
+      idGenerator: _seqIds(),
+    );
+    final series = plan.create.where((t) => t.installmentGroupId != null);
+    expect(series, hasLength(8));
+    expect(
+      series.every((t) => t.tags.length == 1 && t.tags.first == 'app'),
+      isTrue,
+    );
+    expect(plan.create.last.tags, isEmpty);
+  });
+
+  test('provisionado casado com tags acumula as da regra', () {
+    const rule = TransactionRule(id: 'r', pattern: 'ACADEMIA', tags: ['app']);
+    final planned = Transaction(
+      id: 'p1',
+      type: TransactionType.expense,
+      amountCents: 4500,
+      date: DateTime(2026, 11, 8),
+      description: 'ACADEMIA EXEMPLO',
+      accountId: 'acc_a',
+      status: TransactionStatus.planned,
+      tags: const ['x'],
+    );
+    final plan = buildImportPlan(
+      _session(
+        [_line(1, DateTime(2026, 11, 10), 'ACADEMIA EXEMPLO MENSAL', -4500)],
+        existing: [planned],
+        categorizer: _categorizer(rules: const [rule]),
+      ),
+      target: const ImportTarget(accountId: 'acc_a'),
+      today: _today,
+    );
+    expect(plan.update.single.tags, ['x', 'app']);
+  });
+
+  test('recategorize troca as tags sugeridas da linha não editada', () {
+    const rule = TransactionRule(id: 'r', pattern: 'LOJA Y', tags: ['app']);
+    final s = _session([
+      _line(1, DateTime(2026, 11, 5), 'LOJA Y COMPRA', -3000),
+    ]);
+    expect(s.rows.single.suggestion.tags, isEmpty);
+    final re = s.recategorize(_categorizer(rules: const [rule]));
+    expect(re.rows.single.suggestion.tags, ['app']);
+  });
+
   test('desempenho: 2.000 linhas contra 10.000 transações < 2 s', () {
     final existing = [
       for (var i = 0; i < 10000; i++)

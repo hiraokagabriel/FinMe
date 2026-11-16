@@ -83,6 +83,32 @@ void main() {
     },
   );
 
+  testWidgets(
+    'regra só com tags salva; sem nada mostra o erro; linha mostra #app',
+    (tester) async {
+      final s = await _setup(tester);
+      await _pump(tester, s, const RulesSection());
+
+      await tester.tap(find.widgetWithText(FilledButton, 'Nova regra').first);
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextFormField).first, 'UBER');
+      await tester.tap(find.widgetWithText(FilledButton, 'Salvar'));
+      await tester.pumpAndSettle();
+      expect(find.text('Defina categoria, renomeação ou tags'), findsOneWidget);
+      expect(s.rules.all, isEmpty);
+
+      await tester.enterText(find.byKey(const ValueKey('tag-input')), 'app,');
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Salvar'));
+      await tester.pumpAndSettle();
+
+      final rule = s.rules.all.single;
+      expect(rule.tags, ['app']);
+      expect(rule.categoryId, isNull);
+      expect(find.text('#app'), findsOneWidget);
+    },
+  );
+
   testWidgets('regex inválida mostra "Padrão inválido" e não salva', (
     tester,
   ) async {
@@ -151,6 +177,63 @@ void main() {
     expect(s.rules.byId('a')!.active, isFalse);
   });
 
+  testWidgets('reaplicar regra de tags conta só as que ganham tag nova', (
+    tester,
+  ) async {
+    final s = await _setup(tester);
+    await s.rules.upsert(
+      const TransactionRule(id: 'a', pattern: 'UBER', tags: ['app']),
+    );
+    final day = DateTime(2026, 11, 12);
+    await s.transactions.upsertAll([
+      Transaction(
+        id: 't1',
+        type: TransactionType.expense,
+        amountCents: 1000,
+        date: day,
+        description: 'UBER TRIP',
+      ),
+      Transaction(
+        id: 't2',
+        type: TransactionType.expense,
+        amountCents: 2000,
+        date: day,
+        description: 'UBER EATS',
+        tags: const ['app'],
+      ),
+      Transaction(
+        id: 't3',
+        type: TransactionType.expense,
+        amountCents: 900,
+        date: day,
+        description: 'UBER X',
+      ),
+      Transaction(
+        id: 't4',
+        type: TransactionType.expense,
+        amountCents: 900,
+        date: day,
+        description: 'PADARIA',
+      ),
+    ]);
+    await _pump(tester, s, const RulesSection());
+
+    await tester.tap(find.text('Reaplicar às transações'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text(
+        '2 transações vão mudar (0 de categoria, 0 de descrição, 2 de tags)',
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Aplicar'));
+    await tester.pumpAndSettle();
+    expect(s.transactions.byId('t1')!.tags, ['app']);
+    expect(s.transactions.byId('t3')!.tags, ['app']);
+    expect(s.transactions.byId('t4')!.tags, isEmpty);
+  });
+
   testWidgets('reaplicar: mostra a prévia, aplica e fica zerado ao reabrir', (
     tester,
   ) async {
@@ -191,7 +274,9 @@ void main() {
     await tester.tap(find.text('Reaplicar às transações'));
     await tester.pumpAndSettle();
     expect(
-      find.text('2 transações vão mudar (2 de categoria, 0 de descrição)'),
+      find.text(
+        '2 transações vão mudar (2 de categoria, 0 de descrição, 0 de tags)',
+      ),
       findsOneWidget,
     );
 
@@ -206,7 +291,9 @@ void main() {
     await tester.tap(find.text('Reaplicar às transações'));
     await tester.pumpAndSettle();
     expect(
-      find.text('0 transações vão mudar (0 de categoria, 0 de descrição)'),
+      find.text(
+        '0 transações vão mudar (0 de categoria, 0 de descrição, 0 de tags)',
+      ),
       findsOneWidget,
     );
     expect(

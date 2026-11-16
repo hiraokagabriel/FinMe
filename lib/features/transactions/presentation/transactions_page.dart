@@ -15,10 +15,12 @@ import '../../importing/presentation/import_flow.dart';
 import '../../rules/domain/rule_engine.dart';
 import '../../rules/domain/rule_suggestion.dart';
 import '../../rules/presentation/rule_form.dart';
+import '../domain/tags.dart';
 import '../domain/transaction.dart';
 import '../domain/transaction_bulk.dart';
 import 'bulk_action_bar.dart';
 import 'bulk_dialogs.dart';
+import 'tag_widgets.dart';
 import 'transaction_filters.dart';
 import 'transaction_form.dart';
 import 'transaction_row.dart';
@@ -81,15 +83,20 @@ class _TransactionsPageState extends State<TransactionsPage> {
         final filter = ultra
             ? _filter
             : const TransactionFilter(showPlanned: false);
-        final filtered = visibleTransactions(s.transactions.all, month, filter);
+        final tree = ledger.categoryTree;
+        final filtered = visibleTransactions(
+          s.transactions.all,
+          month,
+          filter,
+          tree: tree,
+        );
         // Ordenação só no Ultra e só sobre as linhas já filtradas do mês.
         final rows = ultra
             ? sortTransactions(
                 filtered,
                 _sort,
                 originName: (t) => _originText(ledger, t),
-                categoryName: (t) =>
-                    ledger.categoriesById[t.categoryId]?.name ?? '',
+                categoryName: (t) => tree.label(t.categoryId ?? ''),
               )
             : filtered;
         // Seleção só no Ultra: ao sair dele zera (já estamos no build, sem setState).
@@ -109,6 +116,11 @@ class _TransactionsPageState extends State<TransactionsPage> {
             label: 'Recategorizar',
             icon: Icons.category_outlined,
             onPressed: () => _recategorize(context, s, selected),
+          ),
+          BulkAction(
+            label: 'Tags',
+            icon: Icons.sell_outlined,
+            onPressed: () => _bulkTags(context, s, selected),
           ),
           BulkAction(
             label: 'Confirmar pagamento',
@@ -137,12 +149,9 @@ class _TransactionsPageState extends State<TransactionsPage> {
             onPressed: () => showTransactionForm(context),
           ),
         );
-        // Listas do dropdown inline, uma vez por build (categoria de cada `kind`, por nome).
-        final expenseOptions = _optionsOf(
-          s.categories.all,
-          CategoryKind.expense,
-        );
-        final incomeOptions = _optionsOf(s.categories.all, CategoryKind.income);
+        // Opções do dropdown inline na ordem da árvore (raiz seguida das filhas).
+        final expenseOptions = tree.options(CategoryKind.expense);
+        final incomeOptions = tree.options(CategoryKind.income);
         final emptyAction = ultra && _filter.hasCriteria
             ? Wrap(
                 alignment: WrapAlignment.center,
@@ -230,7 +239,8 @@ class _TransactionsPageState extends State<TransactionsPage> {
                               for (final c in s.cards.all)
                                 if (!c.archived) c,
                             ],
-                            categories: s.categories.all,
+                            tree: tree,
+                            tagOptions: ledger.allTags,
                             searchFocusNode: widget.searchFocusNode,
                             // Seleção é por filtro: mudar o filtro limpa, como trocar o mês.
                             onChanged: (f) => setState(() {
@@ -497,10 +507,15 @@ class _TransactionsPageState extends State<TransactionsPage> {
     AppServices s,
     List<Transaction> selected,
   ) async {
+    final tree = s.ledger.categoryTree;
     final choice = await showBulkCategoryDialog(
       context,
       count: selected.length,
-      categories: s.categories.all,
+      categories: [
+        ...tree.options(CategoryKind.expense),
+        ...tree.options(CategoryKind.income),
+      ],
+      labelOf: (c) => tree.label(c.id),
     );
     if (choice == null || !context.mounted) {
       return;
@@ -516,6 +531,33 @@ class _TransactionsPageState extends State<TransactionsPage> {
     _notify(
       context,
       '${_countLabel(result.changed.length, 'recategorizada', 'recategorizadas')}$skipped',
+    );
+  }
+
+  /// Tags em massa: adiciona ou remove só onde muda; a seleção é mantida.
+  Future<void> _bulkTags(
+    BuildContext context,
+    AppServices s,
+    List<Transaction> selected,
+  ) async {
+    final choice = await showBulkTagsDialog(
+      context,
+      count: selected.length,
+      suggestions: s.ledger.allTags,
+    );
+    if (choice == null || !context.mounted) {
+      return;
+    }
+    final changed = choice.remove
+        ? bulkRemoveTags(selected, choice.tags)
+        : bulkAddTags(selected, choice.tags);
+    await s.transactions.upsertAll(changed);
+    if (!context.mounted) {
+      return;
+    }
+    _notify(
+      context,
+      'Tags atualizadas em ${_countLabel(changed.length, 'transação', 'transações')}',
     );
   }
 
@@ -622,18 +664,9 @@ class _TransactionsPageState extends State<TransactionsPage> {
 String _countLabel(int n, String one, String many) =>
     n == 1 ? '1 $one' : '$n $many';
 
-/// Categorias de um `kind`, por nome (opções do dropdown inline).
-List<TransactionCategory> _optionsOf(
-  List<TransactionCategory> all,
-  CategoryKind kind,
-) => [
-  for (final c in all)
-    if (c.kind == kind) c,
-]..sort((a, b) => a.name.compareTo(b.name));
-
 enum _DeleteScope { one, all }
 
-/// Cópia avulsa: novo id, sem vínculo de parcela nem de recorrência, mesma data.
+/// Cópia avulsa: novo id, sem vínculo de parcela, recorrência nem id externo (importação), mesma data.
 Transaction _duplicate(Transaction t) => Transaction.fromMap({
   ...t.toMap(),
   'id': newId(),
@@ -641,6 +674,7 @@ Transaction _duplicate(Transaction t) => Transaction.fromMap({
   'installmentIndex': null,
   'installmentCount': null,
   'recurringId': null,
+  'externalId': null,
 });
 
 /// Conta ou cartão de origem; '—' quando não há vínculo.
@@ -725,11 +759,15 @@ class _TransactionTable extends StatelessWidget {
         final t = rows[i];
         final onCat = onCategoryChanged;
         final onAmount = onAmountChanged;
+        final category = ledger.categoriesById[t.categoryId];
         return TransactionRow(
           transaction: t,
           ultra: ultra,
           past: t.date.isBefore(pastBefore),
-          category: ledger.categoriesById[t.categoryId],
+          category: category,
+          categoryLabel: category == null
+              ? null
+              : ledger.categoryTree.label(category.id),
           origin: _originName(ledger, t),
           destination: _destinationName(ledger, t),
           selected: ultra ? selection.contains(t.id) : null,
@@ -738,6 +776,7 @@ class _TransactionTable extends StatelessWidget {
           categoryOptions: t.type == TransactionType.income
               ? incomeOptions
               : expenseOptions,
+          categoryLabelOf: (c) => ledger.categoryTree.label(c.id),
           onCategoryChanged: onCat == null ? null : (v) => onCat(t, v),
           // Parcela não edita valor inline (ver canEditAmountInline).
           onAmountChanged: onAmount == null || !canEditAmountInline(t)

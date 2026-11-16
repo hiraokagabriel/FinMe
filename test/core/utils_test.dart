@@ -64,6 +64,16 @@ void main() {
     });
   });
 
+  group('formatMoneyInput', () {
+    test('sem R\$ nem milhar, centavos sempre com 2 dígitos', () {
+      expect(formatMoneyInput(123456), '1234,56');
+      expect(formatMoneyInput(5), '0,05');
+      expect(formatMoneyInput(0), '0,00');
+      expect(formatMoneyInput(-250), '-2,50');
+      expect(parseMoney(formatMoneyInput(123456)), 123456);
+    });
+  });
+
   group('parseMoney', () {
     test('aceita os formatos do SPEC', () {
       expect(parseMoney('1.234,56'), 123456);

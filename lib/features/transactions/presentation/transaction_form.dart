@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/app_scope.dart';
+import '../../../core/models/app_settings.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/formatters.dart';
@@ -11,6 +12,7 @@ import '../../categories/domain/transaction_category.dart';
 import '../../importing/domain/categorizer.dart';
 import '../domain/installments.dart';
 import '../domain/transaction.dart';
+import 'tag_widgets.dart';
 import 'transaction_filters.dart';
 
 const _maxInstallments = 48;
@@ -61,6 +63,12 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
   // Usuário escolheu (ou já tinha) categoria: a descrição não sobrescreve mais.
   late bool _categoryTouched;
   CategorizationResult? _suggestion;
+  // Tags só aparecem no Ultra; no Simples são preservadas ao salvar.
+  late List<String> _tags;
+  // Usuário mexeu nas tags: a regra não sobrescreve mais.
+  bool _tagsTouched = false;
+  // Tags vieram da regra (helper 'Tags da regra').
+  bool _tagsFromRule = false;
   String? _accountId;
   String? _cardId;
   late bool _planned;
@@ -68,6 +76,8 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
   bool _saving = false;
 
   bool get _isNew => widget.initial == null;
+
+  bool get _ultra => widget.services.settings.value.mode == AppMode.ultra;
 
   bool get _locked {
     final type = widget.initial?.type;
@@ -111,6 +121,7 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
     // Referências órfãs (conta/cartão/categoria apagados) viram null: evita assert do Dropdown.
     _categoryId = _validCategory(init?.categoryId);
     _categoryTouched = init?.categoryId != null;
+    _tags = init?.tags ?? const [];
     final accountId = init?.accountId;
     _accountId = accountId != null && s.accounts.byId(accountId) != null
         ? accountId
@@ -136,15 +147,9 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
     return c != null && c.kind == _kindOf(_type) ? id : null;
   }
 
-  List<TransactionCategory> _categoriesFor(AppServices s) {
-    final kind = _kindOf(_type);
-    final list = [
-      for (final c in s.categories.all)
-        if (c.kind == kind) c,
-    ];
-    list.sort((a, b) => a.name.compareTo(b.name));
-    return list;
-  }
+  /// Ordem de dropdown da árvore: cada principal seguida das subcategorias.
+  List<TransactionCategory> _categoriesFor(AppServices s) =>
+      s.ledger.categoryTree.options(_kindOf(_type));
 
   void _setType(TransactionType type) {
     setState(() {
@@ -155,9 +160,9 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
     });
   }
 
-  /// Sugere categoria pela descrição, só enquanto o usuário não escolheu uma.
+  /// Sugere categoria e tags (Ultra) pela descrição, só enquanto o usuário não escolheu cada uma.
   void _suggestCategory(String text) {
-    if (_categoryTouched || _locked) {
+    if (_locked) {
       return;
     }
     final s = widget.services;
@@ -168,15 +173,21 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
     final id = r.categoryId;
     final valid = id != null && _categoriesFor(s).any((cat) => cat.id == id);
     setState(() {
-      if (valid) {
-        _categoryId = id;
-        _suggestion = r;
-      } else {
-        // Categoria veio da sugestão que sumiu (o usuário não escolheu): limpa junto.
-        if (_suggestion != null) {
-          _categoryId = null;
+      if (!_categoryTouched) {
+        if (valid) {
+          _categoryId = id;
+          _suggestion = r;
+        } else {
+          // Categoria veio da sugestão que sumiu (o usuário não escolheu): limpa junto.
+          if (_suggestion != null) {
+            _categoryId = null;
+          }
+          _suggestion = null;
         }
-        _suggestion = null;
+      }
+      if (_isNew && !_tagsTouched && _ultra) {
+        _tags = r.tags;
+        _tagsFromRule = r.tags.isNotEmpty;
       }
     });
   }
@@ -248,6 +259,9 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
       installmentCount: init?.installmentCount,
       recurringId: init?.recurringId,
       notes: notes.isEmpty ? null : notes,
+      externalId: init?.externalId,
+      importedDescription: init?.importedDescription,
+      tags: _tags,
     );
     setState(() => _saving = true);
     try {
@@ -380,13 +394,26 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
                       for (final cat in _categoriesFor(s))
                         DropdownMenuItem<String?>(
                           value: cat.id,
-                          child: Text(cat.name),
+                          child: Text(s.ledger.categoryTree.label(cat.id)),
                         ),
                     ],
                     onChanged: (v) => setState(() {
                       _categoryId = v;
                       _categoryTouched = true;
                       _suggestion = null;
+                    }),
+                  ),
+                ],
+                if (!locked && _ultra) ...[
+                  const SizedBox(height: AppSpace.md),
+                  TagField(
+                    tags: _tags,
+                    suggestions: s.ledger.allTags,
+                    helperText: _tagsFromRule ? 'Tags da regra' : null,
+                    onChanged: (v) => setState(() {
+                      _tags = v;
+                      _tagsTouched = true;
+                      _tagsFromRule = false;
                     }),
                   ),
                 ],

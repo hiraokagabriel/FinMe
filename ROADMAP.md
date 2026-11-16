@@ -21,6 +21,7 @@ Direção do produto e próximos passos. Tarefas detalhadas e status: `docs/BACK
 - **Fase 7 — Identidade visual e polimento**: tipografia Plex + Source Serif 4, neutros quentes, deltas/sparklines, avatar de banco, ordenação, estados vazios, shell só desktop (T-050..T-068).
 - **Fase 8 — Importação, regras e categorização**: CSV com perfis, OFX, prévia com deduplicação, casamento com provisionados e parcelas, categorização offline em cascata, regras e dicionário editáveis (T-070..T-092).
 - **Fase 9 — Produtividade**: paleta Ctrl+K, atalhos globais, multi-seleção com ações em massa e edição inline (T-100..T-115).
+- **Fase 10 — Subcategorias, tags, metas e "posso gastar hoje"** (T-120..T-142).
 
 ## Próximos passos sugeridos
 

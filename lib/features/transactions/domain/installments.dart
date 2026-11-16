@@ -38,6 +38,7 @@ List<Transaction> buildInstallments({
         installmentCount: count,
         recurringId: base.recurringId,
         notes: base.notes,
+        tags: base.tags,
       ),
   ];
 }

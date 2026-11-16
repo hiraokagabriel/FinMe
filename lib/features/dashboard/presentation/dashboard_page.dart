@@ -5,10 +5,12 @@ import '../../../core/models/app_settings.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/widgets.dart';
 import '../../accounts/domain/account.dart';
+import '../../forecast/domain/spendable.dart';
 import 'dashboard_sections.dart';
 import 'dashboard_summary.dart';
+import 'spendable_card.dart';
 
-/// Painel: KPIs, alerta de saldo negativo, faturas, vencimentos e gastos por categoria.
+/// Painel: "Posso gastar hoje", KPIs, alerta de saldo negativo, faturas, vencimentos e gastos por categoria.
 class DashboardPage extends StatelessWidget {
   const DashboardPage({super.key});
 
@@ -35,6 +37,7 @@ class DashboardPage extends StatelessWidget {
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 1200),
                         child: _DashboardBody(
+                          spendable: s.ledger.spendableToday,
                           summary: summary,
                           accounts: s.ledger.accountsById,
                           ultra: ultra,
@@ -56,12 +59,14 @@ class DashboardPage extends StatelessWidget {
 /// Corpo rolável: largura ≥ 1100 usa duas colunas; senão, uma coluna.
 class _DashboardBody extends StatelessWidget {
   const _DashboardBody({
+    required this.spendable,
     required this.summary,
     required this.accounts,
     required this.ultra,
     required this.wide,
   });
 
+  final SpendableToday spendable;
   final DashboardSummary summary;
   final Map<String, Account> accounts;
   final bool ultra;
@@ -88,6 +93,8 @@ class _DashboardBody extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        SpendableCard(data: spendable, ultra: ultra),
+        _gap,
         DashboardKpiRow(summary: summary),
         if (negativeDate != null) ...[
           _gap,

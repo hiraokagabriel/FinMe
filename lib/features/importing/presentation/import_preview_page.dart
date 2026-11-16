@@ -120,15 +120,9 @@ class _ImportPreviewPageState extends State<_ImportPreviewPage> {
     final visible = _onlyUncategorized ? session.uncategorizedIndices() : null;
     final count = visible?.length ?? session.rows.length;
 
-    final categories = services.categories.all;
-    final expenseOptions = [
-      for (final cat in categories)
-        if (cat.kind == CategoryKind.expense) cat,
-    ];
-    final incomeOptions = [
-      for (final cat in categories)
-        if (cat.kind == CategoryKind.income) cat,
-    ];
+    final tree = services.ledger.categoryTree;
+    final expenseOptions = tree.options(CategoryKind.expense);
+    final incomeOptions = tree.options(CategoryKind.income);
     final onRule = ultra ? widget.onCreateRule : null;
 
     final c = context.colors;
@@ -231,6 +225,7 @@ class _ImportPreviewPageState extends State<_ImportPreviewPage> {
                                       row.type == TransactionType.income
                                       ? incomeOptions
                                       : expenseOptions,
+                                  labelOf: (c) => tree.label(c.id),
                                   onInclude: (v) =>
                                       _set(_session.setInclude(i, v)),
                                   onCategory: (id) =>

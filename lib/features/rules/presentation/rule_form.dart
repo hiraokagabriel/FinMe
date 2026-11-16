@@ -5,6 +5,8 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/id.dart';
 import '../../categories/domain/transaction_category.dart';
+import '../../transactions/domain/tags.dart';
+import '../../transactions/presentation/tag_widgets.dart';
 import '../domain/rule_engine.dart';
 import '../domain/transaction_rule.dart';
 
@@ -71,6 +73,7 @@ class _RuleFormDialogState extends State<_RuleFormDialog> {
     widget.initial?.categoryId ?? widget.initialCategoryId,
   );
   late bool _active = widget.initial?.active ?? true;
+  late List<String> _tags = [...?widget.initial?.tags];
   bool _noTarget = false;
   bool _saving = false;
   _TestResult? _result;
@@ -86,16 +89,13 @@ class _RuleFormDialogState extends State<_RuleFormDialog> {
   String? _existingCategory(String? id) =>
       id != null && widget.services.categories.byId(id) != null ? id : null;
 
-  /// Despesas primeiro, depois receitas; por nome dentro de cada tipo.
-  List<TransactionCategory> get _categoriesSorted {
-    final cats = [...widget.services.categories.all]
-      ..sort((a, b) {
-        if (a.kind != b.kind) {
-          return a.kind == CategoryKind.expense ? -1 : 1;
-        }
-        return a.name.compareTo(b.name);
-      });
-    return cats;
+  /// Despesas primeiro, depois receitas; cada raiz seguida das filhas (ordem da árvore).
+  List<TransactionCategory> get _categoryOptions {
+    final tree = widget.services.ledger.categoryTree;
+    return [
+      ...tree.options(CategoryKind.expense),
+      ...tree.options(CategoryKind.income),
+    ];
   }
 
   int _nextPriority() =>
@@ -136,7 +136,8 @@ class _RuleFormDialogState extends State<_RuleFormDialog> {
   Future<void> _save() async {
     final valid = _formKey.currentState?.validate() ?? false;
     final renameTo = _renameTo.text.trim();
-    final hasTarget = _categoryId != null || renameTo.isNotEmpty;
+    final hasTarget =
+        _categoryId != null || renameTo.isNotEmpty || _tags.isNotEmpty;
     setState(() => _noTarget = !hasTarget);
     if (_saving || !valid || !hasTarget) {
       return;
@@ -150,6 +151,7 @@ class _RuleFormDialogState extends State<_RuleFormDialog> {
       renameTo: renameTo.isEmpty ? null : renameTo,
       priority: widget.initial?.priority ?? _nextPriority(),
       active: _active,
+      tags: normalizeTags(_tags),
     );
     await widget.services.rules.upsert(rule);
     if (mounted) {
@@ -207,10 +209,12 @@ class _RuleFormDialogState extends State<_RuleFormDialog> {
                       value: null,
                       child: Text('Sem categoria'),
                     ),
-                    for (final cat in _categoriesSorted)
+                    for (final cat in _categoryOptions)
                       DropdownMenuItem<String?>(
                         value: cat.id,
-                        child: Text(cat.name),
+                        child: Text(
+                          widget.services.ledger.categoryTree.label(cat.id),
+                        ),
                       ),
                   ],
                   onChanged: (v) => setState(() => _categoryId = v),
@@ -222,6 +226,16 @@ class _RuleFormDialogState extends State<_RuleFormDialog> {
                     labelText: 'Renomear para (opcional)',
                   ),
                 ),
+                const SizedBox(height: AppSpace.md),
+                TagField(
+                  tags: _tags,
+                  label: 'Adicionar tags',
+                  suggestions: widget.services.ledger.allTags,
+                  onChanged: (v) {
+                    _tags = v;
+                    _edited();
+                  },
+                ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Ativa'),
@@ -230,7 +244,7 @@ class _RuleFormDialogState extends State<_RuleFormDialog> {
                 ),
                 if (_noTarget)
                   Text(
-                    'Defina categoria ou renomeação',
+                    'Defina categoria, renomeação ou tags',
                     style: textTheme.bodySmall?.copyWith(color: c.danger),
                   ),
                 const SizedBox(height: AppSpace.md),

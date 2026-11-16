@@ -47,6 +47,13 @@ String formatMoney(int cents, {bool hidden = false, bool signed = false}) {
   return '${sign}R\$ $reais,$centavos';
 }
 
+/// Texto inicial de campo monetário: 123456 → "1234,56". Sem R$ nem milhar; `parseMoney` lê de volta.
+String formatMoneyInput(int cents) {
+  final abs = cents.abs();
+  final sign = cents < 0 ? '-' : '';
+  return '$sign${abs ~/ 100},${_two(abs % 100)}';
+}
+
 /// Retorna `null` se a entrada não for um valor monetário válido.
 int? parseMoney(String input) {
   final s = input.replaceAll('R\$', '').replaceAll(RegExp(r'\s'), '');

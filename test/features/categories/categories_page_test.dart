@@ -2,11 +2,14 @@ import 'package:finme/app/app_scope.dart';
 import 'package:finme/app/bootstrap.dart';
 import 'package:finme/app/seed.dart';
 import 'package:finme/core/models/app_settings.dart';
+import 'package:finme/core/models/year_month.dart';
 import 'package:finme/core/services/record_store.dart';
 import 'package:finme/core/theme/app_theme.dart';
+import 'package:finme/core/utils/formatters.dart';
 import 'package:finme/core/widgets/widgets.dart';
 import 'package:finme/features/categories/domain/transaction_category.dart';
 import 'package:finme/features/categories/presentation/categories_page.dart';
+import 'package:finme/features/transactions/domain/transaction.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -255,4 +258,222 @@ void main() {
     await tester.pumpAndSettle();
     expect(s.categories.byId('cat_pets'), isNull);
   });
+
+  testWidgets('nova subcategoria herda ícone e cor do pai e grava parentId', (
+    tester,
+  ) async {
+    final s = await _setup(tester, AppMode.simple);
+    await _pump(tester, s);
+    final pai = s.categories.byId('cat_alimentacao')!;
+
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('cat-cat_alimentacao')),
+        matching: find.byIcon(Icons.more_vert),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Nova subcategoria'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).first, 'Mercado X');
+    await tester.tap(find.text('Salvar'));
+    await tester.pumpAndSettle();
+
+    final filha = s.categories.all.singleWhere((c) => c.name == 'Mercado X');
+    expect(filha.parentId, 'cat_alimentacao');
+    expect(filha.iconCodePoint, pai.iconCodePoint);
+    expect(filha.colorValue, pai.colorValue);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'modo Simples: subcategoria recuada abaixo da raiz, com gasto agregado',
+    (tester) async {
+      final s = await _setup(tester, AppMode.simple);
+      await _addFilha(s);
+      await s.transactions.upsert(_gasto('tx_filha', 'cat_mercadox', 5000));
+      await _pump(tester, s);
+
+      final raiz = tester.getTopLeft(find.text('Alimentação')).dy;
+      final filha = tester.getTopLeft(find.text('Mercado X')).dy;
+      expect(filha, greaterThan(raiz));
+      expect(filha, lessThan(tester.getTopLeft(find.text('Mercado')).dy));
+
+      final total =
+          s.ledger.rolledSpendingFor(
+            const YearMonth(2026, 11),
+          )['cat_alimentacao'] ??
+          0;
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('cat-cat_alimentacao')),
+          matching: find.text(formatMoney(total)),
+        ),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'modo Ultra: filha oculta até expandir; orçamento da raiz soma a filha',
+    (tester) async {
+      final s = await _setup(tester, AppMode.ultra);
+      await s.transactions.replaceAll(const []);
+      await _addFilha(s);
+      await s.categories.upsert(
+        s.categories
+            .byId('cat_alimentacao')!
+            .copyWith(monthlyBudgetCents: 100000),
+      );
+      await s.transactions.upsertAll([
+        _gasto('tx_raiz', 'cat_alimentacao', 10000),
+        _gasto('tx_filha', 'cat_mercadox', 50000),
+      ]);
+      await _pump(tester, s);
+
+      expect(find.text('Mercado X'), findsNothing);
+      await tester.tap(
+        find.byKey(const ValueKey('category-toggle-cat_alimentacao')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Mercado X'), findsOneWidget);
+
+      final barra = tester.widget<LimitBar>(
+        find.descendant(
+          of: find.byKey(const ValueKey('cat-cat_alimentacao')),
+          matching: find.byType(LimitBar),
+        ),
+      );
+      expect(barra.usedCents, 60000);
+      expect(barra.limitCents, 100000);
+    },
+  );
+
+  testWidgets(
+    'editar categoria com filhas desabilita o pai; receitas não viram pai',
+    (tester) async {
+      final s = await _setup(tester, AppMode.simple);
+      await _addFilha(s);
+      await _pump(tester, s);
+
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('cat-cat_alimentacao')),
+          matching: find.byIcon(Icons.more_vert),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Editar'));
+      await tester.pumpAndSettle();
+
+      // Helper do seletor de tipo e helper do dropdown de pai.
+      expect(find.text('Tem subcategorias'), findsNWidgets(2));
+      final campo = tester.widget<DropdownButtonFormField<String?>>(
+        find.byKey(const ValueKey('category-parent')),
+      );
+      expect(campo.onChanged, isNull);
+      final kindControl = tester.widget<SegmentedButton<CategoryKind>>(
+        find.byType(SegmentedButton<CategoryKind>).last,
+      );
+      expect(kindControl.onSelectionChanged, isNull);
+    },
+  );
+
+  testWidgets('dropdown de pai lista só raízes do mesmo tipo', (tester) async {
+    final s = await _setup(tester, AppMode.simple);
+    await _pump(tester, s);
+
+    await tester.tap(find.text('Nova categoria'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('category-parent')));
+    await tester.pumpAndSettle();
+
+    // A página de despesas não mostra receitas; só o menu do dropdown mostraria 'Salário'.
+    expect(find.text('Salário'), findsNothing);
+    expect(find.text('Nenhuma (categoria principal)'), findsWidgets);
+    expect(find.text('Transporte'), findsWidgets);
+  });
+
+  testWidgets('excluir categoria com subcategorias é bloqueado', (
+    tester,
+  ) async {
+    final s = await _setup(tester, AppMode.simple);
+    await _addFilha(s);
+    await _pump(tester, s);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('cat-cat_alimentacao')),
+        matching: find.byIcon(Icons.more_vert),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Excluir'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Mova ou exclua as subcategorias antes'), findsOneWidget);
+    expect(s.categories.byId('cat_alimentacao'), isNotNull);
+    expect(s.categories.byId('cat_mercadox'), isNotNull);
+  });
+
+  testWidgets(
+    'excluir categoria mantém tags e campos de importação do lançamento',
+    (tester) async {
+      final s = await _setup(tester, AppMode.simple);
+      await s.transactions.upsert(
+        _gasto(
+          'tx_tags',
+          'cat_mercado',
+          9000,
+          tags: ['viagem'],
+        ).copyWith(externalId: 'ext-1', importedDescription: 'PGTO MERC'),
+      );
+      await _pump(tester, s);
+
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('cat-cat_mercado')),
+          matching: find.byIcon(Icons.more_vert),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Excluir'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Excluir'));
+      await tester.pumpAndSettle();
+
+      final t = s.transactions.byId('tx_tags')!;
+      expect(t.categoryId, isNull);
+      expect(t.tags, ['viagem']);
+      expect(t.externalId, 'ext-1');
+      expect(t.importedDescription, 'PGTO MERC');
+    },
+  );
 }
+
+/// Subcategoria de Alimentação (`cat_mercadox`), para os testes de árvore.
+Future<void> _addFilha(AppServices s) => s.categories.upsert(
+  const TransactionCategory(
+    id: 'cat_mercadox',
+    name: 'Mercado X',
+    kind: CategoryKind.expense,
+    iconCodePoint: 0,
+    colorValue: 0xFF000000,
+    parentId: 'cat_alimentacao',
+  ),
+);
+
+Transaction _gasto(
+  String id,
+  String categoryId,
+  int cents, {
+  List<String> tags = const [],
+}) => Transaction(
+  id: id,
+  type: TransactionType.expense,
+  amountCents: cents,
+  date: DateTime(2026, 11, 10),
+  description: 'Teste $id',
+  categoryId: categoryId,
+  tags: tags,
+);

@@ -1,5 +1,6 @@
 import 'package:finme/app/seed.dart';
 import 'package:finme/core/utils/text_normalize.dart';
+import 'package:finme/features/categories/domain/transaction_category.dart';
 import 'package:finme/features/importing/domain/merchant_dictionary.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -51,6 +52,78 @@ void main() {
 
     test('nome desconhecido -> null', () {
       expect(resolveCategoryByName('Inexistente', categories), isNull);
+    });
+
+    test('nome inteiro com > sem espaços é categoria, não caminho', () {
+      final ab = [
+        const TransactionCategory(
+          id: 'ab',
+          name: 'A>B',
+          kind: CategoryKind.expense,
+          iconCodePoint: 0,
+          colorValue: 0,
+        ),
+      ];
+      expect(resolveCategoryByName('A>B', ab), 'ab');
+      expect(resolveCategoryByName('A > B', ab), isNull);
+    });
+
+    group('com subcategorias', () {
+      // Sem a raiz 'Outros' do seed: o contrato pede 2 filhas homônimas sem raiz.
+      final sub = [
+        ...categories.where((c) => c.id != 'cat_outros'),
+        const TransactionCategory(
+          id: 'mer2',
+          name: 'Mercado',
+          kind: CategoryKind.expense,
+          iconCodePoint: 0,
+          colorValue: 0,
+          parentId: 'cat_alimentacao',
+        ),
+        const TransactionCategory(
+          id: 'out1',
+          name: 'Outros',
+          kind: CategoryKind.expense,
+          iconCodePoint: 0,
+          colorValue: 0,
+          parentId: 'cat_alimentacao',
+        ),
+        const TransactionCategory(
+          id: 'out2',
+          name: 'Outros',
+          kind: CategoryKind.expense,
+          iconCodePoint: 0,
+          colorValue: 0,
+          parentId: 'cat_transporte',
+        ),
+      ];
+
+      test('caminho com › ou > resolve a filha', () {
+        expect(resolveCategoryByName('Alimentação › Mercado', sub), 'mer2');
+        expect(resolveCategoryByName('alimentacao > mercado', sub), 'mer2');
+      });
+
+      test('nome simples: raiz vence a filha homônima', () {
+        expect(resolveCategoryByName('Mercado', sub), 'cat_mercado');
+      });
+
+      test('duas filhas homônimas sem raiz são ambíguas', () {
+        expect(resolveCategoryByName('Outros', sub), isNull);
+        expect(resolveCategoryByName('Transporte › Outros', sub), 'out2');
+      });
+
+      test('caminho com filha inexistente cai no nome da filha', () {
+        expect(resolveCategoryByName('Transporte › Inexistente', sub), isNull);
+      });
+
+      test('filha única sem raiz homônima resolve', () {
+        final semRaiz = sub.where((c) => c.id != 'cat_mercado').toList();
+        expect(resolveCategoryByName('Mercado', semRaiz), 'mer2');
+      });
+
+      test('fallback Combustível continua indo para Transporte', () {
+        expect(resolveCategoryByName('Combustível', sub), 'cat_transporte');
+      });
     });
   });
 

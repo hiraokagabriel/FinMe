@@ -8,6 +8,7 @@ import 'package:finme/core/models/year_month.dart';
 import 'package:finme/core/services/backup_service.dart';
 import 'package:finme/core/services/record_store.dart';
 import 'package:finme/core/utils/date_utils.dart';
+import 'package:finme/features/goals/domain/goal.dart';
 import 'package:finme/features/importing/domain/import_profile.dart';
 import 'package:finme/features/importing/domain/merchant_dictionary.dart';
 import 'package:finme/features/rules/domain/transaction_rule.dart';
@@ -51,6 +52,7 @@ List<Object?> _state(AppServices s) => [
   [for (final r in s.rules.all) r.toMap()],
   [for (final p in s.importProfiles.all) p.toMap()],
   [for (final e in s.dictionary.all) e.toMap()],
+  [for (final g in s.goals.all) g.toMap()],
 ];
 
 Future<AppServices> _bootstrap({
@@ -87,6 +89,165 @@ void main() {
     expect(dst.transactions.byId(tx.id), tx);
     expect(dst.settings.value.onboardingDone, isTrue);
   });
+
+  test(
+    'export→import devolve metas, parentId, tags de lançamento e de regra',
+    () async {
+      final src = await _bootstrap();
+      final dst = await _bootstrap(demo: false);
+      final accountId = src.accounts.all.first.id;
+      await src.goals.upsert(
+        Goal(
+          id: 'g1',
+          name: 'Viagem',
+          accountId: accountId,
+          targetCents: 100000,
+          targetDate: DateTime(2027, 3, 1),
+          movements: [
+            GoalMovement(
+              id: 'm1',
+              date: DateTime(2026, 11, 2),
+              amountCents: 30000,
+            ),
+            GoalMovement(
+              id: 'm2',
+              date: DateTime(2026, 11, 10),
+              amountCents: -5000,
+              note: 'Imprevisto',
+            ),
+          ],
+        ),
+      );
+      await src.categories.upsert(
+        src.categories
+            .byId('cat_mercado')!
+            .copyWith(parentId: 'cat_alimentacao'),
+      );
+      await src.transactions.upsert(
+        Transaction(
+          id: 'tagged',
+          type: TransactionType.expense,
+          amountCents: 1000,
+          date: _now(),
+          description: 'Com tags',
+          accountId: accountId,
+          tags: const ['viagem', 'casa'],
+        ),
+      );
+      await src.rules.upsert(
+        const TransactionRule(id: 'r_tag', pattern: 'LOJA', tags: ['casa']),
+      );
+
+      await BackupService.importJson(dst, BackupService.exportJson(src));
+
+      expect(dst.goals.all, src.goals.all);
+      expect(dst.categories.byId('cat_mercado')!.parentId, 'cat_alimentacao');
+      expect(dst.transactions.byId('tagged')!.tags, ['viagem', 'casa']);
+      expect(dst.rules.byId('r_tag')!.tags, ['casa']);
+    },
+  );
+
+  test('backup sem goals: metas vazias; meta com conta ausente some', () async {
+    final src = await _bootstrap();
+    final dst = await _bootstrap(demo: false);
+    await dst.goals.upsert(
+      Goal(id: 'local', name: 'Local', accountId: 'conta_x', targetCents: 100),
+    );
+    final map =
+        jsonDecode(BackupService.exportJson(src)) as Map<String, dynamic>;
+    map.remove('goals');
+
+    await BackupService.importJson(dst, jsonEncode(map));
+    expect(dst.goals.all, isEmpty);
+
+    final accountId = src.accounts.all.first.id;
+    map['goals'] = [
+      Goal(
+        id: 'ok',
+        name: 'OK',
+        accountId: accountId,
+        targetCents: 100,
+      ).toMap(),
+      Goal(
+        id: 'orfa',
+        name: 'Órfã',
+        accountId: 'conta_fantasma',
+        targetCents: 100,
+      ).toMap(),
+    ];
+    await BackupService.importJson(dst, jsonEncode(map));
+    expect(dst.goals.all.map((g) => g.id), ['ok']);
+  });
+
+  test(
+    'backup com meta de alvo 0 ou nulo: FormatException e nada gravado',
+    () async {
+      final src = await _bootstrap();
+      final dst = await _bootstrap(demo: false);
+      await dst.goals.upsert(
+        Goal(
+          id: 'local',
+          name: 'Local',
+          accountId: 'conta_x',
+          targetCents: 100,
+        ),
+      );
+      final antes = _state(dst);
+      final accountId = src.accounts.all.first.id;
+      for (final alvo in [0, null]) {
+        final map =
+            jsonDecode(BackupService.exportJson(src)) as Map<String, dynamic>;
+        map['goals'] = [
+          {
+            'id': 'ruim',
+            'name': 'Ruim',
+            'accountId': accountId,
+            'targetCents': alvo,
+          },
+        ];
+        await expectLater(
+          BackupService.importJson(dst, jsonEncode(map)),
+          throwsA(
+            isA<FormatException>().having(
+              (e) => e.message,
+              'message',
+              'Backup com meta de alvo inválido',
+            ),
+          ),
+        );
+      }
+      expect(_state(dst), antes);
+      expect(dst.goals.byId('local'), isNotNull);
+    },
+  );
+
+  test(
+    'CSV: cabeçalho termina em Tags; subcategoria como Pai › Filha; tags com vírgula',
+    () async {
+      final s = await _bootstrap();
+      await s.categories.upsert(
+        s.categories.byId('cat_mercado')!.copyWith(parentId: 'cat_alimentacao'),
+      );
+      await s.transactions.upsert(
+        Transaction(
+          id: 'sub',
+          type: TransactionType.expense,
+          amountCents: 700,
+          date: DateTime(2026, 11, 10),
+          description: 'Compra de mercado',
+          accountId: s.accounts.all.first.id,
+          categoryId: 'cat_mercado',
+          tags: const ['a', 'b'],
+        ),
+      );
+      final lines = BackupService.transactionsCsv(s).split('\r\n');
+
+      expect(lines.first, endsWith(';Notas;Tags'));
+      final line = lines.firstWhere((l) => l.contains('Compra de mercado'));
+      expect(line, contains(';Alimentação › Mercado;'));
+      expect(line, endsWith(';a, b'));
+    },
+  );
 
   test('import descarta regra e transferência com vínculo órfão', () async {
     final src = await _bootstrap();
@@ -388,6 +549,7 @@ void main() {
     'fm_rules',
     'fm_import_profiles',
     'fm_dictionary',
+    'fm_goals',
   ]) {
     test('import com falha em $box restaura tudo (tudo-ou-nada)', () async {
       final src = await _bootstrap();
@@ -422,6 +584,22 @@ void main() {
           categoryName: 'Mercado',
         ),
       );
+      await dst.goals.upsert(
+        Goal(
+          id: 'local_meta',
+          name: 'Local',
+          accountId: dst.accounts.all.first.id,
+          targetCents: 5000,
+        ),
+      );
+      await src.goals.upsert(
+        Goal(
+          id: 'backup_meta',
+          name: 'Do backup',
+          accountId: src.accounts.all.first.id,
+          targetCents: 9000,
+        ),
+      );
       final json = BackupService.exportJson(src);
       final before = _state(dst);
 
@@ -432,6 +610,7 @@ void main() {
       );
 
       expect(_state(dst), before);
+      expect(dst.goals.byId('local_meta'), isNotNull);
       expect(dst.transactions.byId('local'), isNotNull);
       expect(dst.settings.value.mode, AppMode.ultra);
     });

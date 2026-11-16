@@ -1,4 +1,5 @@
 import '../../../core/utils/text_normalize.dart';
+import '../../categories/domain/category_tree.dart';
 import '../../categories/domain/transaction_category.dart';
 
 /// Entrada do dicionário de estabelecimentos. Guarda o nome da categoria, não o id,
@@ -219,21 +220,73 @@ List<DictionaryEntry> defaultDictionary() => [
     ),
 ];
 
-/// id da categoria cujo nome (foldText) bate com [name]; senão o fallback do dicionário; senão null.
+/// Separador de caminho com espaços: ' › ' ou ' > '. Sem espaços ('A>B') não divide.
+final RegExp _pathSepRe = RegExp(
+  '${RegExp.escape(kCategoryPathSeparator)}| > ',
+);
+
+/// id da categoria para [name] (SPEC §5.13): nome inteiro primeiro (ex.: 'A>B'), senão caminho 'Pai › Filha', senão nome simples, senão fallback; senão null.
 String? resolveCategoryByName(
   String name,
   Iterable<TransactionCategory> categories,
 ) {
-  final folded = foldText(name);
+  final cats = categories.toList();
+  final whole = _idByName(foldText(name.trim()), cats);
+  if (whole != null) {
+    return whole;
+  }
+  var wanted = name;
+  final parts = name
+      .split(_pathSepRe)
+      .map((p) => p.trim())
+      .where((p) => p.isNotEmpty)
+      .toList();
+  if (parts.length == 2) {
+    final id = _childIdByPath(parts[0], parts[1], cats);
+    if (id != null) {
+      return id;
+    }
+    wanted = parts[1];
+  }
+  final folded = foldText(wanted);
+  final direct = _idByName(folded, cats);
+  if (direct != null) {
+    return direct;
+  }
   final fallback = kDictionaryFallbacks[folded];
-  for (final wanted in [folded, ?fallback]) {
-    for (final c in categories) {
-      if (foldText(c.name) == wanted) {
-        return c.id;
+  return fallback == null ? null : _idByName(fallback, cats);
+}
+
+/// Filha F de uma raiz R (parentId null) com os nomes dados; null se não houver.
+String? _childIdByPath(
+  String rootName,
+  String childName,
+  List<TransactionCategory> cats,
+) {
+  final root = foldText(rootName);
+  final child = foldText(childName);
+  for (final r in cats) {
+    if (r.parentId != null || foldText(r.name) != root) {
+      continue;
+    }
+    for (final f in cats) {
+      if (f.parentId == r.id && foldText(f.name) == child) {
+        return f.id;
       }
     }
   }
   return null;
+}
+
+/// Raiz homônima (1ª na ordem de entrada) ou única candidata; 2+ subcategorias homônimas → null (ambíguo).
+String? _idByName(String folded, List<TransactionCategory> cats) {
+  final same = cats.where((c) => foldText(c.name) == folded).toList();
+  for (final c in same) {
+    if (c.parentId == null) {
+      return c.id;
+    }
+  }
+  return same.length == 1 ? same.single.id : null;
 }
 
 /// [pattern] casa em [foldedDescription] numa palavra inteira: começa palavra (início ou caractere anterior

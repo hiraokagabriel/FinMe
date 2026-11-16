@@ -15,16 +15,21 @@ class InlineCategoryCell extends StatelessWidget {
     required this.categoryId,
     required this.options,
     required this.onChanged,
+    this.labelOf,
   });
 
   final String? categoryId;
   final List<TransactionCategory> options;
   final ValueChanged<String?> onChanged;
 
+  /// Texto de cada opção e do valor exibido ('Pai › Filha'); null → `c.name`.
+  final String Function(TransactionCategory c)? labelOf;
+
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
     final known = options.any((o) => o.id == categoryId);
+    String text(TransactionCategory o) => labelOf?.call(o) ?? o.name;
     return DropdownButtonHideUnderline(
       child: DropdownButton<String?>(
         value: known ? categoryId : null,
@@ -40,7 +45,7 @@ class InlineCategoryCell extends StatelessWidget {
             child: Text('Sem categoria'),
           ),
           for (final o in options)
-            DropdownMenuItem<String?>(value: o.id, child: Text(o.name)),
+            DropdownMenuItem<String?>(value: o.id, child: Text(text(o))),
         ],
         onChanged: onChanged,
       ),

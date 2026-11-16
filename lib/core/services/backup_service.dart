@@ -7,7 +7,9 @@ import '../../app/app_scope.dart';
 import '../../app/bootstrap.dart';
 import '../../features/accounts/domain/account.dart';
 import '../../features/cards/domain/payment_card.dart';
+import '../../features/categories/domain/category_tree.dart';
 import '../../features/categories/domain/transaction_category.dart';
+import '../../features/goals/domain/goal.dart';
 import '../../features/importing/domain/import_profile.dart';
 import '../../features/importing/domain/merchant_dictionary.dart';
 import '../../features/recurring/domain/recurring_rule.dart';
@@ -34,6 +36,7 @@ class BackupService {
     'Categoria',
     'Parcela',
     'Notas',
+    'Tags',
   ];
 
   static String exportJson(AppServices s) => jsonEncode({
@@ -49,6 +52,7 @@ class BackupService {
     'rules': [for (final r in s.rules.all) r.toMap()],
     'importProfiles': [for (final p in s.importProfiles.all) p.toMap()],
     'dictionary': [for (final e in s.dictionary.all) e.toMap()],
+    'goals': [for (final g in s.goals.all) g.toMap()],
   });
 
   /// Lê tudo antes de gravar: JSON ou registro inválido lança [FormatException] e nada muda.
@@ -72,6 +76,7 @@ class BackupService {
       rules: s.rules.all,
       importProfiles: s.importProfiles.all,
       dictionary: s.dictionary.all,
+      goals: s.goals.all,
     );
     try {
       await s.accounts.replaceAll(b.accounts);
@@ -83,6 +88,7 @@ class BackupService {
       await s.rules.replaceAll(b.rules);
       await s.importProfiles.replaceAll(b.importProfiles);
       await s.dictionary.replaceAll(b.dictionary);
+      await s.goals.replaceAll(b.goals);
       await materializeRecurring(s);
     } catch (e, st) {
       // Cada restauração tem try próprio: uma falha não impede as demais.
@@ -96,6 +102,7 @@ class BackupService {
         () => s.rules.replaceAll(retrato.rules),
         () => s.importProfiles.replaceAll(retrato.importProfiles),
         () => s.dictionary.replaceAll(retrato.dictionary),
+        () => s.goals.replaceAll(retrato.goals),
       ];
       for (final restore in restores) {
         try {
@@ -114,6 +121,7 @@ class BackupService {
       for (final t in s.transactions.all)
         if (month == null || month.contains(t.date)) t,
     ]..sort((a, b) => a.date.compareTo(b.date));
+    final tree = CategoryTree(s.categories.all);
     return const ListToCsvConverter(fieldDelimiter: ';').convert([
       _csvHeader,
       for (final t in list)
@@ -128,11 +136,13 @@ class BackupService {
           _csvText(_destinationOf(t, s)),
           // Transferência e pagamento de fatura não entram no total: o dinheiro só muda de lugar.
           _countsInTotal(t, s) ? 'sim' : 'não',
-          _csvText(_nameOf(t.categoryId, s.categories.byId, (c) => c.name)),
+          // "Pai › Filha" (SPEC §5.20); id desconhecido ou nulo sai vazio.
+          _csvText(tree.label(t.categoryId ?? '')),
           t.installmentIndex == null
               ? ''
               : '${t.installmentIndex}/${t.installmentCount}',
           _csvText(t.notes ?? ''),
+          _csvText(t.tags.join(', ')),
         ],
     ]);
   }
@@ -173,6 +183,7 @@ class BackupService {
     List<TransactionRule> rules,
     List<ImportProfile> importProfiles,
     List<DictionaryEntry> dictionary,
+    List<Goal> goals,
   })
   _parse(Map<String, dynamic> data) {
     try {
@@ -218,6 +229,11 @@ class BackupService {
         dictionary: data.containsKey('dictionary')
             ? _rows(_maps(data, 'dictionary'), DictionaryEntry.fromMap)
             : defaultDictionary(),
+        // Meta com conta ausente no backup é descartada; chave ausente → []. Conta é obrigatória, por isso não usa _linked.
+        goals: _rows([
+          for (final row in _goalRows(data))
+            if (accountIds.contains(row['accountId'])) row,
+        ], Goal.fromMap),
       );
     } on TypeError catch (e) {
       throw FormatException('Backup com campos inválidos: $e');
@@ -228,6 +244,18 @@ class BackupService {
     Map<String, dynamic> data,
     String key,
   ) => [for (final row in data[key] as List) row as Map<String, dynamic>];
+
+  /// Alvo de meta nulo ou ≤ 0 invalida o backup inteiro (nada é gravado).
+  static List<Map<String, dynamic>> _goalRows(Map<String, dynamic> data) {
+    final rows = _optMaps(data, 'goals');
+    for (final row in rows) {
+      final target = row['targetCents'];
+      if (target is! num || target <= 0) {
+        throw const FormatException('Backup com meta de alvo inválido');
+      }
+    }
+    return rows;
+  }
 
   static List<Map<String, dynamic>> _optMaps(
     Map<String, dynamic> data,

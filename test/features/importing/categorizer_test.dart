@@ -256,6 +256,58 @@ void main() {
     expect(r.renamedDescription, 'Xpto Exemplo');
   });
 
+  group('tags (Fase 10)', () {
+    test('tags de todas as regras que casam, em ordem de prioridade', () {
+      final cz = _cz(
+        rules: const [
+          TransactionRule(
+            id: 'r1',
+            pattern: 'UBER',
+            categoryId: 'cat_transporte',
+            tags: ['app'],
+          ),
+          TransactionRule(
+            id: 'r2',
+            pattern: 'TRIP',
+            priority: 1,
+            tags: ['viagem'],
+          ),
+        ],
+      );
+      final r = cz.categorize('UBER *TRIP', isIncome: false);
+      expect(r.categoryId, 'cat_transporte');
+      expect(r.source, SuggestionSource.rule);
+      expect(r.tags, ['app', 'viagem']);
+    });
+
+    test('regra só com tags sem categoria: tags valem sem categoria', () {
+      final cz = _cz(
+        rules: const [
+          TransactionRule(id: 'r', pattern: 'XPTO', tags: ['x']),
+        ],
+      );
+      final r = cz.categorize('XPTO QWERTY', isIncome: false);
+      expect(r.categoryId, isNull);
+      expect(r.tags, ['x']);
+    });
+
+    test('descrição sem regra cai no dicionário com tags vazias', () {
+      final cz = _cz(
+        rules: const [
+          TransactionRule(
+            id: 'r',
+            pattern: 'UBER',
+            categoryId: 'cat_transporte',
+            tags: ['app'],
+          ),
+        ],
+      );
+      final r = cz.categorize('PADARIA PAO BOM', isIncome: false);
+      expect(r.source, SuggestionSource.dictionary);
+      expect(r.tags, isEmpty);
+    });
+  });
+
   test('confidenceLabel nos limiares', () {
     expect(confidenceLabel(0.8), 'alta');
     expect(confidenceLabel(0.79), 'média');

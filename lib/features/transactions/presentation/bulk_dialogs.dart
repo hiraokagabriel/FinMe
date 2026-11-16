@@ -14,10 +14,12 @@ enum BulkDeleteScope { selected, wholeGroups }
 const _noCategoryKey = '__sem_categoria__';
 
 /// Escolhe a categoria para a seleção. Cancelar ou fechar → null.
+/// Sem [labelOf]: texto `c.name`, ordenado por nome. Com ele: ordem recebida (hierarquia da página).
 Future<CategoryChoice?> showBulkCategoryDialog(
   BuildContext context, {
   required int count,
   required List<TransactionCategory> categories,
+  String Function(TransactionCategory c)? labelOf,
 }) {
   final expenses = categories
       .where((c) => c.kind == CategoryKind.expense)
@@ -26,6 +28,9 @@ Future<CategoryChoice?> showBulkCategoryDialog(
       .where((c) => c.kind == CategoryKind.income)
       .toList(growable: false);
   final byId = {for (final c in categories) c.id: c};
+  String text(TransactionCategory c) => labelOf?.call(c) ?? c.name;
+  List<TransactionCategory> ordered(List<TransactionCategory> list) =>
+      labelOf == null ? _byName(list) : list;
   String? chosen;
   var answered = false;
   return showDialog<CategoryChoice>(
@@ -54,12 +59,12 @@ Future<CategoryChoice?> showBulkCategoryDialog(
                   value: _noCategoryKey,
                   child: Text('Sem categoria'),
                 ),
-                for (final c in _byName(expenses))
-                  DropdownMenuItem(value: c.id, child: Text(c.name)),
-                for (final c in _byName(incomes))
+                for (final c in ordered(expenses))
+                  DropdownMenuItem(value: c.id, child: Text(text(c))),
+                for (final c in ordered(incomes))
                   DropdownMenuItem(
                     value: c.id,
-                    child: Text('${c.name} (receita)'),
+                    child: Text('${text(c)} (receita)'),
                   ),
               ],
               onChanged: (v) => setDialog(() => chosen = v),

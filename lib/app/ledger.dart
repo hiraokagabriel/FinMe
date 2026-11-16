@@ -14,14 +14,19 @@ import '../features/cards/domain/invoice.dart';
 import '../features/cards/domain/payment_card.dart';
 import '../features/categories/domain/category_spending.dart';
 import '../features/categories/domain/transaction_category.dart';
+import '../features/categories/domain/category_tree.dart';
 import '../features/forecast/domain/forecast.dart';
 import '../features/forecast/domain/invoice_timeline.dart' as timeline;
+import '../features/forecast/domain/spendable.dart' as spend;
+import '../features/goals/domain/goal.dart';
+import '../features/goals/domain/goal_math.dart' as goal_math;
 import '../features/importing/domain/categorizer.dart';
 import '../features/importing/domain/category_history.dart';
 import '../features/importing/domain/merchant_dictionary.dart';
 import '../features/recurring/domain/recurrence.dart';
 import '../features/recurring/domain/recurring_rule.dart';
 import '../features/rules/domain/transaction_rule.dart';
+import '../features/transactions/domain/tags.dart';
 import '../features/transactions/domain/transaction.dart';
 
 /// Visões calculadas sobre os repositórios. Getters são preguiçosos e memoizados;
@@ -38,6 +43,7 @@ class Ledger extends ChangeNotifier {
     required this.clock,
     this.rules,
     this.dictionary,
+    this.goals,
     this.onDayChanged,
     this.scheduleMidnightTimer = true,
   }) {
@@ -61,6 +67,9 @@ class Ledger extends ChangeNotifier {
   /// Fase 8: opcionais para que testes que constroem o Ledger direto sigam válidos (null = vazio).
   final CollectionRepository<TransactionRule>? rules;
   final CollectionRepository<DictionaryEntry>? dictionary;
+
+  /// Fase 10: opcional como as anteriores (null = sem metas).
+  final CollectionRepository<Goal>? goals;
 
   /// Chamado na virada de dia (bootstrap passa `materializeRecurring`). Evita import circular.
   final Future<void> Function()? onDayChanged;
@@ -88,6 +97,11 @@ class Ledger extends ChangeNotifier {
   List<history.MonthSnapshot>? _history;
   ({int current, int previous})? _expenseMtd;
   Categorizer? _categorizer;
+  CategoryTree? _categoryTree;
+  final _rolled = <YearMonth, Map<String?, int>>{};
+  Map<String, int>? _reserved;
+  spend.SpendableToday? _spendable;
+  List<String>? _allTags;
 
   List<Listenable> get _sources => [
     accounts,
@@ -98,6 +112,7 @@ class Ledger extends ChangeNotifier {
     settings,
     ?rules,
     ?dictionary,
+    ?goals,
   ];
 
   /// Dia do cache. Se o relógio andou para outro dia, invalida e agenda [onDayChanged].
@@ -286,6 +301,48 @@ class Ledger extends ChangeNotifier {
     return _spending[month] ??= spendingByCategory(transactions.all, month);
   }
 
+  /// Árvore de categorias (Fase 10). Recriada a cada mudança de categorias.
+  CategoryTree get categoryTree {
+    _ensureFresh();
+    return _categoryTree ??= CategoryTree(categories.all);
+  }
+
+  /// Gasto do mês com subcategorias somadas na raiz (SPEC §5.20).
+  Map<String?, int> rolledSpendingFor(YearMonth month) {
+    _ensureFresh();
+    return _rolled[month] ??= categoryTree.rollUp(spendingFor(month));
+  }
+
+  /// Reserva ativa por conta das metas (SPEC §5.22). Vazio sem `goals`.
+  Map<String, int> get reservedByAccount {
+    _ensureFresh();
+    return _reserved ??= goal_math.reservedByAccount(goals?.all ?? const []);
+  }
+
+  /// "Posso gastar hoje" até a próxima receita ou fim do mês (SPEC §5.23).
+  spend.SpendableToday get spendableToday {
+    _ensureFresh();
+    return _spendable ??= spend.spendableToday(
+      forecast: forecast,
+      recurring: recurring.all,
+      accountsById: accountsById,
+      reservedByAccount: reservedByAccount,
+      horizonEnd: ForecastService.horizonEnd(
+        today: today,
+        months: settings.value.forecastMonths,
+        minDays: invoiceTimelineDays,
+      ),
+    );
+  }
+
+  /// Tags de todas as transações, das mais usadas às menos usadas (SPEC §5.21).
+  List<String> get allTags {
+    _ensureFresh();
+    return _allTags ??= List.unmodifiable([
+      for (final u in tagUsage(transactions.all)) u.tag,
+    ]);
+  }
+
   /// Saídas de conta em [days] dias: despesas provisionadas (inclusive atrasadas e boletos)
   /// e ocorrências projetadas de despesas de conta. Memoizado por `days`; lista imutável.
   List<Transaction> upcoming({int days = 30}) {
@@ -371,6 +428,11 @@ class Ledger extends ChangeNotifier {
     _history = null;
     _expenseMtd = null;
     _categorizer = null;
+    _categoryTree = null;
+    _rolled.clear();
+    _reserved = null;
+    _spendable = null;
+    _allTags = null;
   }
 
   void _invalidate() {

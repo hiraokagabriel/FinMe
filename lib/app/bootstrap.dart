@@ -7,6 +7,7 @@ import '../core/utils/date_utils.dart';
 import '../features/accounts/domain/account.dart';
 import '../features/cards/domain/payment_card.dart';
 import '../features/categories/domain/transaction_category.dart';
+import '../features/goals/domain/goal.dart';
 import '../features/importing/domain/import_profile.dart';
 import '../features/importing/domain/merchant_dictionary.dart';
 import '../features/recurring/domain/recurrence.dart';
@@ -27,6 +28,7 @@ const _boxes = [
   'fm_rules',
   'fm_import_profiles',
   'fm_dictionary',
+  'fm_goals',
 ];
 
 /// Monta os serviços do app. Sem [storeFactory] usa Hive; testes passam `MemoryRecordStore`.
@@ -95,6 +97,13 @@ Future<AppServices> bootstrap({
     idOf: (e) => e.id,
   );
 
+  final goals = CollectionRepository<Goal>(
+    store: stores['fm_goals']!,
+    fromMap: Goal.fromMap,
+    toMap: (g) => g.toMap(),
+    idOf: (g) => g.id,
+  );
+
   if (categories.isEmpty) {
     await categories.upsertAll(defaultCategories());
   }
@@ -112,6 +121,7 @@ Future<AppServices> bootstrap({
     settings: settings,
     rules: rules,
     dictionary: dictionary,
+    goals: goals,
     clock: now,
     onDayChanged: () => materializeRecurring(services),
   );
@@ -125,6 +135,7 @@ Future<AppServices> bootstrap({
     rules: rules,
     importProfiles: importProfiles,
     dictionary: dictionary,
+    goals: goals,
     ledger: ledger,
     clock: now,
   );

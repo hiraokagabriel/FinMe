@@ -270,4 +270,87 @@ void main() {
       expect(out.map((t) => t.id).toList(), ['t1']);
     });
   });
+
+  group('tags da regra (Fase 10)', () {
+    test('round-trip com tags; ausente → []; normaliza no fromMap', () {
+      const r = TransactionRule(id: 'r', pattern: 'x', tags: ['app', 'viagem']);
+      expect(TransactionRule.fromMap(r.toMap()), r);
+      expect(
+        TransactionRule.fromMap({'id': 'r', 'pattern': 'x'}).tags,
+        isEmpty,
+      );
+      expect(
+        TransactionRule.fromMap({
+          'id': 'r',
+          'pattern': 'x',
+          'tags': [' #a', 'A', 'b'],
+        }).tags,
+        ['a', 'b'],
+      );
+      expect(
+        const TransactionRule(id: 'r', pattern: 'x').toMap(),
+        isNot(contains('tags')),
+      );
+    });
+
+    test('igualdade considera tags e copyWith(tags: []) limpa', () {
+      const a = TransactionRule(id: 'r', pattern: 'x', tags: ['a', 'b']);
+      const b = TransactionRule(id: 'r', pattern: 'x', tags: ['b', 'a']);
+      expect(a == b, isFalse);
+      expect(a.copyWith(tags: const []).tags, isEmpty);
+      expect(a.copyWith().tags, ['a', 'b']);
+    });
+
+    test('regras que casam acrescentam tags em ordem', () {
+      final compiled = compileRules(const [
+        TransactionRule(id: 'a', pattern: 'UBER', tags: ['transporte']),
+        TransactionRule(id: 'b', pattern: 'TRIP', tags: ['viagem']),
+      ]);
+      final out = reapplyRules(compiled, [
+        _tx('t1', description: 'UBER *TRIP'),
+      ], categoriesById: _categories);
+      expect(out.single.tags, ['transporte', 'viagem']);
+    });
+
+    test('tag já presente (mesmo com outra caixa) não conta como mudança', () {
+      final compiled = compileRules(const [
+        TransactionRule(id: 'a', pattern: 'UBER', tags: ['transporte']),
+        TransactionRule(id: 'b', pattern: 'TRIP', tags: ['viagem']),
+      ]);
+      final tx = _tx(
+        't1',
+        description: 'UBER *TRIP',
+      ).copyWith(tags: ['Transporte', 'viagem']);
+      expect(
+        reapplyRules(compiled, [tx], categoriesById: _categories),
+        isEmpty,
+      );
+    });
+
+    test('regra só com tags muda só as tags e nunca remove', () {
+      final compiled = compileRules(const [
+        TransactionRule(id: 'r', pattern: 'exemplo', tags: ['app']),
+      ]);
+      final tx = _tx('t1', categoryId: 'cat_mercado').copyWith(tags: ['casa']);
+      final out = reapplyRules(compiled, [
+        tx,
+      ], categoriesById: _categories).single;
+      expect(out.tags, ['casa', 'app']);
+      expect(out.categoryId, 'cat_mercado');
+      expect(out.description, tx.description);
+    });
+
+    test('idempotente: segunda aplicação não muda nada', () {
+      final compiled = compileRules(const [
+        TransactionRule(id: 'r', pattern: 'exemplo', tags: ['app']),
+      ]);
+      final first = reapplyRules(compiled, [
+        _tx('t1'),
+      ], categoriesById: _categories);
+      expect(
+        reapplyRules(compiled, first, categoriesById: _categories),
+        isEmpty,
+      );
+    });
+  });
 }

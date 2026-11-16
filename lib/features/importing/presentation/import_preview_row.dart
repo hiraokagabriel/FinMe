@@ -135,6 +135,7 @@ class ImportPreviewRow extends StatelessWidget {
     required this.categoryOptions,
     required this.onInclude,
     required this.onCategory,
+    this.labelOf,
     this.onCreateInstallments,
     this.onCreateRule,
   });
@@ -144,6 +145,9 @@ class ImportPreviewRow extends StatelessWidget {
 
   /// Já filtradas pelo tipo da linha.
   final List<TransactionCategory> categoryOptions;
+
+  /// Texto do item de categoria; padrão `c.name` (a prévia passa `'Pai › Filha'`).
+  final String Function(TransactionCategory c)? labelOf;
   final ValueChanged<bool> onInclude;
   final ValueChanged<String?> onCategory;
   final ValueChanged<bool>? onCreateInstallments;
@@ -226,7 +230,10 @@ class ImportPreviewRow extends StatelessWidget {
         for (final cat in categoryOptions)
           DropdownMenuItem<String?>(
             value: cat.id,
-            child: Text(cat.name, overflow: TextOverflow.ellipsis),
+            child: Text(
+              labelOf?.call(cat) ?? cat.name,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
       ],
       onChanged: onCategory,

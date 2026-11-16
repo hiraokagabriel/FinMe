@@ -4,6 +4,7 @@ import '../../../core/utils/date_utils.dart';
 import '../../../core/utils/id.dart';
 import '../../../core/utils/text_normalize.dart';
 import '../../cards/domain/payment_card.dart';
+import '../../transactions/domain/tags.dart';
 import '../../transactions/domain/transaction.dart';
 import 'categorizer.dart';
 import 'import_installments.dart';
@@ -283,6 +284,7 @@ ImportPlan buildImportPlan(
           categoryId: r.categoryEdited
               ? r.categoryId
               : (planned.categoryId ?? r.categoryId),
+          tags: normalizeTags([...planned.tags, ...r.suggestion.tags]),
         ),
       );
       continue;
@@ -306,6 +308,7 @@ ImportPlan buildImportPlan(
           status: status,
           externalId: line.fitid,
           importedDescription: line.description,
+          tags: r.suggestion.tags,
         ),
       );
       continue;
@@ -337,6 +340,7 @@ ImportPlan buildImportPlan(
           installmentCount: mark.count,
           externalId: isImported ? line.fitid : null,
           importedDescription: isImported ? line.description : null,
+          tags: r.suggestion.tags,
         ),
       );
     }

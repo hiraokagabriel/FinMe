@@ -89,6 +89,10 @@ PaletteEntry _transactionEntry(
   ValueChanged<Transaction> onOpen,
 ) {
   final category = ledger.categoriesById[t.categoryId];
+  // Rótulo com pai ('Compras › Mercado'); '' quando não há categoria.
+  final categoryPath = t.categoryId == null
+      ? ''
+      : ledger.categoryTree.label(t.categoryId!);
   final place =
       ledger.cardsById[t.cardId]?.name ??
       ledger.accountsById[t.accountId]?.name;
@@ -97,7 +101,12 @@ PaletteEntry _transactionEntry(
       : '';
   return PaletteEntry(
     label: '${t.description}$installment',
-    subtitle: [formatDate(t.date), ?place, ?category?.name].join(' · '),
+    subtitle: [
+      formatDate(t.date),
+      ?place,
+      if (categoryPath.isNotEmpty) categoryPath,
+      if (t.tags.isNotEmpty) t.tags.map((tag) => '#$tag').join(' '),
+    ].join(' · '),
     icon: category == null
         ? Icons.label_outline
         : categoryIcon(category.iconCodePoint),

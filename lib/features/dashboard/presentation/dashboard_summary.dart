@@ -3,6 +3,7 @@ import '../../../core/models/year_month.dart';
 import '../../accounts/domain/account.dart';
 import '../../accounts/domain/monthly_history.dart';
 import '../../cards/domain/invoice.dart';
+import '../../categories/domain/category_tree.dart';
 import '../../cards/domain/payment_card.dart';
 import '../../forecast/domain/forecast.dart';
 import '../../forecast/domain/invoice_timeline.dart';
@@ -30,11 +31,20 @@ class NegativeAccount {
 }
 
 /// Gasto do mês por categoria. `name` já resolvido ("Sem categoria" quando nulo).
+/// Ultra: `children` tem as subcategorias com gasto e, se houver, 'Sem subcategoria'
+/// (gasto direto na raiz, com `id` igual ao da raiz).
 class CategoryRow {
-  const CategoryRow({required this.name, required this.cents});
+  const CategoryRow({
+    required this.name,
+    required this.cents,
+    this.id,
+    this.children = const [],
+  });
 
+  final String? id;
   final String name;
   final int cents;
+  final List<CategoryRow> children;
 }
 
 /// Números do painel, calculados uma vez por build a partir do [Ledger].
@@ -130,9 +140,11 @@ class DashboardSummary {
     final history = ultra ? ledger.monthlyHistory : null;
     final mtd = ultra ? ledger.expenseMonthToDate : null;
 
+    final month = YearMonth.fromDate(today);
+    final direct = ledger.spendingFor(month);
     final spending =
         ledger
-            .spendingFor(YearMonth.fromDate(today))
+            .rolledSpendingFor(month)
             .entries
             .where((e) => e.value > 0)
             .toList()
@@ -149,7 +161,14 @@ class DashboardSummary {
       upcoming: ledger.upcoming().take(ultra ? 15 : 8).toList(),
       categories: [
         for (final e in spending.take(ultra ? 8 : 3))
-          CategoryRow(name: _categoryName(ledger, e.key), cents: e.value),
+          CategoryRow(
+            id: e.key,
+            name: _categoryName(ledger, e.key),
+            cents: e.value,
+            children: ultra && e.key != null
+                ? _childRows(ledger.categoryTree, e.key!, direct)
+                : const [],
+          ),
       ],
       attention: [
         for (final d in ledger.invoiceTimeline)
@@ -184,5 +203,29 @@ class DashboardSummary {
       return 'Sem categoria';
     }
     return ledger.categoriesById[id]?.name ?? 'Sem categoria';
+  }
+
+  /// Subcategorias com gasto direto > 0, mais 'Sem subcategoria' (gasto na raiz), por valor desc.
+  /// Raiz sem filhas → vazio (sem chevron).
+  static List<CategoryRow> _childRows(
+    CategoryTree tree,
+    String rootId,
+    Map<String?, int> direct,
+  ) {
+    if (!tree.hasChildren(rootId)) {
+      return const [];
+    }
+    final rows = [
+      for (final child in tree.childrenOf(rootId))
+        if ((direct[child.id] ?? 0) > 0)
+          CategoryRow(id: child.id, name: child.name, cents: direct[child.id]!),
+      if ((direct[rootId] ?? 0) > 0)
+        CategoryRow(
+          id: rootId,
+          name: 'Sem subcategoria',
+          cents: direct[rootId]!,
+        ),
+    ];
+    return rows..sort((a, b) => b.cents.compareTo(a.cents));
   }
 }

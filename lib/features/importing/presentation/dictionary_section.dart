@@ -7,6 +7,7 @@ import '../../../core/theme/app_text.dart';
 import '../../../core/utils/id.dart';
 import '../../../core/utils/text_normalize.dart';
 import '../../../core/widgets/widgets.dart';
+import '../../categories/domain/category_tree.dart';
 import '../../categories/domain/transaction_category.dart';
 import '../domain/merchant_dictionary.dart';
 
@@ -212,8 +213,12 @@ class _DictionaryEntryDialogState extends State<_DictionaryEntryDialog> {
   late final _pattern = TextEditingController(
     text: widget.initial?.pattern ?? '',
   );
-  late final List<TransactionCategory> _categories = _sortedCategories();
-  late String? _category = _initialCategoryName();
+  late final CategoryTree _tree = widget.services.ledger.categoryTree;
+  late final List<TransactionCategory> _options = [
+    ..._tree.options(CategoryKind.expense),
+    ..._tree.options(CategoryKind.income),
+  ];
+  late String? _categoryId = _initialCategoryId();
   bool _saving = false;
 
   @override
@@ -222,27 +227,28 @@ class _DictionaryEntryDialogState extends State<_DictionaryEntryDialog> {
     super.dispose();
   }
 
-  List<TransactionCategory> _sortedCategories() =>
-      [...widget.services.categories.all]
-        ..sort((a, b) => a.name.compareTo(b.name));
-
-  /// Nome da categoria que o padrão resolve hoje (inclui fallback); null se não resolve.
-  String? _initialCategoryName() {
+  /// Categoria que o padrão resolve hoje (inclui caminho e fallback); null se não resolve.
+  String? _initialCategoryId() {
     final initial = widget.initial;
     if (initial == null) {
       return null;
     }
-    final id = resolveCategoryByName(
+    return resolveCategoryByName(
       initial.categoryName,
       widget.services.categories.all,
     );
-    return id == null ? null : widget.services.categories.byId(id)?.name;
+  }
+
+  /// Rótulo do item: 'Pai › Filha'; receitas ganham ' (receita)' para não confundir homônimas.
+  String _itemLabel(TransactionCategory c) {
+    final label = _tree.label(c.id);
+    return c.kind == CategoryKind.income ? '$label (receita)' : label;
   }
 
   Future<void> _save() async {
     final valid = _formKey.currentState?.validate() ?? false;
-    final category = _category;
-    if (_saving || !valid || category == null) {
+    final categoryId = _categoryId;
+    if (_saving || !valid || categoryId == null) {
       return;
     }
     setState(() => _saving = true);
@@ -251,7 +257,7 @@ class _DictionaryEntryDialogState extends State<_DictionaryEntryDialog> {
         DictionaryEntry(
           id: widget.initial?.id ?? 'dict_${newId()}',
           pattern: foldText(_pattern.text.trim()),
-          categoryName: category,
+          categoryName: _tree.label(categoryId),
         ),
       );
       if (mounted) {
@@ -298,14 +304,14 @@ class _DictionaryEntryDialogState extends State<_DictionaryEntryDialog> {
                 ),
                 const SizedBox(height: AppSpace.md),
                 DropdownButtonFormField<String>(
-                  initialValue: _category,
+                  initialValue: _categoryId,
                   isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Categoria'),
                   items: [
-                    for (final c in _categories)
-                      DropdownMenuItem(value: c.name, child: Text(c.name)),
+                    for (final c in _options)
+                      DropdownMenuItem(value: c.id, child: Text(_itemLabel(c))),
                   ],
-                  onChanged: (value) => setState(() => _category = value),
+                  onChanged: (value) => setState(() => _categoryId = value),
                   validator: (value) =>
                       value == null ? 'Escolha a categoria' : null,
                 ),

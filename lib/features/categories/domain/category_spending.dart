@@ -1,5 +1,6 @@
 import '../../../core/models/year_month.dart';
 import '../../transactions/domain/transaction.dart';
+import 'category_tree.dart';
 import 'transaction_category.dart';
 
 /// Gasto por categoria no mês (só despesas; cartão incluso). Chave null = sem categoria.
@@ -42,16 +43,21 @@ class BudgetStatus {
 }
 
 /// Orçamentos das categorias com `monthlyBudgetCents > 0`, do maior ratio ao menor.
+/// Com `tree`, o orçamento de raiz cobre o gasto dela e das filhas (SPEC §5.6).
 List<BudgetStatus> budgetStatuses(
   Iterable<TransactionCategory> cats,
-  Map<String?, int> spending,
-) {
+  Map<String?, int> spending, {
+  CategoryTree? tree,
+}) {
+  final rolled = tree == null ? spending : tree.rollUp(spending);
   final statuses = [
     for (final c in cats)
       if (c.monthlyBudgetCents case final budget? when budget > 0)
         BudgetStatus(
           category: c,
-          spentCents: spending[c.id] ?? 0,
+          spentCents:
+              (tree != null && tree.isRoot(c.id) ? rolled : spending)[c.id] ??
+              0,
           budgetCents: budget,
         ),
   ];

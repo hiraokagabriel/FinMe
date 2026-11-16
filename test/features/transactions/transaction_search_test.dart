@@ -8,6 +8,7 @@ Transaction _tx(
   required int amountCents,
   required DateTime date,
   String? importedDescription,
+  List<String> tags = const [],
 }) => Transaction(
   id: id,
   type: TransactionType.expense,
@@ -15,6 +16,7 @@ Transaction _tx(
   date: date,
   description: description,
   importedDescription: importedDescription,
+  tags: tags,
 );
 
 final _t1 = _tx(
@@ -47,6 +49,21 @@ final _t5 = _tx(
   description: 'Netflix',
   amountCents: 5990,
   date: DateTime(2026, 11, 3),
+);
+// t1 e t2 com as tags do SPEC §5.17 (Fase 10).
+final _tagged1 = _tx(
+  't1',
+  description: 'UBER *TRIP',
+  amountCents: 2315,
+  date: DateTime(2026, 11, 5),
+  tags: const ['Viagem'],
+);
+final _tagged2 = _tx(
+  't2',
+  description: 'Uber Eats',
+  amountCents: 4590,
+  date: DateTime(2026, 11, 10),
+  tags: const ['trabalho', 'Viagem SP'],
 );
 
 void main() {
@@ -138,5 +155,25 @@ void main() {
       expect(hidden.search('uber'), [_t1]);
       expect(hidden.search('netflix'), [_t5]);
     });
+
+    test(
+      'tags (Fase 10): # filtra só por tag; token comum também casa tag',
+      () {
+        final tagged = TransactionSearchIndex([
+          _tagged1,
+          _tagged2,
+          _t3,
+          _t4,
+          _t5,
+        ]);
+        expect(tagged.search('#viag'), [_tagged2, _tagged1]);
+        expect(tagged.search('#trab'), [_tagged2]);
+        expect(tagged.search('#'), isEmpty);
+        expect(tagged.search('# #'), isEmpty);
+        expect(tagged.search('uber #trab'), [_tagged2]);
+        expect(tagged.search('#uber'), isEmpty);
+        expect(tagged.search('viagem').map((t) => t.id).toSet(), {'t1', 't2'});
+      },
+    );
   });
 }

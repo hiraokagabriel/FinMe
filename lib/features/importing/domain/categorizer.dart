@@ -4,6 +4,7 @@ import '../../../core/utils/text_normalize.dart';
 import '../../categories/domain/transaction_category.dart';
 import '../../rules/domain/rule_engine.dart';
 import '../../rules/domain/transaction_rule.dart';
+import '../../transactions/domain/tags.dart';
 import 'category_history.dart';
 import 'merchant_dictionary.dart';
 
@@ -19,6 +20,7 @@ class CategorizationResult {
     this.confidence = 0,
     this.ruleId,
     this.renamedDescription,
+    this.tags = const [],
   });
 
   final String? categoryId;
@@ -32,6 +34,9 @@ class CategorizationResult {
 
   /// `renameTo` da 1ª regra ativa que casa com `renameTo` não vazio.
   final String? renamedDescription;
+
+  /// Tags de todas as regras ativas que casam, normalizadas, em ordem de prioridade.
+  final List<String> tags;
 
   static const none = CategorizationResult();
 }
@@ -123,15 +128,18 @@ class Categorizer {
     String? permitted(String? id) =>
         id != null && _kindById[id] == kind ? id : null;
 
-    // 1. Regras: categoria da 1ª permitida; renomeio da 1ª com renameTo (independe da categoria).
+    // 1. Regras: categoria da 1ª permitida; renomeio da 1ª com renameTo (independe da categoria);
+    // tags de todas as que casam (sem `break`, para não perder tags das regras seguintes).
     String? renamed;
     String? ruleCat;
     String? ruleId;
+    final ruleTags = <String>[];
     for (final c in _rules) {
       if (!c.matches(description)) {
         continue;
       }
       renamed ??= _nonBlank(c.rule.renameTo);
+      ruleTags.addAll(c.rule.tags);
       if (ruleCat == null) {
         final id = permitted(c.rule.categoryId);
         if (id != null) {
@@ -139,10 +147,8 @@ class Categorizer {
           ruleId = c.rule.id;
         }
       }
-      if (ruleCat != null && renamed != null) {
-        break;
-      }
     }
+    final tags = List<String>.unmodifiable(normalizeTags(ruleTags));
 
     CategorizationResult hit(
       String id,
@@ -155,6 +161,7 @@ class Categorizer {
       confidence: confidence,
       ruleId: byRule,
       renamedDescription: renamed,
+      tags: tags,
     );
 
     if (ruleCat != null) {
@@ -202,6 +209,6 @@ class Categorizer {
     }
 
     // 5. Nada.
-    return CategorizationResult(renamedDescription: renamed);
+    return CategorizationResult(renamedDescription: renamed, tags: tags);
   }
 }

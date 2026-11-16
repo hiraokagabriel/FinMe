@@ -3,6 +3,7 @@
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/fuzzy.dart';
 import '../../../core/utils/text_normalize.dart';
+import 'tags.dart';
 import 'transaction.dart';
 
 final RegExp _digitStartRe = RegExp(r'^\d');
@@ -31,7 +32,14 @@ class TransactionSearchIndex {
     if (q.length < 2) {
       return const [];
     }
-    final tokens = q.split(' ').where((t) => t.isNotEmpty).toList();
+    // '#' sozinho não tem tag para casar: é ignorado (SPEC §5.17 regra 5).
+    final tokens = [
+      for (final token in q.split(' '))
+        if (token.isNotEmpty && token != '#') token,
+    ];
+    if (tokens.isEmpty) {
+      return const [];
+    }
     final cents = [
       for (final token in tokens) matchAmounts ? _valueCents(token) : null,
     ];
@@ -70,10 +78,14 @@ class _Indexed {
         _fold(transaction.description),
         if (transaction.importedDescription != null)
           _fold(transaction.importedDescription!),
-      ];
+        // Tags juntas: só token comum casa aqui; token '#' usa [tagKeys].
+        if (transaction.tags.isNotEmpty) _fold(transaction.tags.join(' ')),
+      ],
+      tagKeys = [for (final tag in transaction.tags) tagKey(tag)];
 
   final Transaction transaction;
   final List<_Folded> texts;
+  final List<String> tagKeys;
 
   /// Soma dos scores dos tokens; null se algum token não casa.
   int? scoreOf(List<String> tokens, List<int?> cents) {
@@ -88,8 +100,12 @@ class _Indexed {
     return total;
   }
 
-  /// Melhor score entre descrição, descrição importada e valor exato (4).
+  /// Melhor score entre descrição, descrição importada, tags e valor exato (4).
   int? _tokenScore(String token, int? tokenCents) {
+    if (token.startsWith('#')) {
+      final key = token.substring(1);
+      return tagKeys.any((tag) => tag.startsWith(key)) ? 4 : null;
+    }
     int? best;
     if (tokenCents != null && tokenCents == transaction.amountCents) {
       best = 4;

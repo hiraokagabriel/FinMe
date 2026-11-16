@@ -91,6 +91,15 @@ Future<void> _pump(WidgetTester tester, AppServices s) async {
   await tester.pump();
 }
 
+/// Toca uma ação da barra de massa, rolando a barra até ela antes.
+/// shortcut: nos testes as fontes reais não carregam e o texto fica largo; no app as ações cabem.
+Future<void> _tapBar(WidgetTester tester, String label) async {
+  final f = find.widgetWithText(TextButton, label);
+  await tester.ensureVisible(f);
+  await tester.pumpAndSettle();
+  await tester.tap(f);
+}
+
 Future<void> _tapCheckbox(WidgetTester tester, String id) async {
   await tester.tap(find.byKey(Key('tx-select-$id')));
   await tester.pump();
@@ -226,7 +235,7 @@ void main() {
     await _tapCheckbox(tester, 'a');
     await _tapCheckbox(tester, 'b');
     await _tapCheckbox(tester, 'c');
-    await tester.tap(find.text('Recategorizar'));
+    await _tapBar(tester, 'Recategorizar');
     await tester.pumpAndSettle();
 
     await tester.tap(find.byType(DropdownButtonFormField<String>));
@@ -260,7 +269,7 @@ void main() {
     expect(disabled.onPressed, isNull);
 
     await _tapCheckbox(tester, 'd');
-    await tester.tap(find.text('Confirmar pagamento'));
+    await _tapBar(tester, 'Confirmar pagamento');
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Confirmar'));
     await tester.pumpAndSettle();
@@ -350,7 +359,7 @@ void main() {
 
       await _tapCheckbox(tester, 'u1');
       await _tapCheckbox(tester, 'u2');
-      await tester.tap(find.text('Criar regra'));
+      await _tapBar(tester, 'Criar regra');
       await tester.pumpAndSettle();
 
       expect(

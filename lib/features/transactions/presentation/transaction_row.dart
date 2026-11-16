@@ -9,6 +9,7 @@ import '../../categories/domain/transaction_category.dart';
 import '../domain/transaction.dart';
 import '../domain/transaction_bulk.dart';
 import 'inline_cells.dart';
+import 'tag_widgets.dart';
 import 'transaction_filters.dart';
 
 /// Ações da linha. Tocar na linha equivale a [TransactionAction.edit].
@@ -43,11 +44,13 @@ class TransactionRow extends StatelessWidget {
     required this.past,
     required this.onAction,
     this.category,
+    this.categoryLabel,
     this.origin = '',
     this.destination,
     this.selected,
     this.onToggleSelect,
     this.categoryOptions,
+    this.categoryLabelOf,
     this.onCategoryChanged,
     this.onAmountChanged,
   });
@@ -58,6 +61,9 @@ class TransactionRow extends StatelessWidget {
   /// Data anterior ao início do mês atual: texto em `textSecondary`.
   final bool past;
   final TransactionCategory? category;
+
+  /// Rótulo da categoria ('Pai › Filha'); null → `category.name`.
+  final String? categoryLabel;
   final String origin;
 
   /// Conta destino (transferência) ou cartão pago (pagamento de fatura).
@@ -70,6 +76,9 @@ class TransactionRow extends StatelessWidget {
 
   /// Edição inline (Ultra): categorias do `kind` do tipo; só vale com `onCategoryChanged`.
   final List<TransactionCategory>? categoryOptions;
+
+  /// Rótulo de cada opção inline ('Pai › Filha'); null → `c.name`.
+  final String Function(TransactionCategory c)? categoryLabelOf;
   final ValueChanged<String?>? onCategoryChanged;
 
   /// Edição inline do valor; null = texto comum ([MoneyText]).
@@ -97,7 +106,8 @@ class TransactionRow extends StatelessWidget {
     final title = '${t.description}$installment';
     final arrow = destination == null ? null : '→ $destination';
     final cat = category;
-    final subtitle = [if (cat != null) cat.name, ?arrow].join(' · ');
+    final catName = categoryLabel ?? cat?.name;
+    final subtitle = [?catName, ?arrow].join(' · ');
 
     final Widget description = ultra
         ? Row(
@@ -118,6 +128,10 @@ class TransactionRow extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              if (t.tags.isNotEmpty) ...[
+                const SizedBox(width: AppSpace.sm),
+                TagChips(tags: t.tags),
+              ],
             ],
           )
         : Column(
@@ -175,10 +189,11 @@ class TransactionRow extends StatelessWidget {
             key: Key('inline-category-${t.id}'),
             categoryId: t.categoryId,
             options: catOptions,
+            labelOf: categoryLabelOf,
             onChanged: onCat,
           )
         : Text(
-            cat?.name ?? '—',
+            catName ?? '—',
             style: small,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,

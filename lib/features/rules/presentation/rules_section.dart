@@ -6,6 +6,7 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/widgets.dart';
 import '../../categories/domain/transaction_category.dart';
 import '../../transactions/domain/transaction.dart';
+import '../../transactions/presentation/tag_widgets.dart';
 import '../domain/rule_engine.dart';
 import '../domain/transaction_rule.dart';
 import 'rule_form.dart';
@@ -117,7 +118,7 @@ class _RuleRow extends StatelessWidget {
         ? '—'
         : cat == null
         ? 'Categoria removida'
-        : '→ ${cat.name}';
+        : '→ ${s.ledger.categoryTree.label(cat.id)}';
     final rename = (rule.renameTo ?? '').trim();
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -177,6 +178,10 @@ class _RuleRow extends StatelessWidget {
                       ),
                     ),
                   ),
+                ],
+                if (rule.tags.isNotEmpty) ...[
+                  const SizedBox(width: AppSpace.sm),
+                  Flexible(child: TagChips(tags: rule.tags)),
                 ],
               ],
             ),
@@ -240,6 +245,7 @@ class _ReapplyDialogState extends State<_ReapplyDialog> {
   late List<Transaction> _changes;
   int _categoryCount = 0;
   int _descriptionCount = 0;
+  int _tagCount = 0;
 
   @override
   void initState() {
@@ -263,6 +269,10 @@ class _ReapplyDialogState extends State<_ReapplyDialog> {
         .length;
     _descriptionCount = changes
         .where((t) => t.description != before[t.id]!.description)
+        .length;
+    // reapplyRules só acrescenta tags: mudou = mais tags que a original.
+    _tagCount = changes
+        .where((t) => t.tags.length != before[t.id]!.tags.length)
         .length;
   }
 
@@ -296,7 +306,7 @@ class _ReapplyDialogState extends State<_ReapplyDialog> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              '$n $noun ($_categoryCount de categoria, $_descriptionCount de descrição)',
+              '$n $noun ($_categoryCount de categoria, $_descriptionCount de descrição, $_tagCount de tags)',
             ),
             CheckboxListTile(
               contentPadding: EdgeInsets.zero,

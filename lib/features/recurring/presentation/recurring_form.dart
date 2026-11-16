@@ -203,7 +203,7 @@ class _RecurringDialogState extends State<_RecurringDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final s = widget.services;
+    final tree = widget.services.ledger.categoryTree;
     final c = context.colors;
     return AlertDialog(
       title: Text(
@@ -262,12 +262,11 @@ class _RecurringDialogState extends State<_RecurringDialog> {
                     value: null,
                     child: Text('Sem categoria'),
                   ),
-                  for (final cat in s.categories.all)
-                    if (cat.kind == _kind)
-                      DropdownMenuItem<String?>(
-                        value: cat.id,
-                        child: Text(cat.name),
-                      ),
+                  for (final cat in tree.options(_kind))
+                    DropdownMenuItem<String?>(
+                      value: cat.id,
+                      child: Text(tree.label(cat.id)),
+                    ),
                 ],
                 onChanged: (v) => setState(() => _categoryId = v),
               ),

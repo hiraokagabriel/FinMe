@@ -317,7 +317,7 @@ class _TransactionList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = AppScope.of(context);
-    final categories = s.ledger.categoriesById;
+    final tree = s.ledger.categoryTree;
     final inset = MediaQuery.sizeOf(context).width < 600
         ? AppSpace.lg
         : AppSpace.xl;
@@ -347,9 +347,11 @@ class _TransactionList extends StatelessWidget {
               itemCount: items.length,
               itemBuilder: (context, i) {
                 final t = items[i];
+                final id = t.categoryId;
+                final label = id == null ? '' : tree.label(id);
                 return _ItemRow(
                   item: t,
-                  categoryName: categories[t.categoryId]?.name,
+                  categoryName: label.isEmpty ? null : label,
                   planned: _isPlanned(t, s),
                 );
               },

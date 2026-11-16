@@ -1,5 +1,6 @@
 import '../../../core/utils/text_normalize.dart';
 import '../../categories/domain/transaction_category.dart';
+import '../../transactions/domain/tags.dart';
 import '../../transactions/domain/transaction.dart';
 import 'transaction_rule.dart';
 
@@ -80,6 +81,7 @@ List<Transaction> matchingTransactions(
 /// Aplica as regras e devolve só as transações alteradas (cópias).
 /// Categoria: 1ª regra que casa com categoria existente de kind compatível.
 /// Renomeia: 1ª regra que casa com `renameTo` não vazio; guarda a descrição original em `importedDescription`.
+/// Tags: acrescenta as tags de todas as regras que casam (nunca remove).
 List<Transaction> reapplyRules(
   List<CompiledRule> compiled,
   Iterable<Transaction> txs, {
@@ -97,6 +99,7 @@ List<Transaction> reapplyRules(
         : CategoryKind.income;
     String? categoryId;
     String? renameTo;
+    final ruleTags = <String>[];
     for (final c in compiled) {
       if (!c.matches(subject)) {
         continue;
@@ -108,6 +111,7 @@ List<Transaction> reapplyRules(
       if (renameTo == null && name != null && name.trim().isNotEmpty) {
         renameTo = name;
       }
+      ruleTags.addAll(c.rule.tags);
     }
     var out = t;
     if (categoryId != null &&
@@ -120,6 +124,12 @@ List<Transaction> reapplyRules(
         description: renameTo,
         importedDescription: t.importedDescription ?? t.description,
       );
+    }
+    if (ruleTags.isNotEmpty) {
+      final merged = normalizeTags([...t.tags, ...ruleTags]);
+      if (merged.length > t.tags.length) {
+        out = out.copyWith(tags: merged);
+      }
     }
     if (out != t) {
       changed.add(out);

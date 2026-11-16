@@ -1,4 +1,5 @@
 import '../../../core/utils/enum_utils.dart';
+import '../../transactions/domain/tags.dart';
 
 /// Sentinela de `copyWith`: parâmetro omitido mantém o campo; `null` limpa; valor troca.
 const Object _keep = Object();
@@ -16,6 +17,7 @@ class TransactionRule {
     this.renameTo,
     this.priority = 0,
     this.active = true,
+    this.tags = const [],
   });
 
   factory TransactionRule.fromMap(Map<String, dynamic> map) => TransactionRule(
@@ -26,7 +28,12 @@ class TransactionRule {
     renameTo: map['renameTo'] as String?,
     priority: (map['priority'] as num?)?.toInt() ?? 0,
     active: map['active'] != false,
+    tags: List.unmodifiable(normalizeTags(_tagsFrom(map['tags']))),
   );
+
+  /// Ausente, nulo ou não-lista → vazio; itens não `String` são ignorados.
+  static Iterable<String> _tagsFrom(Object? raw) =>
+      raw is List ? raw.whereType<String>() : const [];
 
   final String id;
   final String pattern;
@@ -40,6 +47,9 @@ class TransactionRule {
   final int priority;
   final bool active;
 
+  /// Tags a acrescentar à transação quando a regra casa (nunca remove); já normalizadas.
+  final List<String> tags;
+
   TransactionRule copyWith({
     String? pattern,
     RuleMatchType? matchType,
@@ -47,6 +57,7 @@ class TransactionRule {
     Object? renameTo = _keep,
     int? priority,
     bool? active,
+    List<String>? tags,
   }) => TransactionRule(
     id: id,
     pattern: pattern ?? this.pattern,
@@ -57,6 +68,7 @@ class TransactionRule {
     renameTo: identical(renameTo, _keep) ? this.renameTo : renameTo as String?,
     priority: priority ?? this.priority,
     active: active ?? this.active,
+    tags: tags ?? this.tags,
   );
 
   Map<String, dynamic> toMap() => {
@@ -67,6 +79,7 @@ class TransactionRule {
     'renameTo': renameTo,
     'priority': priority,
     'active': active,
+    if (tags.isNotEmpty) 'tags': tags,
   };
 
   @override
@@ -79,7 +92,8 @@ class TransactionRule {
           other.categoryId == categoryId &&
           other.renameTo == renameTo &&
           other.priority == priority &&
-          other.active == active;
+          other.active == active &&
+          _sameTags(other.tags, tags);
 
   @override
   int get hashCode => Object.hash(
@@ -90,5 +104,9 @@ class TransactionRule {
     renameTo,
     priority,
     active,
+    Object.hashAll(tags),
   );
+
+  static bool _sameTags(List<String> a, List<String> b) =>
+      a.length == b.length && a.indexed.every((e) => e.$2 == b[e.$1]);
 }

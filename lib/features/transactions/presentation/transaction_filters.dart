@@ -5,7 +5,9 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../accounts/domain/account.dart';
 import '../../cards/domain/payment_card.dart';
+import '../../categories/domain/category_tree.dart';
 import '../../categories/domain/transaction_category.dart';
+import '../domain/tags.dart';
 import '../domain/transaction.dart';
 
 /// Filtros de tipo do modo Ultra. Seleção vazia = sem filtro de tipo; várias = OR.
@@ -40,6 +42,7 @@ class TransactionFilter {
     this.origin,
     this.categoryId,
     this.kinds = const {},
+    this.tags = const {},
     this.query = '',
     this.showPlanned = true,
   });
@@ -47,6 +50,9 @@ class TransactionFilter {
   final String? origin;
   final String? categoryId;
   final Set<TxKindFilter> kinds;
+
+  /// Chaves de tag (`tagKey`); vazio = sem filtro. Casa se a transação tem qualquer uma (OR).
+  final Set<String> tags;
   final String query;
   final bool showPlanned;
 
@@ -55,12 +61,14 @@ class TransactionFilter {
     String? Function()? origin,
     String? Function()? categoryId,
     Set<TxKindFilter>? kinds,
+    Set<String>? tags,
     String? query,
     bool? showPlanned,
   }) => TransactionFilter(
     origin: origin == null ? this.origin : origin(),
     categoryId: categoryId == null ? this.categoryId : categoryId(),
     kinds: kinds ?? this.kinds,
+    tags: tags ?? this.tags,
     query: query ?? this.query,
     showPlanned: showPlanned ?? this.showPlanned,
   );
@@ -70,15 +78,22 @@ class TransactionFilter {
       origin != null ||
       categoryId != null ||
       kinds.isNotEmpty ||
+      tags.isNotEmpty ||
       query.trim().isNotEmpty ||
       !showPlanned;
 
-  bool matches(Transaction t) {
+  /// Filtro de categoria numa raiz também casa as filhas; [tree] nulo → só a própria categoria.
+  bool matches(Transaction t, {CategoryTree? tree}) {
     if (!showPlanned && isProvisioned(t)) {
       return false;
     }
-    if (categoryId != null && t.categoryId != categoryId) {
-      return false;
+    final cat = categoryId;
+    if (cat != null) {
+      final own = t.categoryId;
+      final inParent = own != null && tree?.parentOf(own) == cat;
+      if (own != cat && !inParent) {
+        return false;
+      }
     }
     final o = origin;
     if (o != null && !_matchesOrigin(o, t)) {
@@ -87,12 +102,16 @@ class TransactionFilter {
     if (kinds.isNotEmpty && !kinds.any((k) => _matchesKind(k, t))) {
       return false;
     }
+    if (!hasAnyTag(t, tags)) {
+      return false;
+    }
     final q = query.trim().toLowerCase();
     if (q.isEmpty) {
       return true;
     }
     return t.description.toLowerCase().contains(q) ||
-        (t.notes ?? '').toLowerCase().contains(q);
+        (t.notes ?? '').toLowerCase().contains(q) ||
+        t.tags.any((tag) => tag.toLowerCase().contains(q));
   }
 
   static bool _matchesOrigin(String origin, Transaction t) {
@@ -115,11 +134,12 @@ class TransactionFilter {
 List<Transaction> visibleTransactions(
   Iterable<Transaction> all,
   YearMonth month,
-  TransactionFilter filter,
-) {
+  TransactionFilter filter, {
+  CategoryTree? tree,
+}) {
   final list = [
     for (final t in all)
-      if (month.contains(t.date) && filter.matches(t)) t,
+      if (month.contains(t.date) && filter.matches(t, tree: tree)) t,
   ];
   list.sort((a, b) => b.date.compareTo(a.date));
   return list;
@@ -201,14 +221,18 @@ TxTotals txTotals(Iterable<Transaction> rows) {
   return (expenses: expenses, provisioned: provisioned, income: income);
 }
 
-/// Barra de filtros do modo Ultra: origem, categoria, tipo, busca e provisionados.
+/// Sentinela do item "Limpar tags" do menu de tags (não é uma chave de tag).
+const Object _clearTagsValue = Object();
+
+/// Barra de filtros do modo Ultra: origem, categoria, tipo, tags, busca e provisionados.
 class TransactionFilterBar extends StatefulWidget {
   const TransactionFilterBar({
     super.key,
     required this.filter,
     required this.accounts,
     required this.cards,
-    required this.categories,
+    required this.tree,
+    required this.tagOptions,
     required this.onChanged,
     this.searchFocusNode,
   });
@@ -216,7 +240,12 @@ class TransactionFilterBar extends StatefulWidget {
   final TransactionFilter filter;
   final List<Account> accounts;
   final List<PaymentCard> cards;
-  final List<TransactionCategory> categories;
+
+  /// Categorias por árvore: dropdown lista `options` de despesa e depois de receita.
+  final CategoryTree tree;
+
+  /// Tags existentes, das mais usadas às menos usadas (`Ledger.allTags`).
+  final List<String> tagOptions;
   final ValueChanged<TransactionFilter> onChanged;
 
   /// Foco do campo de busca; nulo → o próprio campo cria o seu.
@@ -240,8 +269,7 @@ class _TransactionFilterBarState extends State<TransactionFilterBar> {
   @override
   Widget build(BuildContext context) {
     final f = widget.filter;
-    final cats = [...widget.categories]
-      ..sort((a, b) => a.name.compareTo(b.name));
+    final tree = widget.tree;
     return Wrap(
       spacing: AppSpace.md,
       runSpacing: AppSpace.sm,
@@ -261,7 +289,7 @@ class _TransactionFilterBarState extends State<TransactionFilterBar> {
           ),
         ),
         SizedBox(
-          width: 200,
+          width: 220,
           child: DropdownButtonFormField<String?>(
             isExpanded: true,
             initialValue: f.categoryId,
@@ -274,12 +302,21 @@ class _TransactionFilterBarState extends State<TransactionFilterBar> {
                 value: null,
                 child: Text('Todas as categorias'),
               ),
-              for (final c in cats)
-                DropdownMenuItem<String?>(value: c.id, child: Text(c.name)),
+              for (final c in tree.options(CategoryKind.expense))
+                DropdownMenuItem<String?>(
+                  value: c.id,
+                  child: Text(tree.label(c.id)),
+                ),
+              for (final c in tree.options(CategoryKind.income))
+                DropdownMenuItem<String?>(
+                  value: c.id,
+                  child: Text('${tree.label(c.id)} (receita)'),
+                ),
             ],
             onChanged: (v) => widget.onChanged(f.copyWith(categoryId: () => v)),
           ),
         ),
+        _tagsMenu(),
         Wrap(
           spacing: AppSpace.xs,
           runSpacing: AppSpace.xs,
@@ -325,6 +362,75 @@ class _TransactionFilterBarState extends State<TransactionFilterBar> {
         ),
       ],
     );
+  }
+
+  /// Menu de tags: as 30 mais usadas, mais as selecionadas fora delas. Um toque marca/desmarca.
+  Widget _tagsMenu() {
+    final f = widget.filter;
+    final spelling = {for (final t in widget.tagOptions) tagKey(t): t};
+    final top = widget.tagOptions.take(30);
+    final topKeys = {for (final t in top) tagKey(t)};
+    final extra = [
+      for (final k in f.tags)
+        if (!topKeys.contains(k)) k,
+    ];
+    return PopupMenuButton<Object>(
+      key: const Key('filter-tags'),
+      tooltip: 'Filtrar por tags',
+      onSelected: _toggleTag,
+      itemBuilder: (_) => [
+        if (top.isEmpty && extra.isEmpty)
+          const PopupMenuItem<Object>(
+            enabled: false,
+            child: Text('Nenhuma tag'),
+          ),
+        for (final t in top)
+          CheckedPopupMenuItem<Object>(
+            value: tagKey(t),
+            checked: f.tags.contains(tagKey(t)),
+            child: Text(t),
+          ),
+        for (final k in extra)
+          CheckedPopupMenuItem<Object>(
+            value: k,
+            checked: true,
+            child: Text(spelling[k] ?? k),
+          ),
+        if (f.tags.isNotEmpty) ...[
+          const PopupMenuDivider(),
+          const PopupMenuItem<Object>(
+            value: _clearTagsValue,
+            child: Text('Limpar tags'),
+          ),
+        ],
+      ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpace.sm,
+          vertical: AppSpace.sm,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.sell_outlined, size: 16),
+            const SizedBox(width: AppSpace.xs),
+            Text(f.tags.isEmpty ? 'Tags' : 'Tags (${f.tags.length})'),
+            const Icon(Icons.arrow_drop_down),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _toggleTag(Object value) {
+    final f = widget.filter;
+    final next = <String>{...f.tags};
+    if (identical(value, _clearTagsValue)) {
+      next.clear();
+    } else if (!next.remove(value)) {
+      next.add(value as String);
+    }
+    widget.onChanged(f.copyWith(tags: next));
   }
 
   List<DropdownMenuItem<String?>> _originItems(BuildContext context) => [

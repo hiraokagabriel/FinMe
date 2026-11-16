@@ -1,8 +1,31 @@
 import '../../../core/utils/date_utils.dart';
 import '../../../core/utils/enum_utils.dart';
+import 'tags.dart';
 
 /// Sentinela de `copyWith`: parâmetro omitido mantém o campo; `null` limpa; valor troca.
 const Object _keep = Object();
+
+/// Tags normalizadas em lista imutável; vazia vira `const []`.
+List<String> _frozenTags(List<String> raw) {
+  final normalized = normalizeTags(raw);
+  return normalized.isEmpty ? const [] : List.unmodifiable(normalized);
+}
+
+/// Lê `tags` de um mapa antigo: ausente, nulo ou não-lista → vazio; itens não `String` são ignorados.
+List<String> _tagsFrom(Object? raw) =>
+    raw is List ? raw.whereType<String>().toList() : const [];
+
+bool _sameTags(List<String> a, List<String> b) {
+  if (a.length != b.length) {
+    return false;
+  }
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) {
+      return false;
+    }
+  }
+  return true;
+}
 
 enum TransactionType { expense, income, transfer, invoicePayment }
 
@@ -32,7 +55,9 @@ class Transaction {
     this.notes,
     this.externalId,
     this.importedDescription,
-  }) : date = dateOnly(date);
+    List<String> tags = const [],
+  }) : date = dateOnly(date),
+       tags = _frozenTags(tags);
 
   /// Data lida como `dateKey` e normalizada para meia-noite local.
   factory Transaction.fromMap(Map<String, dynamic> map) => Transaction(
@@ -55,6 +80,7 @@ class Transaction {
     notes: map['notes'] as String?,
     externalId: map['externalId'] as String?,
     importedDescription: map['importedDescription'] as String?,
+    tags: _tagsFrom(map['tags']),
   );
 
   final String id;
@@ -81,6 +107,9 @@ class Transaction {
   /// Descrição como veio do arquivo; null em lançamento manual.
   final String? importedDescription;
 
+  /// Tags livres, já normalizadas (`normalizeTags`); lista imutável.
+  final List<String> tags;
+
   /// Provisionado: ainda não saiu, mas já se sabe que vai sair.
   bool get isPlanned => status == TransactionStatus.planned;
 
@@ -106,6 +135,7 @@ class Transaction {
     Object? notes = _keep,
     Object? externalId = _keep,
     Object? importedDescription = _keep,
+    List<String>? tags,
   }) => Transaction(
     id: id,
     type: type ?? this.type,
@@ -146,6 +176,7 @@ class Transaction {
     importedDescription: identical(importedDescription, _keep)
         ? this.importedDescription
         : importedDescription as String?,
+    tags: tags ?? this.tags,
   );
 
   Map<String, dynamic> toMap() => {
@@ -168,6 +199,7 @@ class Transaction {
     'notes': notes,
     if (externalId != null) 'externalId': externalId,
     if (importedDescription != null) 'importedDescription': importedDescription,
+    if (tags.isNotEmpty) 'tags': tags,
   };
 
   @override
@@ -192,7 +224,8 @@ class Transaction {
           other.recurringId == recurringId &&
           other.notes == notes &&
           other.externalId == externalId &&
-          other.importedDescription == importedDescription;
+          other.importedDescription == importedDescription &&
+          _sameTags(other.tags, tags);
 
   @override
   int get hashCode => Object.hash(
@@ -215,5 +248,6 @@ class Transaction {
     notes,
     externalId,
     importedDescription,
+    Object.hashAll(tags),
   );
 }

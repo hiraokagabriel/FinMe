@@ -987,7 +987,7 @@ aceite: total de testes igual ao de `flutter test`; `bash tool/check.sh` → `CH
 > Ondas (tarefas da mesma onda têm arquivos disjuntos): **A** T-120, T-121, T-122, T-123 · **B** T-124, T-125, T-126, T-127 · **C** T-128, T-129, T-130, T-131, T-132, T-133, T-135, T-136, T-138 · **D** T-134, T-137 · **E** (Fase 9 fechada) T-139, T-140 · **F** T-141 · **G** T-142.
 > Datas nos testes: `DateTime(2026, 11, 15)` como "hoje" (salvo indicação). App de teste igual a `test/features/transactions/transactions_page_test.dart` (`bootstrap` em memória, `seedDemo` quando útil, `clock`).
 
-### T-120 · Subcategorias: `parentId`, `CategoryTree` e orçamento agregado (domínio) · `todo` · deps: — · parallel: yes
+### T-120 · Subcategorias: `parentId`, `CategoryTree` e orçamento agregado (domínio) · `done` · deps: — · parallel: yes
 files: `lib/features/categories/domain/transaction_category.dart`, `lib/features/categories/domain/category_tree.dart` (novo), `lib/features/categories/domain/category_spending.dart`, `test/features/categories/category_tree_test.dart` (novo)
 contrato: SPEC §4.3 (bloco "Subcategorias (Fase 10)": `parentId` com `_keep`, `toMap` só não nulo, `fromMap` tolerante, `==`/`hashCode`), §5.20 inteiro (`kCategoryPathSeparator`, `CategoryTree`, `categoryParentError`), §5.6 "Orçamento com subcategorias" (`budgetStatuses(..., {CategoryTree? tree})`). Dart puro; ordenação por `foldText(name)` (`core/utils/text_normalize.dart`). `CategoryTree` pré-indexa no construtor (mapas id → categoria e pai → filhas); consultas O(1).
 aceite:
@@ -997,7 +997,7 @@ aceite:
 - Exemplo de orçamento de §5.6 (Alimentação spent 90000, ratio 0.9; Mercado spent 50000); sem `tree` o resultado é o atual (Alimentação spent 10000).
 - Testes existentes passam (`budgetStatuses` sem o parâmetro novo).
 
-### T-121 · Tags: `Transaction.tags` e funções de tag (domínio) · `todo` · deps: — · parallel: yes
+### T-121 · Tags: `Transaction.tags` e funções de tag (domínio) · `done` · deps: — · parallel: yes
 files: `lib/features/transactions/domain/transaction.dart`, `lib/features/transactions/domain/tags.dart` (novo), `lib/features/transactions/domain/installments.dart`, `test/features/transactions/tags_test.dart` (novo)
 contrato: SPEC §4.4 bloco "Fase 10 (`tags`)" e §5.21 inteiro (`normalizeTag`, `tagKey`, `normalizeTags`, `parseTagInput`, `hasAnyTag`, `bulkAddTags`, `bulkRemoveTags`, `tagUsage`). `tags.dart` importa `transaction.dart` e vice-versa (import circular é válido em Dart). Construtor: `tags = raw.isEmpty ? const [] : List.unmodifiable(normalizeTags(raw))`. `buildInstallments` passa `tags: base.tags`.
 aceite:
@@ -1008,7 +1008,7 @@ aceite:
 - `buildInstallments` com base de tags `['x']` em 3 parcelas → as 3 com `['x']`.
 - Testes existentes de transações passam.
 
-### T-122 · Metas: entidade `Goal` e regras de reserva (domínio) · `todo` · deps: — · parallel: yes
+### T-122 · Metas: entidade `Goal` e regras de reserva (domínio) · `done` · deps: — · parallel: yes
 files: `lib/features/goals/domain/goal.dart` (novo), `lib/features/goals/domain/goal_math.dart` (novo), `test/features/goals/goal_test.dart` (novo)
 contrato: SPEC §4.9 inteiro (`GoalMovement`, `Goal`) e §5.22 inteiro (`reservedByAccount`, `availableToReserve`, `contributionError`, `withdrawalError`, `removeMovementError`, `overReservedCents`, `monthlyContributionNeeded`, `isGoalOverdue`, regras 1–4). Dart puro; mensagens com `formatMoney`; datas com `dateOnly`/`dateKey`/`parseDateKey`.
 aceite:
@@ -1017,7 +1017,7 @@ aceite:
 - Round-trip de `Goal` com e sem `targetDate` e com 2 movimentos (um com nota); `fromMap` sem `movements`/`archived` → `[]`/`false`; movimento inválido (sem `amountCents`) ignorado; `copyWith(targetDate: null)` limpa.
 - `reservedByAccount` ignora arquivada e omite conta com 0; meta com `rawReservedCents < 0` (dado corrompido) → `reservedCents == 0`.
 
-### T-123 · Posso gastar hoje (domínio) · `todo` · deps: — · parallel: yes
+### T-123 · Posso gastar hoje (domínio) · `done` · deps: — · parallel: yes
 files: `lib/features/forecast/domain/spendable.dart` (novo), `test/features/forecast/spendable_test.dart` (novo)
 contrato: SPEC §5.23 inteiro (`SpendableToday`, `spendableToday`, regras 1–9). Dart puro; usa `occurrencesBetween` (§5.4), `YearMonth`, `ForecastEvent`/`ForecastEventKind`; diferença de dias por `DateTime.utc(y, m, d)`. Não importa `goals/` (recebe `reservedByAccount` pronto).
 aceite (a `Forecast` é montada com `ForecastService.compute(..., today: hoje, months: 6, minDays: 60)` sobre os dados do teste; `horizonEnd = ForecastService.horizonEnd(today: hoje, months: 6, minDays: 60)`):
@@ -1029,7 +1029,7 @@ aceite (a `Forecast` é montada com `ForecastService.compute(..., today: hoje, m
 - `freeCents` de 1 centavo e `days` 20 → `perDayCents == 0` (arredonda para baixo, sem `double`).
 - Conta de investimento não arquivada com saldo 500000 e meta de 100000 nela: não entra em `balanceCents` nem nas reservas (resultado igual ao exemplo completo).
 
-### T-124 · `resolveCategoryByName` com subcategorias · `todo` · deps: T-120 · parallel: yes
+### T-124 · `resolveCategoryByName` com subcategorias · `done` · deps: T-120 · parallel: yes
 files: `lib/features/importing/domain/merchant_dictionary.dart`, `test/features/importing/merchant_dictionary_test.dart`
 contrato: SPEC §5.13 `resolveCategoryByName` (passos 1–3 da Fase 10) e §4.8 (nota da Fase 10). Assinatura inalterada.
 aceite (categorias: `defaultCategories()` + `mer2` 'Mercado' expense filha de `cat_alimentacao`, `out1` 'Outros' filha de `cat_alimentacao`, `out2` 'Outros' filha de `cat_transporte`):
@@ -1039,7 +1039,7 @@ aceite (categorias: `defaultCategories()` + `mer2` 'Mercado' expense filha de `c
 - Sem a raiz `cat_mercado` na lista: `'Mercado'` → `mer2` (única candidata).
 - `'Combustível'` continua → `cat_transporte` (fallback).
 
-### T-125 · Regras com tags: entidade e motor · `todo` · deps: T-121 · parallel: yes
+### T-125 · Regras com tags: entidade e motor · `done` · deps: T-121 · parallel: yes
 files: `lib/features/rules/domain/transaction_rule.dart`, `lib/features/rules/domain/rule_engine.dart`, `test/features/rules/rule_engine_test.dart`
 contrato: SPEC §4.6 (bloco Fase 10: `tags`, construtor `const` com `this.tags = const []`, `fromMap` com `normalizeTags`, `toMap` só não vazia, `copyWith`, `==`/`hashCode`) e §5.14 (parágrafo "Tags (Fase 10)" de `reapplyRules`).
 aceite:
@@ -1048,7 +1048,7 @@ aceite:
 - Idempotente: aplicar de novo sobre o resultado → `[]`.
 - Testes existentes de regras passam.
 
-### T-126 · Ledger, persistência e `AppServices` da Fase 10 · `todo` · deps: T-120, T-121, T-122, T-123 · parallel: yes
+### T-126 · Ledger, persistência e `AppServices` da Fase 10 · `done` · deps: T-120, T-121, T-122, T-123 · parallel: yes
 files: `lib/app/bootstrap.dart`, `lib/app/app_scope.dart`, `lib/app/ledger.dart`, `test/app/ledger_goals_test.dart` (novo)
 contrato: SPEC §3.5 (box `fm_goals`), §6.1 (`goals` obrigatório em `AppServices`), §6.2 bloco Fase 10 (`goals` opcional no `Ledger`, entra em `_sources`; `categoryTree`, `rolledSpendingFor`, `reservedByAccount`, `spendableToday`, `allTags`, todos memoizados e zerados em `_clearCache`).
 aceite:
@@ -1059,7 +1059,7 @@ aceite:
 - `allTags` com 3 transações (`['Viagem']`, `['viagem', 'casa']`, `[]`) → `['Viagem', 'casa']`.
 - `test/app/ledger_test.dart` (Ledger sem `goals`) passa sem mudança; `reservedByAccount` sem `goals` → `{}`.
 
-### T-127 · Widgets de tag: `TagField`, `TagChips`, `showBulkTagsDialog` · `todo` · deps: T-121 · parallel: yes
+### T-127 · Widgets de tag: `TagField`, `TagChips`, `showBulkTagsDialog` · `done` · deps: T-121 · parallel: yes
 files: `lib/features/transactions/presentation/tag_widgets.dart` (novo), `test/features/transactions/tag_widgets_test.dart` (novo)
 contrato: SPEC §7.3 Fase 10, bloco **Tags** (`TagField`, `TagChips`, `BulkTagsChoice`, `showBulkTagsDialog`). Cores via `context.colors`; sem `withOpacity`.
 aceite:
@@ -1069,7 +1069,7 @@ aceite:
 - `TagChips(tags: ['a', 'b', 'c', 'd'])` → '#a', '#b', '#c', '+1'; `tags: []` → nada renderizado.
 - `showBulkTagsDialog(count: 3, ...)` → título 'Tags em 3 transações'; 'Aplicar' desabilitado sem tags; adicionar 'x' e Aplicar → `(remove: false, tags: ['x'])`; modo 'Remover' → `remove: true`; Cancelar → `null`.
 
-### T-128 · Categorizador e importação com tags · `todo` · deps: T-125 · parallel: yes
+### T-128 · Categorizador e importação com tags · `done` · deps: T-125 · parallel: yes
 files: `lib/features/importing/domain/categorizer.dart`, `lib/features/importing/domain/import_session.dart`, `test/features/importing/categorizer_test.dart`, `test/features/importing/import_session_test.dart`
 contrato: SPEC §5.13 (`CategorizationResult.tags`, tags calculadas no passo 1 da cascata) e §5.16 (bullet "Tags (Fase 10)" do plano).
 aceite:
@@ -1078,7 +1078,7 @@ aceite:
 - `recategorize` com regra nova com tags muda as tags sugeridas das linhas não editadas.
 - Testes existentes passam (incluindo desempenho).
 
-### T-129 · Backup e "apagar dados" cobrem a Fase 10 · `todo` · deps: T-126 · parallel: yes
+### T-129 · Backup e "apagar dados" cobrem a Fase 10 · `done` · deps: T-126 · parallel: yes
 files: `lib/core/services/backup_service.dart`, `lib/features/settings/presentation/settings_page.dart`, `test/core/backup_service_test.dart`, `test/features/settings/settings_page_test.dart`
 contrato: SPEC §3.5 "Fase 10: `fm_goals` e campos novos" (chave `goals`, versão 1, ausência → `[]`, meta com conta ausente descartada, retrato/restauração, apagar dados, CSV com rótulo de categoria e coluna "Tags").
 aceite:
@@ -1088,7 +1088,7 @@ aceite:
 - `transactionsCsv`: cabeçalho termina em 'Tags'; transação em subcategoria → 'Alimentação › Mercado'; tags `['a', 'b']` → 'a, b'.
 - Ajustes Ultra → "Apagar todos os dados" confirmado → metas vazias.
 
-### T-130 · Painel: card "Posso gastar hoje" · `todo` · deps: T-126 · parallel: yes
+### T-130 · Painel: card "Posso gastar hoje" · `done` · deps: T-126 · parallel: yes
 files: `lib/features/dashboard/presentation/spendable_card.dart` (novo), `lib/features/dashboard/presentation/dashboard_page.dart`, `test/features/dashboard/spendable_card_test.dart` (novo)
 contrato: SPEC §7.3 Fase 10, bloco **`SpendableCard`** e linha da tabela. `_DashboardBody` recebe `SpendableToday spendable` (de `s.ledger.spendableToday`) e põe `SpendableCard(data: spendable, ultra: ultra)` como **primeiro** filho, antes de `DashboardKpiRow`, seguido de `_gap`.
 aceite (widget test com `SpendableToday` montado à mão dentro do app de teste; e um teste do Painel inteiro com seed):
@@ -1100,7 +1100,7 @@ aceite (widget test com `SpendableToday` montado à mão dentro do app de teste;
 - `hideValues: true` → 'R$ ••••' no lugar dos valores.
 - Painel com seed (Simples e Ultra): `find.byKey(ValueKey('spendable-card'))` existe e fica acima do primeiro `KpiTile` (`tester.getTopLeft(...).dy` menor).
 
-### T-131 · Painel Ultra: drill-down por categoria · `todo` · deps: T-126 · parallel: yes
+### T-131 · Painel Ultra: drill-down por categoria · `done` · deps: T-126 · parallel: yes
 files: `lib/features/dashboard/presentation/dashboard_summary.dart`, `lib/features/dashboard/presentation/dashboard_sections.dart`, `test/features/dashboard/dashboard_categories_test.dart` (novo)
 contrato: SPEC §7.3 Fase 10, parágrafo **Drill-down do Painel (Ultra)** (`CategoryRow.id`/`children`, `rolledSpendingFor`, `CategoriesCard` stateful, keys).
 aceite (app de teste; categorias padrão + 'Mercado X' filha de 'Alimentação'; despesas pagas no mês: 10000 direto em Alimentação, 50000 em Mercado X, 3000 em Transporte):
@@ -1109,7 +1109,7 @@ aceite (app de teste; categorias padrão + 'Mercado X' filha de 'Alimentação';
 - Ultra: filha invisível até tocar em `category-row-<id de Alimentação>`; depois `category-child-<id de Mercado X>` visível; tocar de novo esconde.
 - Testes existentes do Painel passam.
 
-### T-132 · Categorias: árvore, categoria pai e exclusão · `todo` · deps: T-126 · parallel: yes
+### T-132 · Categorias: árvore, categoria pai e exclusão · `done` · deps: T-126 · parallel: yes
 files: `lib/features/categories/presentation/categories_page.dart`, `lib/features/categories/presentation/category_form.dart`, `test/features/categories/categories_page_test.dart`
 contrato: SPEC §7.3 Fase 10 (linhas "Árvore de categorias" e "Categoria pai" da tabela; parágrafo **Categorias**), §5.6 (`budgetStatuses(..., tree: ledger.categoryTree)`; gasto da raiz por `rolledSpendingFor`), §6.3 "Excluir categoria (Fase 10)". `_txWithoutCategory` passa a ser `t.copyWith(categoryId: null)` (preserva tags e campos de importação).
 aceite:
@@ -1120,7 +1120,7 @@ aceite:
 - Excluir 'Alimentação' com filha → SnackBar 'Mova ou exclua as subcategorias antes' e nada apagado; excluir uma categoria usada por transação com tags → transação sem categoria e com as tags intactas.
 - Testes existentes passam.
 
-### T-133 · Metas: diálogos (form, movimento, histórico) · `todo` · deps: T-126 · parallel: yes
+### T-133 · Metas: diálogos (form, movimento, histórico) · `done` · deps: T-126 · parallel: yes
 files: `lib/features/goals/presentation/goal_dialogs.dart` (novo), `test/features/goals/goal_dialogs_test.dart` (novo)
 contrato: SPEC §7.3 Fase 10, bloco **Metas** (`showGoalForm`, `showGoalMovementDialog`, `showGoalHistory`; regras do form, movimento e histórico), §6.3 "Metas". Saldo da conta = `ledger.accountBalances[accountId] ?? 0`; metas de `services.goals.all`. Gravação com `goals.upsert`. `DropdownButtonFormField` com `initialValue`.
 aceite (app de teste com 'Conta Alfa' saldo inicial 200000 e conta arquivada 'Conta Velha'):
@@ -1130,7 +1130,7 @@ aceite (app de teste com 'Conta Alfa' saldo inicial 200000 e conta arquivada 'Co
 - Histórico: lista os 2 movimentos (mais recente primeiro); excluir o aporte de 150000 (com a retirada de 50000 ainda lá) → SnackBar 'Sem este aporte, as retiradas ficariam maiores que o reservado' e nada muda; excluir a retirada → `reservedCents 150000`.
 - Nenhuma ação cria transação (`transactions.all` inalterado).
 
-### T-134 · Metas: seção em Contas · `todo` · deps: T-133 · parallel: yes (com T-137)
+### T-134 · Metas: seção em Contas · `done` · deps: T-133 · parallel: yes (com T-137)
 files: `lib/features/goals/presentation/goals_section.dart` (novo), `lib/features/accounts/presentation/accounts_page.dart`, `test/features/goals/goals_section_test.dart` (novo)
 contrato: SPEC §7.3 Fase 10 (linhas "Metas" e "Reservado por conta" da tabela; bloco **Metas**: `GoalsSection`, linha, Ultra/Simples, estado vazio), §6.3 (excluir/arquivar meta; "Excluir conta (Fase 10)"). `AccountsPage` põe `const GoalsSection()` depois da lista de contas (`AppSpace.lg` antes); linha da conta no Ultra mostra 'R$ X reservado' (de `ledger.reservedByAccount`), em `warning` se `overReservedCents > 0`. `_delete` inclui metas no `inUse` e troca a mensagem.
 aceite (app de teste com 'Conta Alfa' saldo 200000):
@@ -1142,14 +1142,14 @@ aceite (app de teste com 'Conta Alfa' saldo 200000):
 - Excluir 'Conta Alfa' (sem transações) com uma meta → SnackBar 'Conta usada por lançamentos, cartões, recorrências ou metas. Arquive em vez de excluir.'
 - Smoke test e testes existentes de Contas passam.
 
-### T-135 · Rótulo 'Pai › Filha': recorrência e prévia de importação · `todo` · deps: T-126 · parallel: yes
+### T-135 · Rótulo 'Pai › Filha': recorrência e prévia de importação · `done` · deps: T-126 · parallel: yes
 files: `lib/features/recurring/presentation/recurring_form.dart`, `lib/features/importing/presentation/import_preview_page.dart`, `lib/features/importing/presentation/import_preview_row.dart`, `test/features/recurring/recurring_form_test.dart`
 contrato: SPEC §7.3 Fase 10 (rótulo e ordem de dropdown via `ledger.categoryTree`). `recurring_form.dart`: itens de categoria = `categoryTree.options(kind)` com texto `categoryTree.label(id)`. `ImportPreviewRow` ganha `String Function(TransactionCategory c)? labelOf` (padrão `c.name`) usado nos itens do dropdown; `import_preview_page.dart` passa `categoryOptions` = `categoryTree.options(kind da linha)` e `labelOf: (c) => tree.label(c.id)`.
 aceite:
 - Form de recorrência com 'Mercado X' filha de 'Alimentação' → item 'Alimentação › Mercado X' logo depois de 'Alimentação'; escolher grava o id da filha.
 - Testes existentes de recorrência e de prévia passam.
 
-### T-136 · Rótulo 'Pai › Filha': dicionário e detalhe do cartão · `todo` · deps: T-124, T-126 · parallel: yes
+### T-136 · Rótulo 'Pai › Filha': dicionário e detalhe do cartão · `done` · deps: T-124, T-126 · parallel: yes
 files: `lib/features/importing/presentation/dictionary_section.dart`, `lib/features/cards/presentation/card_detail_page.dart`, `test/features/importing/dictionary_section_test.dart`
 contrato: SPEC §4.8 (nota Fase 10: o form grava `categoryTree.label(id)` como `categoryName`), §5.13 (`resolveCategoryByName` com caminho), §7.3 Fase 10 (rótulo). Dicionário: dropdown com `options(expense)` + `options(income)` e texto `label`; badge 'Categoria não encontrada' continua via `resolveCategoryByName`; editar entrada com caminho seleciona a filha. `card_detail_page.dart`: `categoryName: tree.label(id)` (vazio → null).
 aceite:
@@ -1157,7 +1157,7 @@ aceite:
 - Entrada com `categoryName 'Alimentação › Inexistente'` → 'Categoria não encontrada'.
 - Testes existentes passam.
 
-### T-137 · Form de transação: categoria em árvore e tags · `todo` · deps: T-126, T-127, T-128 · parallel: yes (com T-134)
+### T-137 · Form de transação: categoria em árvore e tags · `done` · deps: T-126, T-127, T-128 · parallel: yes (com T-134)
 files: `lib/features/transactions/presentation/transaction_form.dart`, `test/features/transactions/transaction_form_test.dart`
 contrato: SPEC §4.4 (recriar pelo construtor passa `tags`), §7.3 Fase 10 (linha "Tags no form de transação"; parágrafo "Form de transação (Ultra)"). `_categoriesFor` passa a ser `ledger.categoryTree.options(kind)` com texto `label`. Estado `List<String> _tags = initial?.tags ?? const []`, `bool _tagsTouched = false`, `bool _tagsFromRule = false`. Ultra: `TagField(tags: _tags, suggestions: ledger.allTags, helperText: _tagsFromRule ? 'Tags da regra' : null, onChanged: (v) => setState(() { _tags = v; _tagsTouched = true; _tagsFromRule = false; }))` depois da Categoria. No gatilho de descrição existente, se `initial == null && !_tagsTouched` e tipo expense/income → `_tags = r.tags; _tagsFromRule = r.tags.isNotEmpty` (mesmo se a categoria já foi escolhida). `Transaction(..., tags: _tags)`; compra parcelada leva as tags (via `buildInstallments`).
 aceite:
@@ -1168,7 +1168,7 @@ aceite:
 - Parcelado em 3x com tags `['x']` → 3 parcelas com `['x']`.
 - Testes existentes passam.
 
-### T-138 · Regras: tags no form e na seção · `todo` · deps: T-125, T-126, T-127 · parallel: yes
+### T-138 · Regras: tags no form e na seção · `done` · deps: T-125, T-126, T-127 · parallel: yes
 files: `lib/features/rules/presentation/rule_form.dart`, `lib/features/rules/presentation/rules_section.dart`, `test/features/rules/rules_section_test.dart`
 contrato: SPEC §4.6 (regra útil inclui tags), §7.3 Fase 10 (linha "Tags em regras"), §5.14 (tags no reaplicar). Form: `TagField(label: 'Adicionar tags', suggestions: ledger.allTags)` depois de 'Renomear para'; grava `tags: normalizeTags(_tags)`; erro passa a 'Defina categoria, renomeação ou tags'; dropdown de categoria por `categoryTree.options` + `label`. Seção: `TagChips(tags: rule.tags)` na linha; rótulo da categoria por `label`. Reaplicar: texto `'N transações vão mudar (X de categoria, Y de descrição, Z de tags)'` (Z = mudadas cujas tags diferem da original).
 aceite:
@@ -1177,7 +1177,7 @@ aceite:
 - Reaplicar com 2 transações que casam e sem a tag → '2 transações vão mudar (0 de categoria, 0 de descrição, 2 de tags)'; Aplicar → as 2 com `['app']`.
 - Testes existentes passam (ajustar só o texto do reaplicar onde algum teste o compara).
 
-### T-139 · Transações: subcategorias, filtro de tags e tags na linha · `todo` · deps: T-115 (Fase 9 fechada), T-126, T-127 · parallel: yes (com T-140)
+### T-139 · Transações: subcategorias, filtro de tags e tags na linha · `done` · deps: T-115 (Fase 9 fechada), T-126, T-127 · parallel: yes (com T-140)
 files: `lib/features/transactions/presentation/transaction_filters.dart`, `lib/features/transactions/presentation/transactions_page.dart`, `lib/features/transactions/presentation/transaction_row.dart`, `test/features/transactions/transactions_tags_test.dart` (novo)
 contrato: SPEC §7.3 Fase 10, parágrafo "Transações (Ultra)" (`TransactionFilter.tags` + `copyWith(tags:)`, `hasCriteria`, `query` casando tags, `matches(t, {CategoryTree? tree})`, `visibleTransactions(..., {tree})`, dropdown de categoria por `options`/`label`, botão `filter-tags`, rótulo por `label`, `TagChips` na linha Ultra, ordenação por rótulo). `TransactionRow` ganha `String? categoryLabel` (não nulo → usado no lugar de `category.name`) e mostra `TagChips` só no Ultra. A página passa `tree: ledger.categoryTree` para `visibleTransactions` e o rótulo para a linha e para a ordenação.
 aceite (seed demo, Ultra, 1400×900; 'Mercado X' filha de 'Alimentação'; transações do mês: A em 'Alimentação', B em 'Mercado X' com tags `['viagem']`, C em 'Transporte' com `['Trabalho']`):
@@ -1187,7 +1187,7 @@ aceite (seed demo, Ultra, 1400×900; 'Mercado X' filha de 'Alimentação'; trans
 - Linha de B mostra 'Alimentação › Mercado X' e '#viagem'; Simples não mostra '#viagem'.
 - Testes existentes de Transações (incluindo os da Fase 9 e `transaction_filters_test.dart`) passam.
 
-### T-140 · Paleta: busca por tag e rótulo de subcategoria · `todo` · deps: T-115 (Fase 9 fechada), T-121, T-126 · parallel: yes (com T-139)
+### T-140 · Paleta: busca por tag e rótulo de subcategoria · `done` · deps: T-115 (Fase 9 fechada), T-121, T-126 · parallel: yes (com T-139)
 files: `lib/features/transactions/domain/transaction_search.dart`, `lib/app/app_commands.dart`, `test/features/transactions/transaction_search_test.dart`, `test/app/app_commands_test.dart`
 contrato: SPEC §5.17 regra 5 (tags no índice, token `#`) e §7.3 Fase 10 (última frase do parágrafo "Transações (Ultra)": `subtitle` com rótulo e `' · #a #b'`). Tags pré-dobradas no construtor do índice (nada de `foldText` por transação em `search`).
 aceite:
@@ -1195,7 +1195,7 @@ aceite:
 - `transactionEntries` com transação em 'Mercado X' (filha de 'Compras') e tags `['casa']` → subtitle '14/11/2026 · Cartão Beta · Compras › Mercado X · #casa'.
 - Testes existentes passam.
 
-### T-141 · Ações em massa: 'Tags' e rótulos em diálogos e célula inline · `todo` · deps: T-139, T-127 · parallel: no
+### T-141 · Ações em massa: 'Tags' e rótulos em diálogos e célula inline · `done` · deps: T-139, T-127 · parallel: no
 files: `lib/features/transactions/presentation/transactions_page.dart`, `lib/features/transactions/presentation/bulk_dialogs.dart`, `lib/features/transactions/presentation/inline_cells.dart`, `test/features/transactions/transactions_bulk_tags_test.dart` (novo)
 contrato: SPEC §6.3 "Tags em massa (Fase 10)", §7.3 Fase 10 (`BulkAction('Tags', Icons.sell_outlined)` depois de 'Recategorizar'; `labelOf` em `InlineCategoryCell` e `showBulkCategoryDialog`, com a ordem recebida mantida). A página passa `options(kind)` + `labelOf: (c) => tree.label(c.id)` para as células inline e para o diálogo de recategorizar (lista = `options(expense)` + `options(income)`). `bulk_action_bar.dart` não muda.
 aceite (seed demo, Ultra, 1400×900):
@@ -1204,7 +1204,163 @@ aceite (seed demo, Ultra, 1400×900):
 - Célula inline de categoria lista 'Alimentação › Mercado X'; diálogo 'Recategorizar' também.
 - Testes existentes da Fase 9 (`bulk_dialogs_test.dart`, `inline_cells_test.dart`, `transactions_bulk_test.dart`) passam sem mudança (parâmetro novo é opcional).
 
-### T-142 · Documentação da Fase 10 · `todo` · deps: T-120..T-141 · parallel: no
+### T-142 · Documentação da Fase 10 · `done` · deps: T-120..T-141 · parallel: no
 files: `CONTEXT.md`, `ROADMAP.md`, `docs/BACKLOG.md`
 contrato: CONTEXT §4 (árvore com `features/goals/`, `category_tree.dart`, `tags.dart`, `spendable.dart`, `goal_math.dart`, `spendable_card.dart`, `tag_widgets.dart`, `goals_section.dart`, `goal_dialogs.dart`), §5 (Painel com "Posso gastar hoje" como 1º elemento e drill-down; Categorias em árvore; Metas em Contas; tags em Transações, form, regras, paleta e massa; diferenças Simples/Ultra), §6 (regras de "posso gastar", orçamento do pai, reserva de metas), §7 (box `fm_goals`; backup cobre metas, `parentId` e tags; CSV com coluna Tags), §8 (testes novos, total), §10 (commit), §11 (status), §12 (limites: receitas provisionadas avulsas não definem a próxima receita nem somam no livre; contas de investimento entram no saldo do "posso gastar"; recorrências não carregam tags; tags só editáveis no Ultra; subcategorias homônimas tornam o nome simples ambíguo no dicionário/CSV; reserva acima do saldo só gera aviso). ROADMAP: Fase 10 em "v3". BACKLOG: T-120..T-141 `done`.
+aceite: total de testes igual ao de `flutter test`; `bash tool/check.sh` → `CHECK OK`.
+
+### Pendências da revisão da Fase 10 · `todo`
+- Recorrências não têm tags e a materialização não aplica regras: ocorrências recorrentes nunca recebem tags.
+- `hasAnyTag` dobra as tags a cada build de Transações (O(n·tags)); pré-dobrar chaves ou indexar no Ledger se pesar.
+
+## Fase 11 — Patrimônio e devo/me devem
+
+> Origem: `docs/V3_DIRECTION.md` (Domínios novos: Patrimônio; Devo / me devem). Contratos: SPEC §3.5 (Fase 11), §4.10, §4.11, §5.7 (extras), §5.23 regra 6 (nota Fase 11), §5.24–5.26, §6.1–6.3 (Fase 11), §7.3 "Patrimônio e devo/me devem (Fase 11)", §8.
+> Sem dependência nova (`fl_chart` já existe). Domínio puro primeiro, com os exemplos do SPEC como teste; Ledger/persistência; UI por último.
+> Decisões fechadas: patrimônio = contas não arquivadas (todos os tipos) + ativos manuais (último snapshot até a data) + a receber − a pagar − dívida de cartão. **Dívida de cartão = saldo devedor já contratado** (compras lançadas inclusive parcelas futuras de compras já feitas − estornos − pagamentos de fatura; sem recorrências projetadas), por data de compra (`cardPurchaseDate`). Histórico de 24 meses memoizado no Ledger; pontos no fim de cada mês e o último em hoje. Ativo: 1 snapshot por data, só data ≤ hoje, "Encerrar" = snapshot 0 + arquivado (histórico mantido). Dívida: pagamentos parciais com histórico; "quitado" é derivado (restante 0); cada pagamento cria transação paga (receita se me devem, despesa se devo; categoria opcional) e guarda o id; desfazer exclui a transação; dívida com pagamentos não pode ser excluída nem mudar de direção. "Devo" com vencimento entra na Previsão e no "posso gastar" como evento `expense` sem conta (via `extraEvents`; `spendable.dart` não muda); "me devem" nunca entra. Página nova **Patrimônio** (índice 9, na sidebar depois de Contas, sem atalho numérico; atalhos 1–9 intactos); Painel Ultra ganha o KPI 'Patrimônio líquido'. Simples: KPI + linha de apoio, ativos e dívidas enxutos.
+> Dependência da Fase 10: T-154, T-155, T-159 e T-163 tocam arquivos da Fase 10 (`ledger.dart`, `bootstrap.dart`, `app_scope.dart`, `backup_service.dart`, `settings_page.dart`, `dashboard_summary.dart`, `dashboard_sections.dart`, `app_commands.dart`) → só começam com a revisão da Fase 10 fechada (T-142 `done`). As ondas A, B e T-158 só criam arquivos novos (e `forecast.dart`, que a Fase 10 não tocou) e podem começar antes.
+> Ondas (tarefas da mesma onda têm arquivos disjuntos): **A** T-150, T-151, T-152 · **B** T-153 · **C** (Fase 10 fechada) T-154, T-158 · **D** T-155, T-156, T-157, T-159 · **E** T-160, T-161 · **F** T-162 · **G** T-163 · **H** T-164.
+> Datas nos testes: `DateTime(2026, 11, 15)` como "hoje" (salvo indicação). App de teste igual a `test/features/goals/goals_section_test.dart` (`bootstrap` em memória, `clock`).
+
+### T-150 · Ativos: entidade `Asset` e regras de snapshot (domínio) · `todo` · deps: — · parallel: yes
+files: `lib/features/net_worth/domain/asset.dart` (novo), `test/features/net_worth/asset_test.dart` (novo)
+contrato: SPEC §4.10 inteiro (`AssetKind`, `assetKindLabel`, `AssetSnapshot`, `Asset`) e §5.24 inteiro (`assetSnapshotError`, `removeSnapshotError`, `closeAsset`, `assetsValueAt`, regras 1–5). Dart puro; datas com `dateOnly`/`dateKey`/`parseDateKey`; nada de `package:flutter`.
+aceite:
+- Todos os exemplos de §5.24.
+- Construtor com snapshots fora de ordem → ordenados por data; dois na mesma data → fica o último da lista recebida; lista imutável (`add` lança).
+- `withSnapshot`/`withoutSnapshot` devolvem instâncias novas (original intacta); `withoutSnapshot('inexistente')` → igual à original.
+- Round-trip de `Asset` com 2 snapshots (um com nota) e `archived: true`; `fromMap` sem `snapshots`/`archived` → `[]`/`false`; `kind` desconhecido → `investment`; snapshot inválido (sem `valueCents`) ignorado.
+- `assetKindLabel` dos 4 tipos; `lastChangeCents` com 1 snapshot → `null`; sem snapshots: `currentValueCents == 0`, `latest == null`.
+
+### T-151 · Devo / me devem: entidade `Debt` e regras (domínio) · `todo` · deps: — · parallel: yes
+files: `lib/features/debts/domain/debt.dart` (novo), `lib/features/debts/domain/debt_math.dart` (novo), `test/features/debts/debt_test.dart` (novo)
+contrato: SPEC §4.11 inteiro (`DebtDirection`, `DebtPayment`, `Debt`) e §5.25 inteiro (`debtPaymentError`, `debtTransactionDescription`, `settleDebt`, `undoDebtPayment`, `isDebtOverdue`, `debtTotalsAt`, `debtForecastEvents`, `PersonDebtSummary`, `debtsByPerson`, `debtPeople`, regras 1–7). Dart puro; mensagens com `formatMoney`; agrupamento com `foldText(person.trim())`; importa `Transaction` (§4.4) e `ForecastEvent`/`ForecastEventKind` de `forecast.dart` (sem mudar `forecast.dart`).
+aceite:
+- Todos os exemplos de §5.25, exceto o de "posso gastar" (fica em T-154).
+- `Debt(person: '  Ana ', description: '  ')` → `person 'Ana'`, `description null`; pagamentos fora de ordem → ordenados por (data, id); lista imutável.
+- Round-trip com e sem `description`/`dueDate` e com 2 pagamentos (um sem `transactionId`); `fromMap` sem `payments` → `[]`; `direction` desconhecida → `iOwe`; `copyWith(dueDate: null)` limpa; omitido mantém.
+- `settleDebt` em dívida `iOwe` → transação `expense` com 'Pago a Bruno'; categoria passada chega na transação.
+- `debtForecastEvents`: evento com `kind == ForecastEventKind.expense`, `accountId == null`, `sourceId == debt.id`; dívida com descrição → 'Devo a Bruno · {descrição}'; pagamento parcial reduz o valor do evento para o restante.
+
+### T-152 · Previsão aceita eventos extras · `todo` · deps: — · parallel: yes
+files: `lib/features/forecast/domain/forecast.dart`, `test/features/forecast_test.dart`
+contrato: SPEC §5.7 (parâmetro `Iterable<ForecastEvent> extraEvents = const []` em `ForecastService.compute`; bullet "Extras (Fase 11)" do passo 3). Os extras entram em `events` antes da ordenação existente e seguem o mesmo caminho (meses, `daily`, `firstNegativeDate`; `accountNegativeDates` só se `accountId` não nulo). Nenhum chamador muda (parâmetro opcional).
+aceite (hoje 15/11/2026, uma conta A com 100000, sem outras transações):
+- Extra `expense` −30000 em 01/12 sem conta → `events` contém o evento em 01/12; `daily` de 01/12 em diante = 70000; `months[1].expenseCents` inclui 30000 (mesmo critério das despesas); `accountNegativeDates` vazio.
+- Extra em 10/11 (passado) → entra com `date` 15/11; extra depois do fim do horizonte → ignorado.
+- Extra de −150000 em 20/11 → `firstNegativeDate == 20/11/2026`.
+- Sem `extraEvents` → resultado idêntico ao atual (testes existentes de previsão, linha do tempo e `spendable_test.dart` passam sem mudança).
+
+### T-153 · Patrimônio líquido: histórico mensal e dívida de cartão (domínio) · `todo` · deps: T-150, T-151 · parallel: yes
+files: `lib/features/net_worth/domain/net_worth.dart` (novo), `test/features/net_worth/net_worth_test.dart` (novo)
+contrato: SPEC §5.26 inteiro (`NetWorthPoint`, `cardPurchaseDate`, `cardDebtAt`, `netWorthHistory`, regras 1–5 e a decisão "Dívida de cartão"). Reusa `monthlyHistory` (§5.10) para `accountsCents`, `assetsValueAt` (§5.24) e `debtTotalsAt` (§5.25). Dart puro.
+aceite (dados exatos do exemplo de §5.26; transações do cartão com `buildInstallments`):
+- 3 pontos: set `netCents 4490000` (contas 600000, ativos 4000000, a receber 0, a pagar 80000, cartão 30000); out `4920000` (870000, 4200000, 50000, 80000, 120000); nov `4670000` (840000, 4000000, 30000, 80000, 120000).
+- `date` dos pontos: 30/09/2026, 31/10/2026 e 15/11/2026; `history.last.accountsCents == ForecastService.compute(...).currentTotalCents` com os mesmos dados.
+- Variações de §5.26: estorno → cartão de nov 110000; `invoicePayment` com data 20/11 → cartão 80000, contas 800000, líquido 4670000; pagamento maior que a dívida → 0; `cardPurchaseDate` → 28/01/2026.
+- Cartão de débito com despesa paga → não entra em `cardDebtCents`; recorrência de cartão de crédito não materializada → não entra; cartão arquivado com saldo devedor → entra.
+- `netWorthHistory(months: 24)` → 24 pontos em ordem cronológica, último no mês de hoje.
+
+### T-154 · Ledger, persistência e `AppServices` da Fase 11 · `todo` · deps: T-150, T-151, T-152, T-153, T-142 (Fase 10 fechada) · parallel: yes (com T-158)
+files: `lib/app/bootstrap.dart`, `lib/app/app_scope.dart`, `lib/app/ledger.dart`, `test/app/ledger_net_worth_test.dart` (novo)
+contrato: SPEC §3.5 (boxes `fm_assets`, `fm_debts`), §6.1 (`assets` e `debts` obrigatórios em `AppServices`), §6.2 bloco Fase 11 (`assets`/`debts` opcionais no `Ledger`, entram em `_sources`; `forecast` com `extraEvents: debtForecastEvents(...)`; `netWorthMonths = 24`; `netWorthHistory`, `debtsByPerson`, `debtPeople` memoizados e zerados em `_clearCache`).
+aceite:
+- `bootstrap(storeFactory: memória)` → `services.assets.all` e `services.debts.all` vazios; `assets.upsert` e `debts.upsert` notificam o `Ledger`.
+- `ledger.netWorthHistory.length == 24`; `identical(ledger.netWorthHistory, ledger.netWorthHistory)`; após `assets.upsert` de um ativo com snapshot de hoje 100000, `netWorthHistory.last.assetsCents == 100000`.
+- `netWorthHistory.last.accountsCents == ledger.forecast.currentTotalCents`.
+- Exemplo de "posso gastar" de §5.25 (conta A 300000, salário dia 5, d2 devo 80000 vence 01/12, d5 'Eva' me deve 50000 vence 20/11) → `spendableToday.plannedCents == 80000`, `freeCents == 220000`, `perDayCents == 11000`; `forecast.events` tem 1 evento 'Devo a Bruno' e nenhum de 'Eva'.
+- Registrar pagamento de 80000 em d2 (`debts.upsert(settleDebt(...).debt)`) → o evento some da previsão (cache invalidado).
+- `debtsByPerson`/`debtPeople` refletem `debts.all`; `test/app/ledger_test.dart` e `ledger_goals_test.dart` (Ledger sem `assets`/`debts`) passam sem mudança; sem `debts` → `debtsByPerson == []`.
+
+### T-155 · Backup e "apagar dados" cobrem ativos e dívidas · `todo` · deps: T-154 · parallel: yes
+files: `lib/core/services/backup_service.dart`, `lib/features/settings/presentation/settings_page.dart`, `test/core/backup_service_test.dart`, `test/features/settings/settings_page_test.dart`
+contrato: SPEC §3.5 "Fase 11: `fm_assets` e `fm_debts`" (chaves `assets` e `debts`, versão 1, ausência → `[]`, sem validação de vínculo, retrato/restauração, apagar dados e nova mensagem de confirmação).
+aceite:
+- Export → import em app vazio devolve ativos (com snapshots e `archived`) e dívidas (com pagamentos e `transactionId`) iguais.
+- Backup sem `'assets'`/`'debts'` → coleções vazias e o resto importa normalmente.
+- Falha na gravação (store que lança uma vez em `fm_debts`) restaura ativos e dívidas anteriores (padrão do teste de rollback existente).
+- Ajustes Ultra → "Apagar todos os dados" confirmado → ativos e dívidas vazios; a mensagem do diálogo menciona 'ativos, dívidas'.
+
+### T-156 · Ativos: diálogos (form, atualizar valor, histórico) · `todo` · deps: T-154 · parallel: yes
+files: `lib/features/net_worth/presentation/asset_dialogs.dart` (novo), `test/features/net_worth/asset_dialogs_test.dart` (novo)
+contrato: SPEC §7.3 Fase 11, bloco **Diálogos de ativo** (`showAssetForm`, `showAssetValueDialog`, `showAssetHistory`) e §6.3 "Ativos (Fase 11)". `DropdownButtonFormField` com `initialValue`; cores via `context.colors`; guarda contra duplo pop.
+aceite:
+- Form: nome vazio → 'Informe o nome'; valor vazio → 'Informe o valor'; criar 'Carro X' tipo 'Veículo' valor 'R$ 40.000,00' data padrão → ativo gravado com `kind vehicle`, 1 snapshot de 4000000 em 15/11/2026, e devolvido.
+- Editar → sem campos de valor/data; trocar o nome grava só o nome (snapshots intactos).
+- Atualizar valor: 'R$ 38.000,00' em 15/11 → `currentValueCents 3800000`; escolher a data de um snapshot existente mostra 'Substitui o valor de dd/mm/aaaa' e salvar mantém a quantidade de snapshots; data 16/11 → 'A data não pode ser no futuro' e nada gravado.
+- Histórico: lista os snapshots do mais recente para o mais antigo com a variação; excluir com 2 snapshots → sobra 1; excluir o único → SnackBar 'O ativo precisa de pelo menos um valor' e nada muda.
+- Nenhuma ação cria transação (`transactions.all` inalterado).
+
+### T-157 · Dívidas: diálogos (form, quitar, pagamentos) · `todo` · deps: T-154 · parallel: yes
+files: `lib/features/debts/presentation/debt_dialogs.dart` (novo), `test/features/debts/debt_dialogs_test.dart` (novo)
+contrato: SPEC §7.3 Fase 11, bloco **Diálogos de dívida** (`showDebtForm`, `showSettleDebtDialog`, `showDebtPayments`) e §6.3 "Dívidas (Fase 11)" (ordem de gravação transação → dívida, compensação, SnackBars, desfazer). `Autocomplete<String>` com `ledger.debtPeople`; dropdowns com `initialValue`; categoria por `ledger.categoryTree.options(kind)` + `label`.
+aceite (app de teste com 'Conta Alfa' saldo 200000 e conta arquivada 'Conta Velha'):
+- Form: pessoa vazia → 'Informe a pessoa'; valor 0 → 'Informe um valor maior que zero'; vencimento antes da data → 'Vencimento antes da data'; salvar 'Ana' 'Me devem' 'R$ 500,00' → dívida gravada com `owedToMe` e 50000.
+- Pessoa: com uma dívida existente de 'Bruno', digitar 'bru' mostra a opção 'Bruno'.
+- Editar dívida com pagamento de 20000: direção desabilitada com 'Dívida com pagamentos'; valor 'R$ 100,00' → 'Já pago: R$ 200,00'.
+- Quitar: dropdown sem 'Conta Velha'; parcial 'R$ 200,00' → 1 transação `income` 20000 'Recebido de Ana' em 'Conta Alfa' (saldo da conta 220000), restante 30000, SnackBar 'Pagamento registrado · transação criada em Conta Alfa'; em seguida 'R$ 300,01' → 'Restante: R$ 300,00' e nada gravado; depois 'R$ 300,00' → `settled` e 'Dívida quitada · transação criada em Conta Alfa'.
+- Dívida 'Devo' com categoria escolhida → transação `expense` com essa categoria.
+- Pagamentos: 'Desfazer' com confirmação → pagamento removido e transação excluída; pagamento cuja transação foi apagada mostra 'Transação excluída' e desfazer só remove o pagamento.
+- Sem conta ativa → 'Cadastre uma conta para registrar o pagamento.' e 'Confirmar' desabilitado.
+
+### T-158 · Gráfico de evolução do patrimônio · `todo` · deps: T-153 · parallel: yes (com T-154)
+files: `lib/features/net_worth/presentation/net_worth_chart.dart` (novo), `test/features/net_worth/net_worth_chart_test.dart` (novo)
+contrato: SPEC §7.3 Fase 11, bloco **`NetWorthChart`** (`NetWorthChart`, `netWorthTooltipText`; fl_chart como em `forecast_chart.dart`; tooltip rico da Fase 7). Cores via `context.colors`; sem gradiente.
+aceite (pontos montados à mão):
+- `netWorthTooltipText` do ponto de out/2026 de §5.26 → 'Outubro 2026\nPatrimônio líquido: R$ 49.200,00\nContas: R$ 8.700,00\nAtivos: R$ 42.000,00\nA receber: R$ 500,00\nA pagar: -R$ 800,00\nDívida de cartão: -R$ 1.200,00'.
+- Ponto do mês atual (date 15/11, não é o último dia) → 1ª linha 'Novembro 2026 (até 15/11)'.
+- `hideValues: true` → todos os valores 'R$ ••••'.
+- Widget com 12 pontos renderiza um `LineChart` sem exceção; com 1 ponto → 'Ainda sem histórico para o gráfico.'; com um ponto negativo existe a linha horizontal em 0 (`extraLinesData.horizontalLines` não vazio).
+
+### T-159 · Painel Ultra: KPI "Patrimônio líquido" · `todo` · deps: T-154 · parallel: yes
+files: `lib/features/dashboard/presentation/dashboard_summary.dart`, `lib/features/dashboard/presentation/dashboard_sections.dart`, `test/features/dashboard/dashboard_net_worth_test.dart` (novo)
+contrato: SPEC §7.3 Fase 11, parágrafo **Painel Ultra** (`netWorthCents`, `netWorthDelta`, `netWorthTrend` em `DashboardSummary`; 6º `KpiTile` depois de 'Gasto no mês' com `_Trend(higherIsBetter: true)`).
+aceite:
+- Ultra com um ativo de 100000 (snapshot de hoje): `DashboardSummary.of(ledger, ultra: true).netWorthCents == ledger.netWorthHistory.last.netCents`; `netWorthTrend.length == 6`; o Painel mostra 'Patrimônio líquido'.
+- Simples: os três campos `null` e o texto 'Patrimônio líquido' não aparece no Painel.
+- Testes existentes do Painel (incluindo `spendable_card_test.dart` e `dashboard_categories_test.dart`) passam.
+
+### T-160 · Patrimônio: seção de ativos · `todo` · deps: T-156 · parallel: yes (com T-161)
+files: `lib/features/net_worth/presentation/assets_section.dart` (novo), `test/features/net_worth/assets_section_test.dart` (novo)
+contrato: SPEC §7.3 Fase 11 (linha "Ativos" da tabela; bloco **`AssetsSection`**), §6.3 "Ativos (Fase 11)" (encerrar, reativar, excluir com confirmação). Usa os diálogos de T-156.
+aceite (app de teste; ativos 'Carro' 3800000 com 2 snapshots e 'Tesouro' 200000):
+- Sem ativos → `EmptyState` com 'Novo ativo'.
+- Simples: 'Carro' antes de 'Tesouro' (maior valor primeiro), 'Veículo', 'R$ 38.000,00' e o botão `asset-update-<id>`; sem menu.
+- Ultra: 'Atualizado em 01/11/2026', variação '-R$ 2.000,00', rodapé 'Total' 'R$ 40.000,00'.
+- Ultra: menu 'Encerrar' com confirmação → 'Carro' some, `assets-show-archived` aparece; marcar → 'Carro' volta com 'Encerrado'; 'Reativar' → `archived` false. 'Excluir' confirmado → removido do repositório.
+
+### T-161 · Patrimônio: seção devo / me devem · `todo` · deps: T-157 · parallel: yes (com T-160)
+files: `lib/features/debts/presentation/debts_section.dart` (novo), `test/features/debts/debts_section_test.dart` (novo)
+contrato: SPEC §7.3 Fase 11 (linha "Devo / me devem" da tabela; bloco **`DebtsSection`**: totais de `ledger.netWorthHistory.last`, 'Por pessoa' de `ledger.debtsByPerson`, filtros, ordem, keys), §6.3 "Dívidas (Fase 11)" (excluir bloqueado com pagamentos). Usa os diálogos de T-157.
+aceite (app de teste com 'Conta Alfa'; dívidas d1 só com p1, d2, d3, d4 e d6 de §5.25):
+- `debt-totals` mostra 'R$ 300,00' (me devem) e 'R$ 950,00' (devo).
+- Simples: 4 linhas em aberto (Dani quitada fora), d3 com 'Vencida', d4 (sem vencimento) por último; sem filtros nem 'Por pessoa'.
+- Ultra: 'Por pessoa' com Bruno, Ana, Carla nessa ordem; tocar em `debt-person-0` → só as dívidas de Bruno; filtro 'Me devem' → só d1; 'Mostrar quitadas' → Dani aparece com 'Quitada' e sem 'Quitar'.
+- `debt-settle-<d2>` abre 'Pagar a Bruno'.
+- Menu 'Excluir' em d1 (tem pagamento) → SnackBar 'Desfaça os pagamentos antes de excluir' e nada muda; em d4 confirmado → removida.
+- Sem dívidas → `EmptyState` com 'Nova dívida'.
+
+### T-162 · Página Patrimônio · `todo` · deps: T-158, T-160, T-161 · parallel: no
+files: `lib/features/net_worth/presentation/net_worth_page.dart` (novo), `test/features/net_worth/net_worth_page_test.dart` (novo)
+contrato: SPEC §7.3 Fase 11 (tabela; bloco **`NetWorthPage`**: KPI com delta/sparkline no Ultra e linha de apoio no Simples, 'Evolução' com seletor 12/24, 'Composição' com variação da contribuição, `AssetsSection`, `DebtsSection`, botões do cabeçalho).
+aceite (app de teste com os dados de §5.26 — hoje 15/11/2026):
+- KPI `net-worth-kpi` mostra 'R$ 46.700,00'; Ultra mostra a variação '-R$ 2.500,00' e um `DeltaBadge`; Simples mostra a linha 'Contas … · Ativos … · A receber … · Dívidas …' e não mostra 'Evolução' nem 'Composição'.
+- Ultra: `NetWorthChart` com 12 pontos; tocar '24 meses' em `net-worth-range` → 24 pontos.
+- Ultra: `net-worth-breakdown` com 'Dívida de cartão' 'R$ 1.200,00' e 'Faturas em aberto e parcelas futuras já lançadas'.
+- Botões 'Novo ativo' e 'Nova dívida' abrem os respectivos diálogos.
+- Patrimônio negativo (só uma dívida 'Devo' de 10000) → valor do KPI em `danger`.
+- `hideValues` → nenhum valor em claro na página.
+
+### T-163 · Shell e paleta: página Patrimônio e comandos novos · `todo` · deps: T-162, T-156, T-157 · parallel: no
+files: `lib/app/home_shell.dart`, `lib/app/app_commands.dart`, `test/app/smoke_test.dart`, `test/app/app_commands_test.dart`
+contrato: SPEC §7.3 Fase 11 (decisões de navegação: índice 9 `Patrimônio` com `Icons.account_balance_outlined`, `_sidebarOrder`, `_NavTile.number` `int?`, badge Ultra de dívidas `iOwe` vencidas; parágrafo **Paleta**: `onNewAsset`/`onNewDebt` e as 2 entradas depois de 'Nova recorrência'), §7.3 "Páginas (índice)". `_pageFor(9) => const NetWorthPage()`. `GoToPageIntent`/`app_shortcuts.dart` não mudam.
+aceite:
+- Smoke test (larga e estreita, Simples e Ultra) navega as 10 páginas sem exceção; na larga, 'Patrimônio' fica entre 'Contas' e 'Transações' (`getTopLeft(...).dy`) e as 9 primeiras páginas mantêm o tooltip 'Atalho: {i+1}'; na estreita o item tem tooltip 'Patrimônio'.
+- Tecla '9' continua indo para Ajustes (`shell_shortcuts_test.dart` passa sem mudança).
+- `buildAppCommands`: 'Ir para Patrimônio' sem `shortcut`; 'Novo ativo' e 'Nova dívida (devo / me devem)' logo depois de 'Nova recorrência'; `fuzzyRank` com 'emprest' acha 'Nova dívida (devo / me devem)'; `onRun` chama o callback certo.
+- Ultra com uma dívida `iOwe` vencida → badge '1' no item Patrimônio; Simples sem badge.
+
+### T-164 · Documentação da Fase 11 · `todo` · deps: T-150..T-163 · parallel: no
+files: `CONTEXT.md`, `ROADMAP.md`, `docs/BACKLOG.md`
+contrato: CONTEXT §4 (árvore com `features/net_worth/` e `features/debts/` e seus arquivos; `home_shell.dart` com 10 páginas), §5 (página Patrimônio índice 9 depois de Contas, sem atalho; KPI e Painel Ultra; diferenças Simples/Ultra), §6 (patrimônio líquido, dívida de cartão = saldo devedor já contratado com parcelas futuras, snapshots de ativo, quitação parcial que gera transação, "devo" com vencimento na Previsão e no "posso gastar", "me devem" fora), §7 (boxes `fm_assets` e `fm_debts`; backup e apagar dados cobrem as duas), §8 (testes novos, total), §10 (commit), §11 (status), §12 (limites: editar/excluir a transação de quitação pela tela de Transações não altera a dívida; registrar "me devem" não tira dinheiro de conta — o empréstimo feito precisa ser lançado à parte; quitação de "devo" é despesa e entra no gasto por categoria; dívidas não aparecem em `Ledger.upcoming` (Próximos vencimentos), só nos eventos da previsão; valor de ativo é declarado, sem interpolação; `cardPurchaseDate` aproxima o dia em parcelas com dia clampado; Patrimônio sem atalho numérico). ROADMAP: Fase 11 em "v3". BACKLOG: T-150..T-163 `done`.
 aceite: total de testes igual ao de `flutter test`; `bash tool/check.sh` → `CHECK OK`.

@@ -67,21 +67,14 @@ class BulkActionBar extends StatelessWidget {
               child: Row(
                 children: [
                   for (final action in actions)
-                    TextButton.icon(
-                      onPressed: action.onPressed,
-                      icon: Icon(action.icon, size: 18),
-                      label: Text(action.label),
-                      style: TextButton.styleFrom(
-                        foregroundColor: action.destructive
-                            ? colors.danger
-                            : colors.textPrimary,
-                        disabledForegroundColor: colors.textSecondary,
-                      ),
-                    ),
+                    if (!action.destructive) _button(action, colors),
                 ],
               ),
             ),
           ),
+          // Destrutivas ficam fixas à direita: nunca saem da área visível.
+          for (final action in actions)
+            if (action.destructive) _button(action, colors),
           IconButton(
             tooltip: 'Limpar seleção (Esc)',
             icon: const Icon(Icons.close, size: 18),
@@ -92,4 +85,14 @@ class BulkActionBar extends StatelessWidget {
       ),
     );
   }
+
+  Widget _button(BulkAction action, AppColors colors) => TextButton.icon(
+    onPressed: action.onPressed,
+    icon: Icon(action.icon, size: 18),
+    label: Text(action.label),
+    style: TextButton.styleFrom(
+      foregroundColor: action.destructive ? colors.danger : colors.textPrimary,
+      disabledForegroundColor: colors.textSecondary,
+    ),
+  );
 }

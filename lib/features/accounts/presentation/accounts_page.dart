@@ -5,7 +5,10 @@ import '../../../core/models/app_settings.dart';
 import '../../../core/models/year_month.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
+import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/widgets.dart';
+import '../../goals/domain/goal_math.dart';
+import '../../goals/presentation/goals_section.dart';
 import '../domain/account.dart';
 import 'account_form.dart';
 import 'transfer_dialog.dart';
@@ -39,6 +42,7 @@ class _AccountsPageState extends State<AccountsPage> {
         final wide = MediaQuery.sizeOf(context).width >= _wideBreakpoint;
         final pad = wide ? AppSpace.xl : AppSpace.lg;
         final balances = s.ledger.accountBalances;
+        final reserved = s.ledger.reservedByAccount;
         final active = s.accounts.all.where((a) => !a.archived).toList();
         final showArchived = ultra && _showArchived;
         final shown = [
@@ -129,19 +133,26 @@ class _AccountsPageState extends State<AccountsPage> {
                         const SizedBox(height: AppSpace.lg),
                         if (showForecastColumn) const _ColumnHeader(),
                         Expanded(
-                          child: items.isEmpty
-                              ? EmptyState(
-                                  icon: Icons.account_balance_wallet_outlined,
-                                  message: s.accounts.isEmpty
-                                      ? 'Nenhuma conta cadastrada.'
-                                      : 'Todas as contas estão arquivadas.',
-                                  action: FilledButton.icon(
-                                    onPressed: () => showAccountForm(context),
-                                    icon: const Icon(Icons.add),
-                                    label: const Text('Nova conta'),
+                          // Uma rolagem só: a seção de metas fica depois da lista de contas.
+                          child: CustomScrollView(
+                            slivers: [
+                              if (items.isEmpty)
+                                SliverFillRemaining(
+                                  hasScrollBody: false,
+                                  child: EmptyState(
+                                    icon: Icons.account_balance_wallet_outlined,
+                                    message: s.accounts.isEmpty
+                                        ? 'Nenhuma conta cadastrada.'
+                                        : 'Todas as contas estão arquivadas.',
+                                    action: FilledButton.icon(
+                                      onPressed: () => showAccountForm(context),
+                                      icon: const Icon(Icons.add),
+                                      label: const Text('Nova conta'),
+                                    ),
                                   ),
                                 )
-                              : ListView.builder(
+                              else
+                                SliverList.builder(
                                   itemCount: items.length,
                                   itemBuilder: (context, i) =>
                                       switch (items[i]) {
@@ -157,6 +168,9 @@ class _AccountsPageState extends State<AccountsPage> {
                                                     (forecastByAccount[a.id] ??
                                                         0)
                                               : null,
+                                          reservedCents: ultra
+                                              ? (reserved[a.id] ?? 0)
+                                              : null,
                                           showForecastColumn:
                                               showForecastColumn,
                                           onAction: (action) =>
@@ -165,6 +179,12 @@ class _AccountsPageState extends State<AccountsPage> {
                                         _ => const SizedBox.shrink(),
                                       },
                                 ),
+                              const SliverToBoxAdapter(
+                                child: SizedBox(height: AppSpace.lg),
+                              ),
+                              const SliverToBoxAdapter(child: GoalsSection()),
+                            ],
+                          ),
                         ),
                       ],
                     ),
@@ -200,12 +220,13 @@ class _AccountsPageState extends State<AccountsPage> {
           (t) => t.accountId == a.id || t.toAccountId == a.id,
         ) ||
         s.cards.all.any((c) => c.paymentAccountId == a.id) ||
-        s.recurring.all.any((r) => r.accountId == a.id);
+        s.recurring.all.any((r) => r.accountId == a.id) ||
+        s.goals.all.any((g) => g.accountId == a.id);
     if (inUse) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Conta usada por lançamentos, cartões ou recorrências. Arquive em vez de excluir.',
+            'Conta usada por lançamentos, cartões, recorrências ou metas. Arquive em vez de excluir.',
           ),
         ),
       );
@@ -307,6 +328,7 @@ class _AccountRow extends StatelessWidget {
     required this.account,
     required this.balanceCents,
     required this.forecastCents,
+    required this.reservedCents,
     required this.showForecastColumn,
     required this.onAction,
   });
@@ -316,6 +338,9 @@ class _AccountRow extends StatelessWidget {
 
   /// null no modo Simples.
   final int? forecastCents;
+
+  /// Reserva ativa das metas nesta conta; null no modo Simples.
+  final int? reservedCents;
   final bool showForecastColumn;
   final ValueChanged<_AccountAction> onAction;
 
@@ -326,6 +351,12 @@ class _AccountRow extends StatelessWidget {
     final archived = account.archived;
     final nameColor = archived ? c.textSecondary : c.textPrimary;
     final forecast = forecastCents;
+    final reserved = reservedCents;
+    final hidden = AppScope.of(context).settings.value.hideValues;
+    final overReserved = overReservedCents(
+      accountBalanceCents: balanceCents,
+      reservedCents: reserved ?? 0,
+    );
     return DecoratedBox(
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: c.border)),
@@ -379,6 +410,13 @@ class _AccountRow extends StatelessWidget {
                         ),
                         MoneyText(forecast, style: textTheme.bodySmall),
                       ],
+                    ),
+                  if (reserved != null && reserved > 0)
+                    Text(
+                      '${formatMoney(reserved, hidden: hidden)} reservado',
+                      style: textTheme.bodySmall?.copyWith(
+                        color: overReserved > 0 ? c.warning : c.textSecondary,
+                      ),
                     ),
                 ],
               ),

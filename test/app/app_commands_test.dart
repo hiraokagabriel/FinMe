@@ -1,4 +1,5 @@
 import 'package:finme/app/app_commands.dart';
+import 'package:finme/app/app_scope.dart';
 import 'package:finme/app/bootstrap.dart';
 import 'package:finme/app/command_palette.dart';
 import 'package:finme/app/ledger.dart';
@@ -7,6 +8,7 @@ import 'package:finme/core/models/app_settings.dart';
 import 'package:finme/core/services/record_store.dart';
 import 'package:finme/core/utils/fuzzy.dart';
 import 'package:finme/core/widgets/money.dart';
+import 'package:finme/features/categories/domain/transaction_category.dart';
 import 'package:finme/features/transactions/domain/transaction.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -101,6 +103,7 @@ void main() {
 
   group('transactionEntries', () {
     late Ledger ledger;
+    late AppServices services;
 
     setUp(() async {
       final s = await bootstrap(
@@ -108,8 +111,44 @@ void main() {
         clock: () => DateTime(2026, 11, 14),
       );
       await seedDemo(s);
+      services = s;
       ledger = s.ledger;
     });
+
+    test(
+      'subcategoria no subtitle (Pai › Filha) e tags com # no fim',
+      () async {
+        await services.categories.upsert(
+          const TransactionCategory(
+            id: 'cat_mercado_x',
+            name: 'Mercado X',
+            kind: CategoryKind.expense,
+            iconCodePoint: 0xe59c,
+            colorValue: 0xFF42A5F5,
+            parentId: 'cat_compras',
+          ),
+        );
+        final t = Transaction(
+          id: 'm1',
+          type: TransactionType.expense,
+          amountCents: 3000,
+          date: DateTime(2026, 11, 14),
+          description: 'Mercado Exemplo',
+          cardId: 'card_beta_master',
+          categoryId: 'cat_mercado_x',
+          tags: const ['casa'],
+        );
+        final entry = transactionEntries(
+          [t],
+          ledger: ledger,
+          onOpen: (_) {},
+        ).single;
+        expect(
+          entry.subtitle,
+          '14/11/2026 · Beta Master · Compras › Mercado X · #casa',
+        );
+      },
+    );
 
     Transaction parcela() => Transaction(
       id: 'p1',

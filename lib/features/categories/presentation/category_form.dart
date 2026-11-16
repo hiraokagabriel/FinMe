@@ -7,13 +7,16 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/id.dart';
 import '../../../core/widgets/widgets.dart';
+import '../domain/category_tree.dart';
 import '../domain/transaction_category.dart';
 
 /// Abre o formulário de categoria (nova ou edição). Orçamento só existe para despesa.
+/// `parentId` (só nova): cria subcategoria; herda ícone e cor do pai como padrão.
 Future<void> showCategoryForm(
   BuildContext context, {
   TransactionCategory? initial,
   CategoryKind kind = CategoryKind.expense,
+  String? parentId,
 }) {
   final services = AppScope.of(context);
   return showDialog<void>(
@@ -22,6 +25,7 @@ Future<void> showCategoryForm(
       services: services,
       initial: initial,
       kind: initial?.kind ?? kind,
+      parentId: parentId,
     ),
   );
 }
@@ -31,11 +35,13 @@ class _CategoryFormDialog extends StatefulWidget {
     required this.services,
     required this.initial,
     required this.kind,
+    this.parentId,
   });
 
   final AppServices services;
   final TransactionCategory? initial;
   final CategoryKind kind;
+  final String? parentId;
 
   @override
   State<_CategoryFormDialog> createState() => _CategoryFormDialogState();
@@ -46,9 +52,25 @@ class _CategoryFormDialogState extends State<_CategoryFormDialog> {
   late final _name = TextEditingController(text: widget.initial?.name ?? '');
   late final _budget = TextEditingController(text: _initialBudgetText());
   late CategoryKind _kind = widget.kind;
-  late int _icon = widget.initial?.iconCodePoint ?? kCategoryIcons.first;
-  late int _color = widget.initial?.colorValue ?? kEntityColors.first;
+  late final TransactionCategory? _newParent =
+      widget.initial == null && widget.parentId != null
+      ? widget.services.categories.byId(widget.parentId!)
+      : null;
+  late int _icon =
+      widget.initial?.iconCodePoint ??
+      _newParent?.iconCodePoint ??
+      kCategoryIcons.first;
+  late int _color =
+      widget.initial?.colorValue ??
+      _newParent?.colorValue ??
+      kEntityColors.first;
+  late String? _parentId = _startParentId();
   late final bool _inUse = _isInUse();
+  late final bool _hasChildren =
+      widget.initial != null &&
+      widget.services.categories.all.any(
+        (c) => c.parentId == widget.initial!.id,
+      );
   bool _saving = false;
 
   @override
@@ -63,6 +85,21 @@ class _CategoryFormDialogState extends State<_CategoryFormDialog> {
     return cents == null
         ? ''
         : (cents / 100).toStringAsFixed(2).replaceAll('.', ',');
+  }
+
+  /// Raízes do tipo que podem ser pai: sem pai próprio e diferentes da categoria editada.
+  List<TransactionCategory> _parentOptions(CategoryKind kind) => [
+    for (final c in widget.services.ledger.categoryTree.roots(kind))
+      if (c.parentId == null && c.id != widget.initial?.id) c,
+  ];
+
+  /// Pai inicial: o do cadastro, ou o pai passado na criação; inválido vira null.
+  String? _startParentId() {
+    final initial = widget.initial;
+    final id = initial == null
+        ? _newParent?.id
+        : widget.services.ledger.categoryTree.parentOf(initial.id);
+    return _parentOptions(_kind).any((c) => c.id == id) ? id : null;
   }
 
   /// Categoria com lançamentos ou recorrências não pode trocar de tipo (despesa/receita).
@@ -93,6 +130,7 @@ class _CategoryFormDialogState extends State<_CategoryFormDialog> {
             _kind == CategoryKind.expense && budget != null && budget > 0
             ? budget
             : null,
+        parentId: _parentId,
       );
       await widget.services.categories.upsert(category);
       if (mounted) {
@@ -154,10 +192,22 @@ class _CategoryFormDialogState extends State<_CategoryFormDialog> {
                   ],
                   selected: {_kind},
                   // Sem onSelectionChanged o controle fica desabilitado.
-                  onSelectionChanged: _inUse
+                  onSelectionChanged: _inUse || _hasChildren
                       ? null
-                      : (sel) => setState(() => _kind = sel.first),
+                      : (sel) => setState(() {
+                          _kind = sel.first;
+                          _parentId = null;
+                        }),
                 ),
+                if (_hasChildren) ...[
+                  const SizedBox(height: AppSpace.xs),
+                  Text(
+                    'Tem subcategorias',
+                    style: textTheme.bodySmall?.copyWith(
+                      color: c.textSecondary,
+                    ),
+                  ),
+                ],
                 if (_inUse) ...[
                   const SizedBox(height: AppSpace.xs),
                   Text(
@@ -167,6 +217,40 @@ class _CategoryFormDialogState extends State<_CategoryFormDialog> {
                     ),
                   ),
                 ],
+                const SizedBox(height: AppSpace.md),
+                // KeyedSubtree recria o campo ao trocar o tipo (os itens mudam).
+                KeyedSubtree(
+                  key: ValueKey(_kind),
+                  child: DropdownButtonFormField<String?>(
+                    key: const ValueKey('category-parent'),
+                    initialValue: _parentId,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      labelText: 'Categoria pai',
+                      helperText: _hasChildren ? 'Tem subcategorias' : null,
+                    ),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('Nenhuma (categoria principal)'),
+                      ),
+                      for (final parent in _parentOptions(_kind))
+                        DropdownMenuItem<String?>(
+                          value: parent.id,
+                          child: Text(parent.name),
+                        ),
+                    ],
+                    onChanged: _hasChildren
+                        ? null
+                        : (value) => setState(() => _parentId = value),
+                    validator: (_) => categoryParentError(
+                      id: widget.initial?.id,
+                      kind: _kind,
+                      parentId: _parentId,
+                      categories: widget.services.categories.all,
+                    ),
+                  ),
+                ),
                 if (_kind == CategoryKind.expense) ...[
                   const SizedBox(height: AppSpace.md),
                   MoneyField(

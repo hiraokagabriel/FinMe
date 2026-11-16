@@ -1,22 +1,43 @@
 import 'package:finme/app/app_scope.dart';
 import 'package:finme/app/bootstrap.dart';
 import 'package:finme/app/seed.dart';
+import 'package:finme/core/models/app_settings.dart';
 import 'package:finme/core/services/record_store.dart';
 import 'package:finme/core/theme/app_theme.dart';
+import 'package:finme/features/categories/domain/transaction_category.dart';
+import 'package:finme/features/rules/domain/transaction_rule.dart';
 import 'package:finme/features/transactions/domain/transaction.dart';
+import 'package:finme/features/transactions/presentation/tag_widgets.dart';
 import 'package:finme/features/transactions/presentation/transaction_form.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-Future<AppServices> _boot(WidgetTester tester) async {
+Future<AppServices> _boot(
+  WidgetTester tester, {
+  AppMode mode = AppMode.simple,
+}) async {
   return (await tester.runAsync(() async {
     final s = await bootstrap(
       storeFactory: (_) => MemoryRecordStore(),
       clock: () => DateTime(2026, 11, 14),
     );
     await seedDemo(s);
+    await s.settings.update((c) => c.copyWith(mode: mode));
     return s;
   }))!;
+}
+
+Future<void> _pickCartao(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('form-origem')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Cartão · Alfa Visa ••••1234').last);
+  await tester.pumpAndSettle();
+}
+
+Future<void> _addTag(WidgetTester tester, String tag) async {
+  await tester.enterText(find.byKey(const ValueKey('tag-input')), tag);
+  await tester.testTextInput.receiveAction(TextInputAction.done);
+  await tester.pumpAndSettle();
 }
 
 Future<void> _openForm(
@@ -233,6 +254,265 @@ void main() {
         isTrue,
       );
       expect(find.text('Salvar'), findsNothing);
+    },
+  );
+
+  Transaction importada() => Transaction(
+    id: 'tx_importada',
+    type: TransactionType.expense,
+    amountCents: 5000,
+    date: DateTime(2026, 11, 10),
+    description: 'Uber viagem',
+    categoryId: 'cat_transporte',
+    accountId: 'acc_alfa',
+    tags: const ['viagem'],
+    externalId: 'FIT-123',
+    importedDescription: 'UBER *TRIP 9988',
+  );
+
+  testWidgets(
+    'Simples: editar importada com tags preserva tags, externalId e importedDescription',
+    (tester) async {
+      final s = await _boot(tester);
+      final tx = importada();
+      await tester.runAsync(() => s.transactions.upsert(tx));
+      await _openForm(tester, s, initial: tx);
+
+      expect(find.byType(TagField), findsNothing);
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Valor'),
+        '60,00',
+      );
+      await tester.tap(find.text('Salvar'));
+      await tester.pumpAndSettle();
+
+      final saved = s.transactions.byId('tx_importada')!;
+      expect(saved.amountCents, 6000);
+      expect(saved.tags, ['viagem']);
+      expect(saved.externalId, 'FIT-123');
+      expect(saved.importedDescription, 'UBER *TRIP 9988');
+    },
+  );
+
+  testWidgets('Ultra: editar com tags mostra o chip e preserva as tags', (
+    tester,
+  ) async {
+    final s = await _boot(tester, mode: AppMode.ultra);
+    final tx = importada();
+    await tester.runAsync(() => s.transactions.upsert(tx));
+    await _openForm(tester, s, initial: tx);
+
+    expect(find.byType(TagField), findsOneWidget);
+    expect(find.text('viagem'), findsOneWidget);
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Valor'),
+      '60,00',
+    );
+    await tester.tap(find.text('Salvar'));
+    await tester.pumpAndSettle();
+
+    final saved = s.transactions.byId('tx_importada')!;
+    expect(saved.amountCents, 6000);
+    expect(saved.tags, ['viagem']);
+    expect(saved.externalId, 'FIT-123');
+    expect(saved.importedDescription, 'UBER *TRIP 9988');
+  });
+
+  testWidgets('Ultra: nova despesa com tag digitada + Enter salva a tag', (
+    tester,
+  ) async {
+    final s = await _boot(tester, mode: AppMode.ultra);
+    await _openForm(tester, s);
+
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Valor'),
+      '25,00',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Descrição'),
+      'Almoço trabalho',
+    );
+    await _pickCartao(tester);
+    await _addTag(tester, 'trabalho');
+    await tester.tap(find.text('Salvar'));
+    await tester.pumpAndSettle();
+
+    final saved = s.transactions.all.where(
+      (t) => t.description == 'Almoço trabalho',
+    );
+    expect(saved, hasLength(1));
+    expect(saved.single.tags, ['trabalho']);
+  });
+
+  testWidgets('Ultra: regra com tags preenche o form e salva com elas', (
+    tester,
+  ) async {
+    final s = await _boot(tester, mode: AppMode.ultra);
+    await tester.runAsync(
+      () => s.rules.upsert(
+        const TransactionRule(id: 'r_uber', pattern: 'UBER', tags: ['app']),
+      ),
+    );
+    await _openForm(tester, s);
+
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Valor'),
+      '18,00',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Descrição'),
+      'UBER TRIP',
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('app'), findsOneWidget);
+    expect(find.text('Tags da regra'), findsOneWidget);
+
+    await _pickCartao(tester);
+    await tester.tap(find.text('Salvar'));
+    await tester.pumpAndSettle();
+
+    final saved = s.transactions.all.where((t) => t.description == 'UBER TRIP');
+    expect(saved.single.tags, ['app']);
+  });
+
+  testWidgets(
+    'Ultra: tags mexidas antes da descrição não são sobrescritas pela regra',
+    (tester) async {
+      final s = await _boot(tester, mode: AppMode.ultra);
+      await tester.runAsync(
+        () => s.rules.upsert(
+          const TransactionRule(id: 'r_uber', pattern: 'UBER', tags: ['app']),
+        ),
+      );
+      await _openForm(tester, s);
+
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Valor'),
+        '18,00',
+      );
+      await _pickCartao(tester);
+      await _addTag(tester, 'trabalho');
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Descrição'),
+        'UBER TRIP',
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('app'), findsNothing);
+      expect(find.text('Tags da regra'), findsNothing);
+
+      await tester.tap(find.text('Salvar'));
+      await tester.pumpAndSettle();
+      final saved = s.transactions.all.where(
+        (t) => t.description == 'UBER TRIP',
+      );
+      expect(saved.single.tags, ['trabalho']);
+    },
+  );
+
+  testWidgets('Simples: regra com tags não aplica tags ao novo lançamento', (
+    tester,
+  ) async {
+    final s = await _boot(tester);
+    await tester.runAsync(
+      () => s.rules.upsert(
+        const TransactionRule(id: 'r_uber', pattern: 'UBER', tags: ['app']),
+      ),
+    );
+    await _openForm(tester, s);
+
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Valor'),
+      '18,00',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Descrição'),
+      'UBER TRIP',
+    );
+    await _pickCartao(tester);
+    await tester.tap(find.text('Salvar'));
+    await tester.pumpAndSettle();
+
+    final saved = s.transactions.all.where((t) => t.description == 'UBER TRIP');
+    expect(saved.single.tags, isEmpty);
+  });
+
+  testWidgets(
+    'categoria: subcategoria aparece logo depois da principal, com Pai › Filha',
+    (tester) async {
+      final s = await _boot(tester);
+      await tester.runAsync(
+        () => s.categories.upsert(
+          const TransactionCategory(
+            id: 'cat_mercado_x',
+            name: 'Mercado X',
+            kind: CategoryKind.expense,
+            iconCodePoint: 0xe8cc,
+            colorValue: 0xFF42A5F5,
+            parentId: 'cat_alimentacao',
+          ),
+        ),
+      );
+      await _openForm(tester, s);
+
+      await tester.tap(_categoriaField());
+      await tester.pumpAndSettle();
+
+      final parentY = tester.getTopLeft(find.text('Alimentação').last).dy;
+      final childY = tester
+          .getTopLeft(find.text('Alimentação › Mercado X').last)
+          .dy;
+      expect(childY, greaterThan(parentY));
+      for (final c in s.categories.all.where(
+        (c) =>
+            c.kind == CategoryKind.expense &&
+            c.id != 'cat_alimentacao' &&
+            c.id != 'cat_mercado_x',
+      )) {
+        final f = find.text(c.name);
+        if (f.evaluate().isEmpty) {
+          continue;
+        }
+        final y = tester.getTopLeft(f.last).dy;
+        expect(y < parentY || y > childY, isTrue, reason: c.name);
+      }
+
+      await tester.tap(find.text('Alimentação › Mercado X').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Alimentação › Mercado X'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'Ultra: parcelado em 3x com tags grava as 3 parcelas com as tags',
+    (tester) async {
+      final s = await _boot(tester, mode: AppMode.ultra);
+      await _openForm(tester, s);
+
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Valor'),
+        '100,00',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Descrição'),
+        'Compra tag parcelada',
+      );
+      await _pickCartao(tester);
+      await _addTag(tester, 'x');
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Parcelas'),
+        '3',
+      );
+      await tester.tap(find.text('Salvar'));
+      await tester.pumpAndSettle();
+
+      final parcels = s.transactions.all.where(
+        (t) => t.description == 'Compra tag parcelada',
+      );
+      expect(parcels, hasLength(3));
+      expect(
+        parcels.every((t) => t.tags.length == 1 && t.tags.single == 'x'),
+        isTrue,
+      );
     },
   );
 }

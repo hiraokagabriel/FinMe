@@ -265,6 +265,7 @@ void main() {
             accountId: 'acc_alfa',
             notes: 'nota',
             recurringId: 'rec_x',
+            externalId: 'ext-dup',
           ),
         ),
       );
@@ -282,9 +283,12 @@ void main() {
       final copy = copies.firstWhere((t) => t.id != 'tx_dup');
       expect(copy.recurringId, isNull);
       expect(copy.installmentGroupId, isNull);
+      expect(copy.externalId, isNull);
+      expect(copy.notes, 'nota');
       expect(copy.amountCents, 3000);
       expect(copy.date, DateTime(2026, 11, 10));
       expect(s.transactions.byId('tx_dup')!.recurringId, 'rec_x');
+      expect(s.transactions.byId('tx_dup')!.externalId, 'ext-dup');
     },
   );
 }

@@ -6,6 +6,7 @@ const Object _keep = Object();
 enum CategoryKind { expense, income }
 
 /// Categoria de despesa ou receita. `monthlyBudgetCents` null = sem orçamento.
+/// `parentId` null = categoria principal; senão, subcategoria de 1 nível (§4.3, §5.20).
 class TransactionCategory {
   const TransactionCategory({
     required this.id,
@@ -14,6 +15,7 @@ class TransactionCategory {
     required this.iconCodePoint,
     required this.colorValue,
     this.monthlyBudgetCents,
+    this.parentId,
   });
 
   factory TransactionCategory.fromMap(Map<String, dynamic> map) =>
@@ -24,6 +26,7 @@ class TransactionCategory {
         iconCodePoint: (map['iconCodePoint'] as num).toInt(),
         colorValue: (map['colorValue'] as num).toInt(),
         monthlyBudgetCents: (map['monthlyBudgetCents'] as num?)?.toInt(),
+        parentId: map['parentId'] is String ? map['parentId'] as String : null,
       );
 
   final String id;
@@ -32,6 +35,7 @@ class TransactionCategory {
   final int iconCodePoint;
   final int colorValue;
   final int? monthlyBudgetCents;
+  final String? parentId;
 
   TransactionCategory copyWith({
     String? name,
@@ -39,6 +43,7 @@ class TransactionCategory {
     int? iconCodePoint,
     int? colorValue,
     Object? monthlyBudgetCents = _keep,
+    Object? parentId = _keep,
   }) => TransactionCategory(
     id: id,
     name: name ?? this.name,
@@ -48,6 +53,7 @@ class TransactionCategory {
     monthlyBudgetCents: identical(monthlyBudgetCents, _keep)
         ? this.monthlyBudgetCents
         : monthlyBudgetCents as int?,
+    parentId: identical(parentId, _keep) ? this.parentId : parentId as String?,
   );
 
   Map<String, dynamic> toMap() => {
@@ -57,6 +63,7 @@ class TransactionCategory {
     'iconCodePoint': iconCodePoint,
     'colorValue': colorValue,
     'monthlyBudgetCents': monthlyBudgetCents,
+    if (parentId != null) 'parentId': parentId,
   };
 
   @override
@@ -68,7 +75,8 @@ class TransactionCategory {
           other.kind == kind &&
           other.iconCodePoint == iconCodePoint &&
           other.colorValue == colorValue &&
-          other.monthlyBudgetCents == monthlyBudgetCents;
+          other.monthlyBudgetCents == monthlyBudgetCents &&
+          other.parentId == parentId;
 
   @override
   int get hashCode => Object.hash(
@@ -78,5 +86,6 @@ class TransactionCategory {
     iconCodePoint,
     colorValue,
     monthlyBudgetCents,
+    parentId,
   );
 }

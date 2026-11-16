@@ -351,16 +351,35 @@ class _UpcomingLine extends StatelessWidget {
   }
 }
 
-/// Gastos do mês por categoria. Ultra: barras proporcionais. Simples: lista.
-class CategoriesCard extends StatelessWidget {
+/// Gastos do mês por categoria. Ultra: barras proporcionais e subcategorias recolhidas por raiz.
+class CategoriesCard extends StatefulWidget {
   const CategoriesCard({super.key, required this.rows, required this.ultra});
 
   final List<CategoryRow> rows;
   final bool ultra;
 
   @override
+  State<CategoriesCard> createState() => _CategoriesCardState();
+}
+
+class _CategoriesCardState extends State<CategoriesCard> {
+  /// Ids das raízes com subcategorias abertas.
+  final Set<String> _expanded = {};
+
+  void _toggle(String id) {
+    setState(() {
+      if (!_expanded.remove(id)) {
+        _expanded.add(id);
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final rows = widget.rows;
     final maxCents = rows.isEmpty ? 0 : rows.first.cents;
+    double fractionOf(int cents) =>
+        maxCents <= 0 ? 0.0 : (cents / maxCents).clamp(0.0, 1.0).toDouble();
     return SectionCard(
       title: 'Gastos por categoria (mês)',
       child: rows.isEmpty
@@ -371,15 +390,37 @@ class CategoriesCard extends StatelessWidget {
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                for (final row in rows)
+                for (final row in rows) ...[
                   _CategoryLine(
                     row: row,
-                    fraction: maxCents <= 0 ? 0 : row.cents / maxCents,
-                    ultra: ultra,
+                    fraction: fractionOf(row.cents),
+                    ultra: widget.ultra,
+                    expanded: _expanded.contains(row.id),
+                    onTap: _toggleAction(row),
                   ),
+                  if (_expanded.contains(row.id))
+                    for (final child in row.children)
+                      _CategoryChildLine(
+                        key: ValueKey(
+                          child.id == row.id
+                              ? 'category-child-${row.id}-direct'
+                              : 'category-child-${child.id}',
+                        ),
+                        row: child,
+                        fraction: fractionOf(child.cents),
+                      ),
+                ],
               ],
             ),
     );
+  }
+
+  VoidCallback? _toggleAction(CategoryRow row) {
+    final id = row.id;
+    if (id == null || row.children.isEmpty) {
+      return null;
+    }
+    return () => _toggle(id);
   }
 }
 
@@ -388,17 +429,89 @@ class _CategoryLine extends StatelessWidget {
     required this.row,
     required this.fraction,
     required this.ultra,
+    required this.expanded,
+    this.onTap,
   });
 
   final CategoryRow row;
   final double fraction;
   final bool ultra;
+  final bool expanded;
+
+  /// Null quando a linha não tem subcategorias (sem chevron).
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final textTheme = Theme.of(context).textTheme;
+    final id = row.id;
+    return InkWell(
+      key: id == null ? null : ValueKey('category-row-$id'),
+      onTap: onTap,
+      borderRadius: AppRadius.chipBorder,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: AppSpace.xs),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                if (onTap != null) ...[
+                  AnimatedRotation(
+                    turns: expanded ? 0.25 : 0,
+                    duration: AppMotion.fast,
+                    curve: AppMotion.curve,
+                    child: Icon(
+                      Icons.chevron_right,
+                      size: 16,
+                      color: c.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(width: AppSpace.xs),
+                ],
+                Expanded(
+                  child: Text(
+                    row.name,
+                    style: textTheme.bodyMedium,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                MoneyText(row.cents, style: textTheme.bodyMedium),
+              ],
+            ),
+            if (ultra) ...[
+              const SizedBox(height: AppSpace.xs),
+              _ShareBar(fraction: fraction),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Subcategoria aberta sob a raiz (Ultra): recuada, 12 px, barra proporcional ao maior total do mês.
+class _CategoryChildLine extends StatelessWidget {
+  const _CategoryChildLine({
+    super.key,
+    required this.row,
+    required this.fraction,
+  });
+
+  final CategoryRow row;
+  final double fraction;
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: AppSpace.xs),
+      padding: const EdgeInsets.only(
+        left: AppSpace.lg,
+        top: AppSpace.xs,
+        bottom: AppSpace.xs,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -407,18 +520,16 @@ class _CategoryLine extends StatelessWidget {
               Expanded(
                 child: Text(
                   row.name,
-                  style: textTheme.bodyMedium,
+                  style: textTheme.bodySmall,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              MoneyText(row.cents, style: textTheme.bodyMedium),
+              MoneyText(row.cents, style: textTheme.bodySmall),
             ],
           ),
-          if (ultra) ...[
-            const SizedBox(height: AppSpace.xs),
-            _ShareBar(fraction: fraction.clamp(0.0, 1.0).toDouble()),
-          ],
+          const SizedBox(height: AppSpace.xs),
+          _ShareBar(fraction: fraction),
         ],
       ),
     );
