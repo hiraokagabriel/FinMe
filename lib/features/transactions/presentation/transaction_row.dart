@@ -7,12 +7,16 @@ import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/widgets.dart';
 import '../../categories/domain/transaction_category.dart';
 import '../domain/transaction.dart';
+import '../domain/transaction_bulk.dart';
+import 'inline_cells.dart';
 import 'transaction_filters.dart';
 
 /// Ações da linha. Tocar na linha equivale a [TransactionAction.edit].
 enum TransactionAction { edit, confirm, duplicate, delete }
 
 /// Larguras fixas das colunas; cabeçalho e linhas compartilham.
+/// Coluna de checkbox (seleção, só Ultra) antes da data.
+const kTxSelectWidth = 36.0;
 const kTxDateWidth = 136.0;
 
 /// Simples: data curta (dd/MM) cabe em coluna estreita no celular.
@@ -23,7 +27,7 @@ const kTxValueWidth = 120.0;
 const kTxMenuWidth = 40.0;
 
 /// Abaixo disso a tabela Ultra rola na horizontal (360px sem overflow).
-const kTxUltraMinWidth = 760.0;
+const kTxUltraMinWidth = 796.0;
 
 /// Alturas fixas para `ListView.builder(itemExtent)`.
 const kTxRowExtentUltra = 40.0;
@@ -41,6 +45,11 @@ class TransactionRow extends StatelessWidget {
     this.category,
     this.origin = '',
     this.destination,
+    this.selected,
+    this.onToggleSelect,
+    this.categoryOptions,
+    this.onCategoryChanged,
+    this.onAmountChanged,
   });
 
   final Transaction transaction;
@@ -54,6 +63,17 @@ class TransactionRow extends StatelessWidget {
   /// Conta destino (transferência) ou cartão pago (pagamento de fatura).
   final String? destination;
   final ValueChanged<TransactionAction> onAction;
+
+  /// Null = sem checkbox. Linha selecionada usa `primarySubtle`, vencendo o fundo de provisionado.
+  final bool? selected;
+  final VoidCallback? onToggleSelect;
+
+  /// Edição inline (Ultra): categorias do `kind` do tipo; só vale com `onCategoryChanged`.
+  final List<TransactionCategory>? categoryOptions;
+  final ValueChanged<String?>? onCategoryChanged;
+
+  /// Edição inline do valor; null = texto comum ([MoneyText]).
+  final ValueChanged<int>? onAmountChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -136,9 +156,57 @@ class TransactionRow extends StatelessWidget {
       TransactionType.transfer => MoneyText(t.amountCents, style: body),
     };
 
+    final isSelected = selected == true;
+    final sel = selected;
+    final catOptions = categoryOptions;
+    final onCat = onCategoryChanged;
+    final onAmount = onAmountChanged;
+    final Widget? leading = sel == null
+        ? null
+        : Checkbox(
+            key: Key('tx-select-${t.id}'),
+            value: sel,
+            // Checkbox consome o toque: não chega ao InkWell da linha (não abre o formulário).
+            onChanged: (_) => onToggleSelect?.call(),
+          );
+    final Widget categoryCell =
+        catOptions != null && onCat != null && canEditCategoryInline(t)
+        ? InlineCategoryCell(
+            key: Key('inline-category-${t.id}'),
+            categoryId: t.categoryId,
+            options: catOptions,
+            onChanged: onCat,
+          )
+        : Text(
+            cat?.name ?? '—',
+            style: small,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          );
+    // A coluna de valor envolve tudo em FittedBox (constraints ilimitadas): o SizedBox
+    // dá largura fixa ao campo de edição, senão o TextField não tem limite de largura.
+    final Widget valueCell = onAmount == null
+        ? value
+        : SizedBox(
+            width: kTxValueWidth,
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: InlineAmountCell(
+                key: Key('inline-amount-${t.id}'),
+                display: value,
+                amountCents: t.amountCents,
+                onSubmit: onAmount,
+              ),
+            ),
+          );
+
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: provisioned ? c.warning.withValues(alpha: 0.08) : null,
+        color: isSelected
+            ? c.primarySubtle
+            : provisioned
+            ? c.warning.withValues(alpha: 0.08)
+            : null,
         border: Border(bottom: BorderSide(color: c.border)),
       ),
       child: InkWell(
@@ -147,6 +215,7 @@ class TransactionRow extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: AppSpace.sm),
           child: TransactionColumns(
             ultra: ultra,
+            leading: leading,
             date: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -169,15 +238,8 @@ class TransactionRow extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   )
                 : const SizedBox.shrink(),
-            category: ultra
-                ? Text(
-                    cat?.name ?? '—',
-                    style: small,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  )
-                : const SizedBox.shrink(),
-            value: value,
+            category: ultra ? categoryCell : const SizedBox.shrink(),
+            value: valueCell,
             menu: PopupMenuButton<TransactionAction>(
               tooltip: 'Ações',
               padding: EdgeInsets.zero,
@@ -219,11 +281,15 @@ class TransactionColumns extends StatelessWidget {
     required this.description,
     required this.value,
     required this.menu,
+    this.leading,
     this.origin = const SizedBox.shrink(),
     this.category = const SizedBox.shrink(),
   });
 
   final bool ultra;
+
+  /// Coluna de checkbox antes da data; null = sem coluna.
+  final Widget? leading;
   final Widget date;
   final Widget description;
   final Widget origin;
@@ -234,6 +300,7 @@ class TransactionColumns extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Row(
     children: [
+      if (leading != null) SizedBox(width: kTxSelectWidth, child: leading),
       SizedBox(
         width: ultra ? kTxDateWidth : kTxDateWidthSimple,
         child: Align(
@@ -266,16 +333,32 @@ class TransactionTableHeader extends StatelessWidget {
     required this.ultra,
     this.sort,
     this.onSort,
+    this.selectable = false,
+    this.selectAllState,
+    this.onSelectAll,
   });
 
   final bool ultra;
   final TxSort? sort;
   final ValueChanged<TxSortColumn>? onSort;
 
+  /// Checkbox tristate na coluna de seleção (`null` = parcial). Toque chama [onSelectAll].
+  final bool selectable;
+  final bool? selectAllState;
+  final VoidCallback? onSelectAll;
+
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
     final sortCallback = onSort;
+    final leading = selectable
+        ? Checkbox(
+            key: const Key('tx-select-all'),
+            tristate: true,
+            value: selectAllState,
+            onChanged: (_) => onSelectAll?.call(),
+          )
+        : null;
     Widget label(String text, TxSortColumn column, {bool alignEnd = false}) =>
         SortableHeaderLabel(
           label: text,
@@ -294,6 +377,7 @@ class TransactionTableHeader extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: AppSpace.sm),
           child: TransactionColumns(
             ultra: ultra,
+            leading: leading,
             date: label('Data', TxSortColumn.date),
             description: label('Descrição', TxSortColumn.description),
             origin: ultra

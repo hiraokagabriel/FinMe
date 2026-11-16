@@ -813,7 +813,7 @@ aceite: total de testes igual ao de `flutter test`; `bash tool/check.sh` → `CH
 > Datas nos testes: `DateTime(2026, 11, 14)` como "hoje". App de teste igual a `test/features/transactions/transactions_page_test.dart` (`bootstrap` em memória, `seedDemo`, `clock`).
 > Teclado nos testes: `tester.sendKeyEvent(LogicalKeyboardKey.keyN)`; Ctrl = `sendKeyDownEvent(LogicalKeyboardKey.controlLeft)` … `sendKeyUpEvent`; `/` com `sendKeyEvent(LogicalKeyboardKey.slash, character: '/')`.
 
-### T-100 · Busca aproximada (core) · `todo` · deps: — · parallel: yes
+### T-100 · Busca aproximada (core) · `done` · deps: — · parallel: yes
 files: `lib/core/utils/fuzzy.dart` (novo), `test/core/fuzzy_test.dart` (novo)
 contrato: SPEC §3.8 inteiro (`foldedWords`, `fuzzyTokenScore`, `fuzzyScore`, `fuzzyRank`). Dart puro; importa só `text_normalize.dart`. Regex em `final` de topo.
 aceite:
@@ -823,7 +823,7 @@ aceite:
 - `fuzzyRank(['Nova recorrência', 'Nova transação', 'Ajustes'], 'nova', (s) => [s])` == `['Nova recorrência', 'Nova transação']` (empate mantém a ordem); com `'trans'` → `['Nova transação']`; com `''` e `limit: 2` → os 2 primeiros na ordem de entrada.
 - `fuzzyRank` usa o maior score entre os textos: item com textos `['Importar arquivo', 'csv']` e query `'csv'` aparece.
 
-### T-101 · Operações em massa e edição inline (domínio) · `todo` · deps: — · parallel: yes
+### T-101 · Operações em massa e edição inline (domínio) · `done` · deps: — · parallel: yes
 files: `lib/features/transactions/domain/transaction_bulk.dart` (novo), `test/features/transactions/transaction_bulk_test.dart` (novo)
 contrato: SPEC §5.18 inteiro (`BulkResult`, `bulkRecategorize`, `bulkConfirmPlanned`, `installmentGroupsOf`, `bulkDeleteIds`, `commonCategoryId`, `canEditCategoryInline`, `canEditAmountInline`, `parseInlineAmount`). Dart puro; usa `copyWith` (limpa `categoryId` com `null`), `dateOnly`, `parseMoney`, `CategoryKind`.
 aceite: todos os exemplos do SPEC §5.18, mais:
@@ -839,7 +839,7 @@ aceite:
 - Os 9 exemplos do SPEC §5.19.
 - Invariante: para cada exemplo com resultado não vazio, `CompiledRule(TransactionRule(id: 'r', pattern: resultado)).matches(s)` é true para todos os assuntos.
 
-### T-103 · Seleção de transações (lógica) · `todo` · deps: — · parallel: yes
+### T-103 · Seleção de transações (lógica) · `done` · deps: — · parallel: yes
 files: `lib/features/transactions/presentation/transaction_selection.dart` (novo, Dart puro: sem `package:flutter`), `test/features/transactions/transaction_selection_test.dart` (novo)
 contrato: SPEC §7.3 "Produtividade (Fase 9)", bloco `TransactionSelection`. Imutável; cada operação devolve nova instância.
 aceite (order = `['a', 'b', 'c', 'd', 'e']`):
@@ -849,7 +849,7 @@ aceite (order = `['a', 'b', 'c', 'd', 'e']`):
 - `selectAll(order)` → 5 ids, anchor mantido; `selectedIn(['e', 'a', 'x'])` sobre `{a, e}` → `['e', 'a']`.
 - `allState`: `[]` → false; nenhum → false; `{a, b}` → null; todos → true; ids extras fora de order não impedem `true`.
 
-### T-104 · Atalhos: intents, mapas e guarda de digitação · `todo` · deps: — · parallel: yes
+### T-104 · Atalhos: intents, mapas e guarda de digitação · `done` · deps: — · parallel: yes
 files: `lib/app/app_shortcuts.dart` (novo), `test/app/app_shortcuts_test.dart` (novo)
 contrato: SPEC §7.3 "Produtividade (Fase 9)", bloco **Atalhos** (`OpenPaletteIntent`, `NewTransactionIntent`, `FocusSearchIntent`, `ImportFileIntent`, `GoToPageIntent`, `SelectAllRowsIntent`, `ClearSelectionIntent`, `kAppShortcuts`, `kSelectionShortcuts`, `isTextInputFocused`, `TypingGuardAction`). Mapas `final` (não `const`).
 aceite (widget de teste: `Shortcuts(kAppShortcuts)` > `Actions` com `TypingGuardAction` para N, `/` e dígitos e `CallbackAction` para Ctrl+K/Ctrl+I, gravando os intents recebidos numa lista > `Focus(autofocus: true)` com um `TextField` key `campo`):
@@ -858,12 +858,12 @@ aceite (widget de teste: `Shortcuts(kAppShortcuts)` > `Actions` com `TypingGuard
 - Shift+N não gera `NewTransactionIntent` (SingleActivator exige modificadores exatos).
 - `kSelectionShortcuts`: Ctrl+A → `SelectAllRowsIntent`, Esc → `ClearSelectionIntent`; com foco no campo, a `TypingGuardAction` de Ctrl+A fica desabilitada (nenhum intent gravado).
 
-### T-105 · Busca de transações (domínio) · `todo` · deps: T-100 · parallel: yes
+### T-105 · Busca de transações (domínio) · `done` · deps: T-100 · parallel: yes
 files: `lib/features/transactions/domain/transaction_search.dart` (novo), `test/features/transactions/transaction_search_test.dart` (novo)
 contrato: SPEC §5.17 inteiro (`TransactionSearchIndex`, regras 1–4). Pré-dobra no construtor; `search` não chama `foldText` por transação.
 aceite: todos os exemplos e o teste de desempenho do SPEC §5.17, mais: empate de score e data → `id` asc; `search('uber', limit: 1)` → `[t2]`; query `'  UBER  '` igual a `'uber'`.
 
-### T-106 · Paleta de comandos (widget) · `todo` · deps: T-100 · parallel: yes
+### T-106 · Paleta de comandos (widget) · `done` · deps: T-100 · parallel: yes
 files: `lib/app/command_palette.dart` (novo), `test/app/command_palette_test.dart` (novo)
 contrato: SPEC §7.3 "Produtividade (Fase 9)", bloco **Paleta** (`PaletteEntry`, `showCommandPalette`, visual, teclado, keys `palette-input`/`palette-item-$i`). Cores por `context.colors`; texto do rodapé exato.
 aceite (comandos de teste: 'Nova transação' (shortcut 'N'), 'Nova recorrência', 'Ir para Painel' ('1'); `onRun` grava numa lista):
@@ -875,7 +875,7 @@ aceite (comandos de teste: 'Nova transação' (shortcut 'N'), 'Nova recorrência
 - 'xyz' sem resultados → 'Nada encontrado'; Enter não faz nada.
 - Esc fecha sem executar.
 
-### T-107 · Células inline: categoria e valor · `todo` · deps: T-101 · parallel: yes
+### T-107 · Células inline: categoria e valor · `done` · deps: T-101 · parallel: yes
 files: `lib/features/transactions/presentation/inline_cells.dart` (novo), `test/features/transactions/inline_cells_test.dart` (novo)
 contrato: SPEC §7.3 "Produtividade (Fase 9)", bloco **Edição inline** (`InlineCategoryCell`, `InlineAmountCell`). Valor via `parseInlineAmount`; texto inicial = `formatMoney(amountCents)` sem o prefixo `R$ ` (mesmo `replaceFirst` de `transaction_form.dart`).
 aceite:
@@ -886,7 +886,7 @@ aceite:
 - Esc → sai sem chamar; tirar o foco (tap fora) → sai sem chamar.
 - Célula dentro de um `InkWell(onTap: …)`: clicar no valor não dispara o `onTap` do `InkWell`.
 
-### T-108 · Barra de ações em massa e diálogos · `todo` · deps: T-101 · parallel: yes
+### T-108 · Barra de ações em massa e diálogos · `done` · deps: T-101 · parallel: yes
 files: `lib/features/transactions/presentation/bulk_action_bar.dart` (novo), `lib/features/transactions/presentation/bulk_dialogs.dart` (novo), `test/features/transactions/bulk_dialogs_test.dart` (novo)
 contrato: SPEC §7.3 "Produtividade (Fase 9)", blocos **Barra de ações em massa** e **Diálogos** (`BulkAction`, `BulkActionBar`, `CategoryChoice`, `showBulkCategoryDialog`, `showBulkConfirmDialog`, `BulkDeleteScope`, `showBulkDeleteDialog`). `DropdownButtonFormField` com `initialValue`; guarda contra duplo pop (flag `answered`, como `transactions_page.dart`).
 aceite:
@@ -895,7 +895,7 @@ aceite:
 - `showBulkConfirmDialog(count: 2, initialDate: 14/11/2026)` → título 'Confirmar 2 provisionados'; Confirmar sem mudar a data → `DateTime(2026, 11, 14)`; Cancelar → `null`.
 - `showBulkDeleteDialog(count: 3, groups: 0, …)` → 'Excluir 3 transações?' e 'Excluir' → `BulkDeleteScope.selected`; `(count: 2, groups: 1, wholeGroupsCount: 4)` → botões 'Só as 2 selecionadas' e 'Grupos inteiros (4 lançamentos)' devolvem `selected` / `wholeGroups`.
 
-### T-109 · Comandos da paleta e entradas de transação · `todo` · deps: T-105, T-106 · parallel: yes (com T-110)
+### T-109 · Comandos da paleta e entradas de transação · `done` · deps: T-105, T-106 · parallel: yes (com T-110)
 files: `lib/app/app_commands.dart` (novo), `test/app/app_commands_test.dart` (novo)
 contrato: SPEC §7.3 "Produtividade (Fase 9)", bloco **Comandos**.
 ```dart
@@ -914,7 +914,7 @@ aceite:
 - `transactionEntries` com parcela 3/10 de 'Loja Exemplo' em cartão 'Cartão Beta' com categoria 'Compras', data 14/11/2026 → label 'Loja Exemplo 3/10', subtitle '14/11/2026 · Cartão Beta · Compras', `group 'Transações'`; `onRun` chama `onOpen` com a transação.
 - `filterTransactionsEntry('uber', …)` → label 'Filtrar Transações do mês por “uber”', `group 'Transações'`.
 
-### T-110 · Linha e cabeçalho: checkbox e células inline · `todo` · deps: T-107 · parallel: yes (com T-109)
+### T-110 · Linha e cabeçalho: checkbox e células inline · `done` · deps: T-107 · parallel: yes (com T-109)
 files: `lib/features/transactions/presentation/transaction_row.dart`, `test/features/transactions/transaction_row_test.dart` (novo)
 contrato: SPEC §7.3 "Produtividade (Fase 9)", parágrafos **Transações Ultra com seleção** (coluna, cor de fundo, `kTxSelectWidth = 36`, `kTxUltraMinWidth = 796`) e `TransactionRow` (parâmetros novos e keys). `TransactionColumns` ganha `Widget? leading` (não nulo → `SizedBox(width: kTxSelectWidth)` antes da data). `TransactionTableHeader` ganha `bool selectable = false`, `bool? selectAllState`, `VoidCallback? onSelectAll` (checkbox tristate key `tx-select-all`). Todos os parâmetros novos são opcionais: sem eles a linha é idêntica à atual.
 aceite:
@@ -925,7 +925,7 @@ aceite:
 - Cabeçalho com `selectable: true, selectAllState: null` → checkbox tristate; tocar chama `onSelectAll`.
 - Linha Ultra com checkbox dentro de `SizedBox(width: kTxUltraMinWidth)`: sem overflow.
 
-### T-111 · Transações: multi-seleção e ações em massa · `todo` · deps: T-101, T-102, T-103, T-104, T-108, T-110 · parallel: no
+### T-111 · Transações: multi-seleção e ações em massa · `done` · deps: T-101, T-102, T-103, T-104, T-108, T-110 · parallel: no
 files: `lib/features/transactions/presentation/transactions_page.dart`, `test/features/transactions/transactions_bulk_test.dart` (novo), `test/features/transactions/transactions_page_test.dart` (só se algum teste existente precisar de ajuste pela coluna nova)
 contrato: SPEC §6.3 "Ações em massa", §7.3 "Produtividade (Fase 9)" (**Transações Ultra com seleção**, **Barra de ações em massa**, **Diálogos**, SnackBars). `TransactionsPage({super.key, this.focusNode})` (`FocusNode?`; nulo → nó próprio criado e descartado pela página). Estado `TransactionSelection _selection`; `visible = _selection.selectedIn(ids das linhas)`; `HardwareKeyboard.instance.isShiftPressed` decide `toggle`/`extendTo`. Página envolta em `Shortcuts(shortcuts: kSelectionShortcuts)` > `Actions({SelectAllRowsIntent: TypingGuardAction(...), ClearSelectionIntent: TypingGuardAction(...)})` > `Focus(focusNode: ..., autofocus: true)`; no Simples as ações não fazem nada. Mudar o mês zera a seleção. Ações: recategorizar (categorias de `s.categories.all`), confirmar (data inicial `ledger.today`), criar regra (`showRuleForm` + `reapplyRules` com a regra devolvida), excluir (`groups = installmentGroupsOf(sel).length`; `wholeGroupsCount = bulkDeleteIds(sel, all, wholeGroups: true).length`). Uma gravação por ação.
 aceite (seed demo, Ultra, 1400×900, mês 11/2026):
@@ -939,7 +939,7 @@ aceite (seed demo, Ultra, 1400×900, mês 11/2026):
 - Seleção com 1 parcela de um grupo de 3 (criado no teste com `buildInstallments`, datas em 11/2026 para a 1ª) + 1 simples: 'Só as 2 selecionadas' remove 2; repetir com 'Grupos inteiros (4 lançamentos)' remove o grupo inteiro e a simples.
 - 'Criar regra' com 2 transações 'UBER *TRIP 1' e 'UBER *TRIP 2' (criadas no teste) → form abre com padrão 'UBER *TRIP'; escolher 'Transporte' e salvar → regra gravada e as 2 com `cat_transporte`; SnackBar 'Regra criada · 2 transações atualizadas'.
 
-### T-112 · Transações: edição inline, busca focável e dicas · `todo` · deps: T-111 · parallel: no
+### T-112 · Transações: edição inline, busca focável e dicas · `done` · deps: T-111 · parallel: no
 files: `lib/features/transactions/presentation/transactions_page.dart`, `lib/features/transactions/presentation/transaction_filters.dart`, `test/features/transactions/transactions_inline_test.dart` (novo)
 contrato: SPEC §6.3 "Edição inline", §7.3 "Produtividade (Fase 9)" (**Edição inline**, `/`, **Dicas de atalho**). `TransactionsPage` ganha `this.searchFocusNode` (`FocusNode?`) e `this.initialQuery` (`String?`; estado inicial `_filter = TransactionFilter(query: initialQuery ?? '')`). `TransactionFilterBar` ganha `FocusNode? searchFocusNode` repassado ao `TextField` de busca. Ultra passa a cada linha: `categoryOptions` (listas por `CategoryKind`, por nome, montadas uma vez por build) + `onCategoryChanged` → `upsert(t.copyWith(categoryId: v))`; `onAmountChanged` só se `canEditAmountInline(t) && !settings.hideValues` → `upsert(t.copyWith(amountCents: v))`. Simples não passa nada. Botão 'Nova transação' em `Tooltip(message: 'Atalho: N')`; botão 'Importar' em `Tooltip(message: 'Atalho: Ctrl+I')`.
 aceite (seed demo, Ultra, 1400×900):
@@ -951,7 +951,7 @@ aceite (seed demo, Ultra, 1400×900):
 - `searchFocusNode.requestFocus()` → o `TextField` de busca fica focado.
 - Tooltips 'Atalho: N' e 'Atalho: Ctrl+I' presentes nos dois modos.
 
-### T-113 · Shell: atalhos globais, foco e paleta · `todo` · deps: T-104, T-109, T-112 · parallel: no
+### T-113 · Shell: atalhos globais, foco e paleta · `done` · deps: T-104, T-109, T-112 · parallel: no
 files: `lib/app/home_shell.dart`, `test/app/shell_shortcuts_test.dart` (novo)
 contrato: SPEC §7.3 "Produtividade (Fase 9)", parágrafos **Foco do shell**, **Paleta** e **Comandos**. `Shortcuts(shortcuts: kAppShortcuts)` > `Actions` (N, `/` e `GoToPageIntent` com `TypingGuardAction`; Ctrl+K e Ctrl+I com `CallbackAction`) > `Focus(focusNode: _shellFocus, autofocus: true)` > `Scaffold`. `FocusNode`s `_shellFocus`, `_txFocus`, `_txSearchFocus` criados no `initState` e descartados no `dispose`; `FocusManager.instance.addListener(_reclaimFocus)` (removido no `dispose`). `_pageFor(4)` → `TransactionsPage(key: ValueKey('tx-$_txEpoch'), focusNode: _txFocus, searchFocusNode: _txSearchFocus, initialQuery: _txQuery)`. `_openPalette()`: se `_paletteOpen` retorna; índice = `TransactionSearchIndex(ultra ? all : all.where((t) => !isProvisioned(t)))`; `showCommandPalette(commands: buildAppCommands(...), search: (q) => q.trim().length < 2 ? [] : [if (ultra) filterTransactionsEntry(q, onRun: () => setState(() { _txQuery = q; _txEpoch++; _index = 4; })), ...transactionEntries(index.search(q), ledger: ..., onOpen: (t) => showTransactionForm(context, initial: t))])`. Comandos: `onNewRecurring` → `showRecurringForm(context)`; `onToggleMode`/`onToggleTheme`/`onToggleHideValues` → `services.settings.update(...)`; tema: `Theme.of(context).brightness == Brightness.dark ? ThemePreference.light : ThemePreference.dark`. `_navItems` passa como `pages`.
 aceite (app completo como no smoke test, 1400×900, seed demo):
@@ -964,7 +964,7 @@ aceite (app completo como no smoke test, 1400×900, seed demo):
 - Comandos 'Mudar para Modo Ultra', 'Ocultar valores' e 'Alternar tema claro/escuro' mudam `settings.mode`, `hideValues` e `theme`.
 - Depois de excluir uma transação pelo menu da linha (o nó focado some), `1` continua navegando (reclaim de foco).
 
-### T-114 · Shell: dicas de atalho e entrada "Buscar" · `todo` · deps: T-113 · parallel: no
+### T-114 · Shell: dicas de atalho e entrada "Buscar" · `done` · deps: T-113 · parallel: no
 files: `lib/app/home_shell.dart`, `test/app/smoke_test.dart`
 contrato: SPEC §7.3 "Produtividade (Fase 9)", parágrafo **Dicas de atalho** (FAB `tooltip: 'Atalho: N'`; sidebar larga: `Tooltip('Atalho: {i+1}')` por item e entrada 'Buscar' com 'Ctrl+K', key `sidebar-search`; colapsada: tooltip '{rótulo} · {i+1}' e `IconButton(Icons.search, tooltip: 'Buscar (Ctrl+K)')`; as duas chamam `_openPalette`).
 aceite:
@@ -973,7 +973,238 @@ aceite:
 - Sidebar colapsada: tooltip 'Buscar (Ctrl+K)' presente; tap → paleta abre.
 - FAB com tooltip 'Atalho: N'.
 
-### T-115 · Documentação da Fase 9 · `todo` · deps: T-100..T-114 · parallel: no
+### T-115 · Documentação da Fase 9 · `done` · deps: T-100..T-114 · parallel: no
 files: `CONTEXT.md`, `ROADMAP.md`, `docs/BACKLOG.md`
 contrato: CONTEXT §4 (árvore com `app_shortcuts.dart`, `command_palette.dart`, `app_commands.dart`, `core/utils/fuzzy.dart`, `transaction_search.dart`, `transaction_bulk.dart`, `rule_suggestion.dart`, `transaction_selection.dart`, `inline_cells.dart`, `bulk_action_bar.dart`, `bulk_dialogs.dart`), §5 (tabela de atalhos, paleta, multi-seleção, ações em massa, edição inline; diferenças Simples/Ultra), §8 (testes novos, total), §10 (commit), §11 (status), §12 (limites: valor de parcela não editável inline; `/` só foca a busca de Transações no Ultra; atalhos não valem dentro de diálogos; busca da paleta é por descrição e valor exato, sem notas; "Filtrar Transações" vale só para o mês exibido; Shift+clique só no checkbox). ROADMAP: Fase 9 em "v3". BACKLOG: T-100..T-114 `done`.
+aceite: total de testes igual ao de `flutter test`; `bash tool/check.sh` → `CHECK OK`.
+
+## Fase 10 — Subcategorias, tags, metas e "posso gastar hoje"
+
+> Origem: `docs/V3_DIRECTION.md` (Domínios novos). Contratos: SPEC §3.5 (Fase 10), §4.3, §4.4, §4.6, §4.9, §5.6, §5.13, §5.14, §5.16, §5.17, §5.20–5.23, §6.1–6.3 (Fase 10), §7.3 "Subcategorias, tags, metas e posso gastar hoje (Fase 10)".
+> Sem dependência nova. Domínio puro primeiro, com os exemplos do SPEC como teste; Ledger/persistência; UI por último.
+> Decisões fechadas: subcategoria de 1 nível; vínculo inválido vira raiz (nunca derruba). Orçamento do pai cobre pai + filhas; filha tem orçamento próprio opcional. `resolveCategoryByName` aceita caminho 'Pai › Filha' e nome simples (raiz vence; filhas homônimas = ambíguo). Tags normalizadas (trim, sem '#', sem duplicata por `foldText`); regras só **acrescentam** tags. Metas são seção da página Contas (sem página nova: atalhos 1–9 intactos); aporte nunca passa do saldo atual livre da conta; meta arquivada libera a reserva. "Posso gastar hoje" reusa os eventos da previsão: contas ativas (todos os tipos), faturas em aberto com vencimento ≤ próxima receita (inclusive; vencidas entram), despesas provisionadas e recorrências de despesa de conta até lá; próxima receita = próxima ocorrência **depois de hoje** de recorrência de receita ativa em conta ativa; sem ela, fim do mês; reserva efetiva limitada ao saldo positivo da conta; livre ≤ 0 → "Sem folga", 0/dia. Simples: card do Painel, árvore de categorias e metas enxutas; tags só no Ultra (Simples preserva as tags existentes).
+> Dependência da Fase 9: T-139, T-140 e T-141 tocam `transactions_page.dart`, `transaction_filters.dart`, `transaction_row.dart`, `transaction_search.dart`, `app_commands.dart`, `inline_cells.dart` e `bulk_dialogs.dart` → só começam com a Fase 9 fechada (T-115 `done`). `bulk_action_bar.dart` e `home_shell.dart` **não** são tocados (a ação 'Tags' é só mais um `BulkAction` montado pela página).
+> Ondas (tarefas da mesma onda têm arquivos disjuntos): **A** T-120, T-121, T-122, T-123 · **B** T-124, T-125, T-126, T-127 · **C** T-128, T-129, T-130, T-131, T-132, T-133, T-135, T-136, T-138 · **D** T-134, T-137 · **E** (Fase 9 fechada) T-139, T-140 · **F** T-141 · **G** T-142.
+> Datas nos testes: `DateTime(2026, 11, 15)` como "hoje" (salvo indicação). App de teste igual a `test/features/transactions/transactions_page_test.dart` (`bootstrap` em memória, `seedDemo` quando útil, `clock`).
+
+### T-120 · Subcategorias: `parentId`, `CategoryTree` e orçamento agregado (domínio) · `todo` · deps: — · parallel: yes
+files: `lib/features/categories/domain/transaction_category.dart`, `lib/features/categories/domain/category_tree.dart` (novo), `lib/features/categories/domain/category_spending.dart`, `test/features/categories/category_tree_test.dart` (novo)
+contrato: SPEC §4.3 (bloco "Subcategorias (Fase 10)": `parentId` com `_keep`, `toMap` só não nulo, `fromMap` tolerante, `==`/`hashCode`), §5.20 inteiro (`kCategoryPathSeparator`, `CategoryTree`, `categoryParentError`), §5.6 "Orçamento com subcategorias" (`budgetStatuses(..., {CategoryTree? tree})`). Dart puro; ordenação por `foldText(name)` (`core/utils/text_normalize.dart`). `CategoryTree` pré-indexa no construtor (mapas id → categoria e pai → filhas); consultas O(1).
+aceite:
+- Entidade: round-trip com e sem `parentId`; `fromMap` sem a chave → `null`; `copyWith(parentId: null)` limpa; omitido mantém; `toMap()` sem `parentId` não tem a chave.
+- Todos os exemplos de §5.20 (labels, `options(expense)` na ordem dada, `rollUp`, `categoryParentError` ×5).
+- `childrenOf('tra') == const []`; `hasChildren('ali')` true; `rootOf('mer') == 'ali'`; `rootOf('nada') == 'nada'`; `CategoryTree.empty.label('x') == ''`.
+- Exemplo de orçamento de §5.6 (Alimentação spent 90000, ratio 0.9; Mercado spent 50000); sem `tree` o resultado é o atual (Alimentação spent 10000).
+- Testes existentes passam (`budgetStatuses` sem o parâmetro novo).
+
+### T-121 · Tags: `Transaction.tags` e funções de tag (domínio) · `todo` · deps: — · parallel: yes
+files: `lib/features/transactions/domain/transaction.dart`, `lib/features/transactions/domain/tags.dart` (novo), `lib/features/transactions/domain/installments.dart`, `test/features/transactions/tags_test.dart` (novo)
+contrato: SPEC §4.4 bloco "Fase 10 (`tags`)" e §5.21 inteiro (`normalizeTag`, `tagKey`, `normalizeTags`, `parseTagInput`, `hasAnyTag`, `bulkAddTags`, `bulkRemoveTags`, `tagUsage`). `tags.dart` importa `transaction.dart` e vice-versa (import circular é válido em Dart). Construtor: `tags = raw.isEmpty ? const [] : List.unmodifiable(normalizeTags(raw))`. `buildInstallments` passa `tags: base.tags`.
+aceite:
+- Todos os exemplos de §5.21.
+- `Transaction(..., tags: [' #Viagem', 'viagem', 'casa']).tags == ['Viagem', 'casa']`; a lista é imutável (`add` lança).
+- `fromMap` sem `'tags'`, com `null`, com `'x'` (não lista) e com `['a', 1, null]` → `[]`, `[]`, `[]`, `['a']`; `toMap()` sem tags não tem a chave; round-trip com tags.
+- `==`: mesmas tags em outra ordem → diferente; mesmas tags → igual e mesmo `hashCode`; `copyWith()` mantém tags; `copyWith(tags: [])` limpa.
+- `buildInstallments` com base de tags `['x']` em 3 parcelas → as 3 com `['x']`.
+- Testes existentes de transações passam.
+
+### T-122 · Metas: entidade `Goal` e regras de reserva (domínio) · `todo` · deps: — · parallel: yes
+files: `lib/features/goals/domain/goal.dart` (novo), `lib/features/goals/domain/goal_math.dart` (novo), `test/features/goals/goal_test.dart` (novo)
+contrato: SPEC §4.9 inteiro (`GoalMovement`, `Goal`) e §5.22 inteiro (`reservedByAccount`, `availableToReserve`, `contributionError`, `withdrawalError`, `removeMovementError`, `overReservedCents`, `monthlyContributionNeeded`, `isGoalOverdue`, regras 1–4). Dart puro; mensagens com `formatMoney`; datas com `dateOnly`/`dateKey`/`parseDateKey`.
+aceite:
+- Todos os exemplos de §5.22.
+- `Goal` com movimentos fora de ordem → `movements` ordenados por (data, id); `withMovement`/`withoutMovement` devolvem instâncias novas (original intacta); `withoutMovement('inexistente')` → igual à original.
+- Round-trip de `Goal` com e sem `targetDate` e com 2 movimentos (um com nota); `fromMap` sem `movements`/`archived` → `[]`/`false`; movimento inválido (sem `amountCents`) ignorado; `copyWith(targetDate: null)` limpa.
+- `reservedByAccount` ignora arquivada e omite conta com 0; meta com `rawReservedCents < 0` (dado corrompido) → `reservedCents == 0`.
+
+### T-123 · Posso gastar hoje (domínio) · `todo` · deps: — · parallel: yes
+files: `lib/features/forecast/domain/spendable.dart` (novo), `test/features/forecast/spendable_test.dart` (novo)
+contrato: SPEC §5.23 inteiro (`SpendableToday`, `spendableToday`, regras 1–9). Dart puro; usa `occurrencesBetween` (§5.4), `YearMonth`, `ForecastEvent`/`ForecastEventKind`; diferença de dias por `DateTime.utc(y, m, d)`. Não importa `goals/` (recebe `reservedByAccount` pronto).
+aceite (a `Forecast` é montada com `ForecastService.compute(..., today: hoje, months: 6, minDays: 60)` sobre os dados do teste; `horizonEnd = ForecastService.horizonEnd(today: hoje, months: 6, minDays: 60)`):
+- O exemplo completo de §5.23 com hoje 15/11/2026 (datas sugeridas: K1 fecha 28/vence 5 com compra de 80000 em 10/11 → vence 05/12; K2 fecha 3/vence 10 com compra de 120000 em 05/11 → vence 10/12; ambos com `paymentAccountId` A): `nextIncomeDate` 05/12, `days` 20, faturas 80000 (1 evento), provisionados 180000 (3 eventos: atrasado de B em 15/11, boleto 20/11, aluguel 01/12), reservas 40000, `freeCents` 50000, `perDayCents` 2500; transferência fora; conta C arquivada fora.
+- Variações de §5.23: sem salário (até 30/11, 16 dias, livre 280000, 17500/dia); reserva 400000 (efetiva 300000, livre −210000, `overcommitted`, 0/dia); hoje 30/11 sem salário → `days == 1`; hoje 04/12 → `days == 1`; hoje 05/12 → `nextIncomeDate` 05/01/2027.
+- Recorrência de receita inativa, em cartão, sem conta ou em conta arquivada não define a data (cai no fim do mês).
+- Duas receitas (dia 5 'Salário' e dia 20 'Freela') com hoje 15/11 → 20/11, descrição 'Freela', `days` 5.
+- Fatura vencida (vencimento 10/11, em aberto 30000) entra com evento em 15/11; fatura quitada não entra.
+- `freeCents` de 1 centavo e `days` 20 → `perDayCents == 0` (arredonda para baixo, sem `double`).
+- Conta de investimento não arquivada com saldo 500000 e meta de 100000 nela: não entra em `balanceCents` nem nas reservas (resultado igual ao exemplo completo).
+
+### T-124 · `resolveCategoryByName` com subcategorias · `todo` · deps: T-120 · parallel: yes
+files: `lib/features/importing/domain/merchant_dictionary.dart`, `test/features/importing/merchant_dictionary_test.dart`
+contrato: SPEC §5.13 `resolveCategoryByName` (passos 1–3 da Fase 10) e §4.8 (nota da Fase 10). Assinatura inalterada.
+aceite (categorias: `defaultCategories()` + `mer2` 'Mercado' expense filha de `cat_alimentacao`, `out1` 'Outros' filha de `cat_alimentacao`, `out2` 'Outros' filha de `cat_transporte`):
+- Testes existentes passam (sem subcategorias o resultado não muda).
+- `'Alimentação › Mercado'` → `mer2`; `'alimentacao > mercado'` → `mer2`; `'Mercado'` → `cat_mercado` (raiz vence a filha homônima).
+- `'Outros'` → `null` (2 filhas homônimas, sem raiz); `'Transporte › Outros'` → `out2`; `'Transporte › Inexistente'` → resolve `'Inexistente'` → `null`.
+- Sem a raiz `cat_mercado` na lista: `'Mercado'` → `mer2` (única candidata).
+- `'Combustível'` continua → `cat_transporte` (fallback).
+
+### T-125 · Regras com tags: entidade e motor · `todo` · deps: T-121 · parallel: yes
+files: `lib/features/rules/domain/transaction_rule.dart`, `lib/features/rules/domain/rule_engine.dart`, `test/features/rules/rule_engine_test.dart`
+contrato: SPEC §4.6 (bloco Fase 10: `tags`, construtor `const` com `this.tags = const []`, `fromMap` com `normalizeTags`, `toMap` só não vazia, `copyWith`, `==`/`hashCode`) e §5.14 (parágrafo "Tags (Fase 10)" de `reapplyRules`).
+aceite:
+- Round-trip de regra com tags; `fromMap` sem `'tags'` → `[]`; `fromMap` com `'tags': [' #a', 'A', 'b']` → `['a', 'b']`.
+- `reapplyRules`: regra contains 'UBER' com tags `['transporte']` e outra contains 'TRIP' com `['viagem']` sobre `'UBER *TRIP'` sem tags → tags `['transporte', 'viagem']`; transação que já tem `['Transporte', 'viagem']` → não muda (fora do retorno); regra só com tags (sem categoria/renomear) muda só as tags.
+- Idempotente: aplicar de novo sobre o resultado → `[]`.
+- Testes existentes de regras passam.
+
+### T-126 · Ledger, persistência e `AppServices` da Fase 10 · `todo` · deps: T-120, T-121, T-122, T-123 · parallel: yes
+files: `lib/app/bootstrap.dart`, `lib/app/app_scope.dart`, `lib/app/ledger.dart`, `test/app/ledger_goals_test.dart` (novo)
+contrato: SPEC §3.5 (box `fm_goals`), §6.1 (`goals` obrigatório em `AppServices`), §6.2 bloco Fase 10 (`goals` opcional no `Ledger`, entra em `_sources`; `categoryTree`, `rolledSpendingFor`, `reservedByAccount`, `spendableToday`, `allTags`, todos memoizados e zerados em `_clearCache`).
+aceite:
+- `bootstrap(storeFactory: memória)` → `services.goals.all` vazio; `goals.upsert(meta)` notifica o `Ledger`.
+- `identical(ledger.categoryTree, ledger.categoryTree)`; após `categories.upsert` de uma filha, `categoryTree.label(id)` contém ' › ' e `rolledSpendingFor(mês)` agrega o gasto dela no pai.
+- `reservedByAccount` reflete aporte gravado; `spendableToday.reservedCents` muda depois de `goals.upsert(meta.withMovement(...))`; `identical(ledger.spendableToday, ledger.spendableToday)` sem mudança entre as leituras.
+- `spendableToday.balanceCents == ledger.forecast.currentTotalCents`.
+- `allTags` com 3 transações (`['Viagem']`, `['viagem', 'casa']`, `[]`) → `['Viagem', 'casa']`.
+- `test/app/ledger_test.dart` (Ledger sem `goals`) passa sem mudança; `reservedByAccount` sem `goals` → `{}`.
+
+### T-127 · Widgets de tag: `TagField`, `TagChips`, `showBulkTagsDialog` · `todo` · deps: T-121 · parallel: yes
+files: `lib/features/transactions/presentation/tag_widgets.dart` (novo), `test/features/transactions/tag_widgets_test.dart` (novo)
+contrato: SPEC §7.3 Fase 10, bloco **Tags** (`TagField`, `TagChips`, `BulkTagsChoice`, `showBulkTagsDialog`). Cores via `context.colors`; sem `withOpacity`.
+aceite:
+- `TagField(tags: [])`: digitar 'viagem, Casa' + Enter → `onChanged(['viagem', 'Casa'])` e campo limpo; com `tags: ['viagem']`, digitar 'VIAGEM' + Enter → `onChanged(['viagem'])`.
+- Tocar no X de um chip → `onChanged` sem ela; Backspace com campo vazio remove a última.
+- `suggestions: ['viagem', 'trabalho', 'casa']` com `tags: ['casa']` e texto 'tr' → só o chip 'trabalho'; tocar → `onChanged(['casa', 'trabalho'])`.
+- `TagChips(tags: ['a', 'b', 'c', 'd'])` → '#a', '#b', '#c', '+1'; `tags: []` → nada renderizado.
+- `showBulkTagsDialog(count: 3, ...)` → título 'Tags em 3 transações'; 'Aplicar' desabilitado sem tags; adicionar 'x' e Aplicar → `(remove: false, tags: ['x'])`; modo 'Remover' → `remove: true`; Cancelar → `null`.
+
+### T-128 · Categorizador e importação com tags · `todo` · deps: T-125 · parallel: yes
+files: `lib/features/importing/domain/categorizer.dart`, `lib/features/importing/domain/import_session.dart`, `test/features/importing/categorizer_test.dart`, `test/features/importing/import_session_test.dart`
+contrato: SPEC §5.13 (`CategorizationResult.tags`, tags calculadas no passo 1 da cascata) e §5.16 (bullet "Tags (Fase 10)" do plano).
+aceite:
+- Regras contains 'UBER' (`cat_transporte`, tags `['app']`) prio 0 e contains 'TRIP' (só tags `['viagem']`) prio 1: `categorize('UBER *TRIP')` → `cat_transporte`, tags `['app', 'viagem']`; descrição que não casa regra (cai no dicionário) → tags `[]`.
+- Plano: linha que casa regra com tags `['app']` → transação criada com `['app']`; parcela 3/10 → as 8 do grupo com `['app']`; casamento com provisionado que já tem `['x']` → `update` com `['x', 'app']`.
+- `recategorize` com regra nova com tags muda as tags sugeridas das linhas não editadas.
+- Testes existentes passam (incluindo desempenho).
+
+### T-129 · Backup e "apagar dados" cobrem a Fase 10 · `todo` · deps: T-126 · parallel: yes
+files: `lib/core/services/backup_service.dart`, `lib/features/settings/presentation/settings_page.dart`, `test/core/backup_service_test.dart`, `test/features/settings/settings_page_test.dart`
+contrato: SPEC §3.5 "Fase 10: `fm_goals` e campos novos" (chave `goals`, versão 1, ausência → `[]`, meta com conta ausente descartada, retrato/restauração, apagar dados, CSV com rótulo de categoria e coluna "Tags").
+aceite:
+- Export → import em app vazio devolve metas (com movimentos), `parentId` de categoria, tags de transação e tags de regra iguais.
+- Backup sem `'goals'` → metas vazias; meta com `accountId` inexistente no backup some.
+- Falha na gravação (store que lança uma vez em `fm_goals`) restaura as metas anteriores (padrão do teste de rollback existente).
+- `transactionsCsv`: cabeçalho termina em 'Tags'; transação em subcategoria → 'Alimentação › Mercado'; tags `['a', 'b']` → 'a, b'.
+- Ajustes Ultra → "Apagar todos os dados" confirmado → metas vazias.
+
+### T-130 · Painel: card "Posso gastar hoje" · `todo` · deps: T-126 · parallel: yes
+files: `lib/features/dashboard/presentation/spendable_card.dart` (novo), `lib/features/dashboard/presentation/dashboard_page.dart`, `test/features/dashboard/spendable_card_test.dart` (novo)
+contrato: SPEC §7.3 Fase 10, bloco **`SpendableCard`** e linha da tabela. `_DashboardBody` recebe `SpendableToday spendable` (de `s.ledger.spendableToday`) e põe `SpendableCard(data: spendable, ultra: ultra)` como **primeiro** filho, antes de `DashboardKpiRow`, seguido de `_gap`.
+aceite (widget test com `SpendableToday` montado à mão dentro do app de teste; e um teste do Painel inteiro com seed):
+- livre 50000, 2500/dia, até 05/12, receita 'Salário', 20 dias → textos 'R$ 500,00', ' livres · ', 'R$ 25,00', '/dia até 05/12' e 'Próxima receita: Salário em 05/12 (20 dias)'.
+- 'Ver cálculo' → aparecem 'Saldo das contas', '− Faturas até 05/12 (1)', '− Provisionados até 05/12 (3)', '− Reservado em metas', '= Livre', '÷ 20 dias'; 'Ocultar cálculo' esconde.
+- Ultra com detalhe aberto mostra a descrição de um evento de fatura; Simples não mostra descrições de eventos.
+- livre −210000 → 'Sem folga até 05/12' e 'Faltam' + 'R$ 2.100,00'; nenhum '/dia'.
+- Sem receita → 'Sem receita recorrente: considerando até o fim do mês (16 dias)'.
+- `hideValues: true` → 'R$ ••••' no lugar dos valores.
+- Painel com seed (Simples e Ultra): `find.byKey(ValueKey('spendable-card'))` existe e fica acima do primeiro `KpiTile` (`tester.getTopLeft(...).dy` menor).
+
+### T-131 · Painel Ultra: drill-down por categoria · `todo` · deps: T-126 · parallel: yes
+files: `lib/features/dashboard/presentation/dashboard_summary.dart`, `lib/features/dashboard/presentation/dashboard_sections.dart`, `test/features/dashboard/dashboard_categories_test.dart` (novo)
+contrato: SPEC §7.3 Fase 10, parágrafo **Drill-down do Painel (Ultra)** (`CategoryRow.id`/`children`, `rolledSpendingFor`, `CategoriesCard` stateful, keys).
+aceite (app de teste; categorias padrão + 'Mercado X' filha de 'Alimentação'; despesas pagas no mês: 10000 direto em Alimentação, 50000 em Mercado X, 3000 em Transporte):
+- `DashboardSummary.of(ledger, ultra: true).categories.first` → nome 'Alimentação', 60000, `children` = ['Mercado X' 50000, 'Sem subcategoria' 10000].
+- Simples: 'Alimentação' com 60000 e `children` vazio; nenhum chevron.
+- Ultra: filha invisível até tocar em `category-row-<id de Alimentação>`; depois `category-child-<id de Mercado X>` visível; tocar de novo esconde.
+- Testes existentes do Painel passam.
+
+### T-132 · Categorias: árvore, categoria pai e exclusão · `todo` · deps: T-126 · parallel: yes
+files: `lib/features/categories/presentation/categories_page.dart`, `lib/features/categories/presentation/category_form.dart`, `test/features/categories/categories_page_test.dart`
+contrato: SPEC §7.3 Fase 10 (linhas "Árvore de categorias" e "Categoria pai" da tabela; parágrafo **Categorias**), §5.6 (`budgetStatuses(..., tree: ledger.categoryTree)`; gasto da raiz por `rolledSpendingFor`), §6.3 "Excluir categoria (Fase 10)". `_txWithoutCategory` passa a ser `t.copyWith(categoryId: null)` (preserva tags e campos de importação).
+aceite:
+- Criar 'Mercado X' com pai 'Alimentação' pelo form (`category-parent`) → `parentId` gravado; nova subcategoria criada pelo menu 'Nova subcategoria' herda ícone e cor do pai.
+- Simples: 'Mercado X' aparece recuada logo abaixo de 'Alimentação'; gasto da raiz = agregado.
+- Ultra: filha oculta até tocar em `category-toggle-<id>`; barra de orçamento da raiz usa o gasto agregado (orçamento 100000, gastos 10000 direto + 50000 na filha → `LimitBar` com usado 60000).
+- Editar 'Alimentação' (com filha): campo pai desabilitado com 'Tem subcategorias'. Categorias de receita não aparecem como pai de despesa.
+- Excluir 'Alimentação' com filha → SnackBar 'Mova ou exclua as subcategorias antes' e nada apagado; excluir uma categoria usada por transação com tags → transação sem categoria e com as tags intactas.
+- Testes existentes passam.
+
+### T-133 · Metas: diálogos (form, movimento, histórico) · `todo` · deps: T-126 · parallel: yes
+files: `lib/features/goals/presentation/goal_dialogs.dart` (novo), `test/features/goals/goal_dialogs_test.dart` (novo)
+contrato: SPEC §7.3 Fase 10, bloco **Metas** (`showGoalForm`, `showGoalMovementDialog`, `showGoalHistory`; regras do form, movimento e histórico), §6.3 "Metas". Saldo da conta = `ledger.accountBalances[accountId] ?? 0`; metas de `services.goals.all`. Gravação com `goals.upsert`. `DropdownButtonFormField` com `initialValue`.
+aceite (app de teste com 'Conta Alfa' saldo inicial 200000 e conta arquivada 'Conta Velha'):
+- Form: nome vazio → 'Informe o nome'; alvo 0 → 'Informe um alvo maior que zero'; dropdown sem 'Conta Velha'; salvar 'Viagem' alvo 'R$ 6.000,00' sem data → meta gravada com `targetCents 600000`, `targetDate null`, e devolvida.
+- Editar meta com movimentos → campo conta desabilitado com 'Meta com movimentos'.
+- Movimento: aporte 'R$ 1.500,00' → `reservedCents 150000`; novo aporte 'R$ 600,00' → erro 'Saldo livre na conta: R$ 500,00' e nada gravado; retirada 'R$ 2.000,00' → 'Reservado nesta meta: R$ 1.500,00'; retirada 'R$ 500,00' → `reservedCents 100000`.
+- Histórico: lista os 2 movimentos (mais recente primeiro); excluir o aporte de 150000 (com a retirada de 50000 ainda lá) → SnackBar 'Sem este aporte, as retiradas ficariam maiores que o reservado' e nada muda; excluir a retirada → `reservedCents 150000`.
+- Nenhuma ação cria transação (`transactions.all` inalterado).
+
+### T-134 · Metas: seção em Contas · `todo` · deps: T-133 · parallel: yes (com T-137)
+files: `lib/features/goals/presentation/goals_section.dart` (novo), `lib/features/accounts/presentation/accounts_page.dart`, `test/features/goals/goals_section_test.dart` (novo)
+contrato: SPEC §7.3 Fase 10 (linhas "Metas" e "Reservado por conta" da tabela; bloco **Metas**: `GoalsSection`, linha, Ultra/Simples, estado vazio), §6.3 (excluir/arquivar meta; "Excluir conta (Fase 10)"). `AccountsPage` põe `const GoalsSection()` depois da lista de contas (`AppSpace.lg` antes); linha da conta no Ultra mostra 'R$ X reservado' (de `ledger.reservedByAccount`), em `warning` se `overReservedCents > 0`. `_delete` inclui metas no `inUse` e troca a mensagem.
+aceite (app de teste com 'Conta Alfa' saldo 200000):
+- Sem metas → `EmptyState` com 'Nova meta'; sem conta ativa → botão 'Nova meta' desabilitado.
+- Meta alvo 600000 com 120000 reservado: Simples mostra nome, 'R$ 1.200,00', 'R$ 6.000,00', '20,0%' e o botão 'Aportar'; sem menu nem 'Aporte mensal necessário'.
+- Ultra com data-alvo 15/05/2027 (hoje 15/11/2026) → 'Aporte mensal necessário: R$ 800,00'; data 10/10/2026 → 'Data-alvo passou'; alvo atingido → 'Meta atingida'.
+- Ultra: gasto pago que derruba o saldo para 80000 → badge 'Reserva acima do saldo: faltam R$ 400,00' e caption da conta em `warning`.
+- Arquivar (menu) → some da lista; 'Mostrar arquivadas' → reaparece em `textSecondary`. Excluir com confirmação → removida.
+- Excluir 'Conta Alfa' (sem transações) com uma meta → SnackBar 'Conta usada por lançamentos, cartões, recorrências ou metas. Arquive em vez de excluir.'
+- Smoke test e testes existentes de Contas passam.
+
+### T-135 · Rótulo 'Pai › Filha': recorrência e prévia de importação · `todo` · deps: T-126 · parallel: yes
+files: `lib/features/recurring/presentation/recurring_form.dart`, `lib/features/importing/presentation/import_preview_page.dart`, `lib/features/importing/presentation/import_preview_row.dart`, `test/features/recurring/recurring_form_test.dart`
+contrato: SPEC §7.3 Fase 10 (rótulo e ordem de dropdown via `ledger.categoryTree`). `recurring_form.dart`: itens de categoria = `categoryTree.options(kind)` com texto `categoryTree.label(id)`. `ImportPreviewRow` ganha `String Function(TransactionCategory c)? labelOf` (padrão `c.name`) usado nos itens do dropdown; `import_preview_page.dart` passa `categoryOptions` = `categoryTree.options(kind da linha)` e `labelOf: (c) => tree.label(c.id)`.
+aceite:
+- Form de recorrência com 'Mercado X' filha de 'Alimentação' → item 'Alimentação › Mercado X' logo depois de 'Alimentação'; escolher grava o id da filha.
+- Testes existentes de recorrência e de prévia passam.
+
+### T-136 · Rótulo 'Pai › Filha': dicionário e detalhe do cartão · `todo` · deps: T-124, T-126 · parallel: yes
+files: `lib/features/importing/presentation/dictionary_section.dart`, `lib/features/cards/presentation/card_detail_page.dart`, `test/features/importing/dictionary_section_test.dart`
+contrato: SPEC §4.8 (nota Fase 10: o form grava `categoryTree.label(id)` como `categoryName`), §5.13 (`resolveCategoryByName` com caminho), §7.3 Fase 10 (rótulo). Dicionário: dropdown com `options(expense)` + `options(income)` e texto `label`; badge 'Categoria não encontrada' continua via `resolveCategoryByName`; editar entrada com caminho seleciona a filha. `card_detail_page.dart`: `categoryName: tree.label(id)` (vazio → null).
+aceite:
+- Novo padrão 'loja x' com categoria 'Alimentação › Mercado X' → `categoryName 'Alimentação › Mercado X'`; a linha não mostra 'Categoria não encontrada'.
+- Entrada com `categoryName 'Alimentação › Inexistente'` → 'Categoria não encontrada'.
+- Testes existentes passam.
+
+### T-137 · Form de transação: categoria em árvore e tags · `todo` · deps: T-126, T-127, T-128 · parallel: yes (com T-134)
+files: `lib/features/transactions/presentation/transaction_form.dart`, `test/features/transactions/transaction_form_test.dart`
+contrato: SPEC §4.4 (recriar pelo construtor passa `tags`), §7.3 Fase 10 (linha "Tags no form de transação"; parágrafo "Form de transação (Ultra)"). `_categoriesFor` passa a ser `ledger.categoryTree.options(kind)` com texto `label`. Estado `List<String> _tags = initial?.tags ?? const []`, `bool _tagsTouched = false`, `bool _tagsFromRule = false`. Ultra: `TagField(tags: _tags, suggestions: ledger.allTags, helperText: _tagsFromRule ? 'Tags da regra' : null, onChanged: (v) => setState(() { _tags = v; _tagsTouched = true; _tagsFromRule = false; }))` depois da Categoria. No gatilho de descrição existente, se `initial == null && !_tagsTouched` e tipo expense/income → `_tags = r.tags; _tagsFromRule = r.tags.isNotEmpty` (mesmo se a categoria já foi escolhida). `Transaction(..., tags: _tags)`; compra parcelada leva as tags (via `buildInstallments`).
+aceite:
+- Editar transação com tags `['viagem']` e só mudar o valor (Simples e Ultra) → tags preservadas; Simples não mostra o campo Tags.
+- Ultra, nova despesa: digitar tag 'trabalho' + Enter e salvar → transação com `['trabalho']`.
+- Ultra, com regra contains 'UBER' tags `['app']`: nova despesa, digitar 'UBER TRIP' → chip 'app' e 'Tags da regra'; salvar → `['app']`. Mexer nas tags antes de digitar a descrição → a regra não sobrescreve.
+- Dropdown de categoria mostra 'Alimentação › Mercado X' depois de 'Alimentação'.
+- Parcelado em 3x com tags `['x']` → 3 parcelas com `['x']`.
+- Testes existentes passam.
+
+### T-138 · Regras: tags no form e na seção · `todo` · deps: T-125, T-126, T-127 · parallel: yes
+files: `lib/features/rules/presentation/rule_form.dart`, `lib/features/rules/presentation/rules_section.dart`, `test/features/rules/rules_section_test.dart`
+contrato: SPEC §4.6 (regra útil inclui tags), §7.3 Fase 10 (linha "Tags em regras"), §5.14 (tags no reaplicar). Form: `TagField(label: 'Adicionar tags', suggestions: ledger.allTags)` depois de 'Renomear para'; grava `tags: normalizeTags(_tags)`; erro passa a 'Defina categoria, renomeação ou tags'; dropdown de categoria por `categoryTree.options` + `label`. Seção: `TagChips(tags: rule.tags)` na linha; rótulo da categoria por `label`. Reaplicar: texto `'N transações vão mudar (X de categoria, Y de descrição, Z de tags)'` (Z = mudadas cujas tags diferem da original).
+aceite:
+- Regra só com tags `['app']` (sem categoria/renomear) salva; sem nada → 'Defina categoria, renomeação ou tags'.
+- Linha da regra mostra '#app'.
+- Reaplicar com 2 transações que casam e sem a tag → '2 transações vão mudar (0 de categoria, 0 de descrição, 2 de tags)'; Aplicar → as 2 com `['app']`.
+- Testes existentes passam (ajustar só o texto do reaplicar onde algum teste o compara).
+
+### T-139 · Transações: subcategorias, filtro de tags e tags na linha · `todo` · deps: T-115 (Fase 9 fechada), T-126, T-127 · parallel: yes (com T-140)
+files: `lib/features/transactions/presentation/transaction_filters.dart`, `lib/features/transactions/presentation/transactions_page.dart`, `lib/features/transactions/presentation/transaction_row.dart`, `test/features/transactions/transactions_tags_test.dart` (novo)
+contrato: SPEC §7.3 Fase 10, parágrafo "Transações (Ultra)" (`TransactionFilter.tags` + `copyWith(tags:)`, `hasCriteria`, `query` casando tags, `matches(t, {CategoryTree? tree})`, `visibleTransactions(..., {tree})`, dropdown de categoria por `options`/`label`, botão `filter-tags`, rótulo por `label`, `TagChips` na linha Ultra, ordenação por rótulo). `TransactionRow` ganha `String? categoryLabel` (não nulo → usado no lugar de `category.name`) e mostra `TagChips` só no Ultra. A página passa `tree: ledger.categoryTree` para `visibleTransactions` e o rótulo para a linha e para a ordenação.
+aceite (seed demo, Ultra, 1400×900; 'Mercado X' filha de 'Alimentação'; transações do mês: A em 'Alimentação', B em 'Mercado X' com tags `['viagem']`, C em 'Transporte' com `['Trabalho']`):
+- Filtro de categoria 'Alimentação' → A e B visíveis, C não; 'Alimentação › Mercado X' → só B.
+- `filter-tags` → marcar 'viagem' → só B; marcar também 'Trabalho' → B e C ('Tags (2)'); 'Limpar tags' → todas.
+- Busca 'trabalho' → C (casa a tag).
+- Linha de B mostra 'Alimentação › Mercado X' e '#viagem'; Simples não mostra '#viagem'.
+- Testes existentes de Transações (incluindo os da Fase 9 e `transaction_filters_test.dart`) passam.
+
+### T-140 · Paleta: busca por tag e rótulo de subcategoria · `todo` · deps: T-115 (Fase 9 fechada), T-121, T-126 · parallel: yes (com T-139)
+files: `lib/features/transactions/domain/transaction_search.dart`, `lib/app/app_commands.dart`, `test/features/transactions/transaction_search_test.dart`, `test/app/app_commands_test.dart`
+contrato: SPEC §5.17 regra 5 (tags no índice, token `#`) e §7.3 Fase 10 (última frase do parágrafo "Transações (Ultra)": `subtitle` com rótulo e `' · #a #b'`). Tags pré-dobradas no construtor do índice (nada de `foldText` por transação em `search`).
+aceite:
+- Exemplos extras de §5.17 (Fase 10) com t1/t2 do SPEC acrescidos das tags indicadas; exemplos e desempenho antigos continuam passando.
+- `transactionEntries` com transação em 'Mercado X' (filha de 'Compras') e tags `['casa']` → subtitle '14/11/2026 · Cartão Beta · Compras › Mercado X · #casa'.
+- Testes existentes passam.
+
+### T-141 · Ações em massa: 'Tags' e rótulos em diálogos e célula inline · `todo` · deps: T-139, T-127 · parallel: no
+files: `lib/features/transactions/presentation/transactions_page.dart`, `lib/features/transactions/presentation/bulk_dialogs.dart`, `lib/features/transactions/presentation/inline_cells.dart`, `test/features/transactions/transactions_bulk_tags_test.dart` (novo)
+contrato: SPEC §6.3 "Tags em massa (Fase 10)", §7.3 Fase 10 (`BulkAction('Tags', Icons.sell_outlined)` depois de 'Recategorizar'; `labelOf` em `InlineCategoryCell` e `showBulkCategoryDialog`, com a ordem recebida mantida). A página passa `options(kind)` + `labelOf: (c) => tree.label(c.id)` para as células inline e para o diálogo de recategorizar (lista = `options(expense)` + `options(income)`). `bulk_action_bar.dart` não muda.
+aceite (seed demo, Ultra, 1400×900):
+- Selecionar 2 transações → 'Tags' → adicionar 'viagem' → as 2 com 'viagem' no repositório; SnackBar 'Tags atualizadas em 2 transações'; seleção mantida.
+- Modo 'Remover' 'viagem' nas mesmas → tags removidas; transação que não tinha a tag não entra na contagem.
+- Célula inline de categoria lista 'Alimentação › Mercado X'; diálogo 'Recategorizar' também.
+- Testes existentes da Fase 9 (`bulk_dialogs_test.dart`, `inline_cells_test.dart`, `transactions_bulk_test.dart`) passam sem mudança (parâmetro novo é opcional).
+
+### T-142 · Documentação da Fase 10 · `todo` · deps: T-120..T-141 · parallel: no
+files: `CONTEXT.md`, `ROADMAP.md`, `docs/BACKLOG.md`
+contrato: CONTEXT §4 (árvore com `features/goals/`, `category_tree.dart`, `tags.dart`, `spendable.dart`, `goal_math.dart`, `spendable_card.dart`, `tag_widgets.dart`, `goals_section.dart`, `goal_dialogs.dart`), §5 (Painel com "Posso gastar hoje" como 1º elemento e drill-down; Categorias em árvore; Metas em Contas; tags em Transações, form, regras, paleta e massa; diferenças Simples/Ultra), §6 (regras de "posso gastar", orçamento do pai, reserva de metas), §7 (box `fm_goals`; backup cobre metas, `parentId` e tags; CSV com coluna Tags), §8 (testes novos, total), §10 (commit), §11 (status), §12 (limites: receitas provisionadas avulsas não definem a próxima receita nem somam no livre; contas de investimento entram no saldo do "posso gastar"; recorrências não carregam tags; tags só editáveis no Ultra; subcategorias homônimas tornam o nome simples ambíguo no dicionário/CSV; reserva acima do saldo só gera aviso). ROADMAP: Fase 10 em "v3". BACKLOG: T-120..T-141 `done`.
 aceite: total de testes igual ao de `flutter test`; `bash tool/check.sh` → `CHECK OK`.

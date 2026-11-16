@@ -5,6 +5,7 @@ import 'package:finme/app/seed.dart';
 import 'package:finme/core/models/app_settings.dart';
 import 'package:finme/core/services/record_store.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const _pages = [
@@ -61,6 +62,19 @@ Future<void> _openAndCancelTransactionForm(WidgetTester tester) async {
   expect(tester.takeException(), isNull);
 }
 
+/// Abre a paleta pela entrada da sidebar ou pelo botão colapsado e fecha com Esc.
+Future<void> _openAndCloseSearch(WidgetTester tester, Finder trigger) async {
+  await tester.tap(trigger);
+  await tester.pumpAndSettle();
+  expect(find.byKey(const ValueKey('palette-input')), findsOneWidget);
+  expect(find.text('Buscar comandos e transações'), findsOneWidget);
+
+  await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+  await tester.pumpAndSettle();
+  expect(find.byKey(const ValueKey('palette-input')), findsNothing);
+  expect(tester.takeException(), isNull);
+}
+
 void main() {
   for (final mode in AppMode.values) {
     testWidgets('desktop 1400x900 ($mode): navega 9 páginas e abre o form', (
@@ -69,38 +83,70 @@ void main() {
       final s = await _boot(tester, mode);
       await _pumpApp(tester, s, size: const Size(1400, 900));
 
-      for (final label in _pages) {
+      expect(find.byTooltip('Atalho: N'), findsOneWidget);
+      for (var i = 0; i < _pages.length; i++) {
         // Na sidebar larga, o primeiro item com o rótulo é o da navegação.
-        await tester.tap(find.widgetWithText(InkWell, label).first);
+        await tester.tap(find.widgetWithText(InkWell, _pages[i]).first);
         await tester.pumpAndSettle();
-        expect(tester.takeException(), isNull, reason: label);
+        expect(tester.takeException(), isNull, reason: _pages[i]);
+        expect(find.byTooltip('Atalho: ${i + 1}'), findsWidgets);
       }
 
       await _openAndCancelTransactionForm(tester);
     });
+
+    testWidgets('desktop 1400x900 ($mode): entrada Buscar abre a paleta', (
+      tester,
+    ) async {
+      final s = await _boot(tester, mode);
+      await _pumpApp(tester, s, size: const Size(1400, 900));
+
+      await _openAndCloseSearch(
+        tester,
+        find.byKey(const ValueKey('sidebar-search')),
+      );
+    });
+
+    testWidgets(
+      'estreito 800x700 ($mode): sidebar colapsada navega 9 páginas',
+      (tester) async {
+        final s = await _boot(tester, mode);
+        await _pumpApp(tester, s, size: const Size(800, 700));
+
+        expect(find.byType(Drawer), findsNothing);
+        expect(find.byType(AppBar), findsNothing);
+
+        for (var i = 0; i < _pages.length; i++) {
+          final label = _pages[i];
+          await tester.tap(find.byTooltip('$label · ${i + 1}'));
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull, reason: label);
+        }
+
+        await _openAndCancelTransactionForm(tester);
+      },
+    );
+
+    testWidgets('estreito 800x700 ($mode): botão Buscar abre a paleta', (
+      tester,
+    ) async {
+      final s = await _boot(tester, mode);
+      await _pumpApp(tester, s, size: const Size(800, 700));
+
+      await _openAndCloseSearch(tester, find.byTooltip('Buscar (Ctrl+K)'));
+    });
   }
 
-  testWidgets('estreito 800x700 (Ultra): sidebar colapsada navega 9 páginas', (
+  testWidgets('estreito 800x700 (Ultra): botão de modo alterna para Simples', (
     tester,
   ) async {
     final s = await _boot(tester, AppMode.ultra);
     await _pumpApp(tester, s, size: const Size(800, 700));
 
-    expect(find.byType(Drawer), findsNothing);
-    expect(find.byType(AppBar), findsNothing);
-
-    for (final label in _pages) {
-      await tester.tap(find.byTooltip(label));
-      await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull, reason: label);
-    }
-
     await tester.tap(find.byTooltip('Modo: Ultra'));
     await tester.pumpAndSettle();
     expect(find.byTooltip('Modo: Simples'), findsOneWidget);
     expect(s.settings.value.mode, AppMode.simple);
-
-    await _openAndCancelTransactionForm(tester);
   });
 
   testWidgets('redimensionar 1400 -> 800 não causa overflow', (tester) async {

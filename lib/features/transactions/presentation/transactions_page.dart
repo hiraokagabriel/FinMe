@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../app/app_scope.dart';
+import '../../../app/app_shortcuts.dart';
 import '../../../app/ledger.dart';
 import '../../../core/models/app_settings.dart';
 import '../../../core/models/year_month.dart';
@@ -8,25 +10,63 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/id.dart';
 import '../../../core/widgets/widgets.dart';
+import '../../categories/domain/transaction_category.dart';
 import '../../importing/presentation/import_flow.dart';
+import '../../rules/domain/rule_engine.dart';
+import '../../rules/domain/rule_suggestion.dart';
+import '../../rules/presentation/rule_form.dart';
 import '../domain/transaction.dart';
+import '../domain/transaction_bulk.dart';
+import 'bulk_action_bar.dart';
+import 'bulk_dialogs.dart';
 import 'transaction_filters.dart';
 import 'transaction_form.dart';
 import 'transaction_row.dart';
+import 'transaction_selection.dart';
 
 class TransactionsPage extends StatefulWidget {
-  const TransactionsPage({super.key});
+  const TransactionsPage({
+    super.key,
+    this.focusNode,
+    this.searchFocusNode,
+    this.initialQuery,
+  });
+
+  /// Foco da página (atalhos de seleção). Nulo → a página cria e descarta o próprio.
+  final FocusNode? focusNode;
+
+  /// Foco do campo de busca da barra de filtros (Ultra); `/` do shell usa este nó.
+  final FocusNode? searchFocusNode;
+
+  /// Busca inicial (ex.: vinda da paleta). Só o Ultra mostra a barra de filtros.
+  final String? initialQuery;
 
   @override
   State<TransactionsPage> createState() => _TransactionsPageState();
 }
 
 class _TransactionsPageState extends State<TransactionsPage> {
+  final FocusNode _ownFocus = FocusNode(debugLabel: 'transactions');
   YearMonth? _month;
-  TransactionFilter _filter = const TransactionFilter();
+  late TransactionFilter _filter;
   TxSort _sort = kDefaultTxSort;
   // Troca a chave da barra de filtros: `initialValue` não reseta sozinho.
   int _filterEpoch = 0;
+  TransactionSelection _selection = TransactionSelection.empty;
+
+  FocusNode get _focus => widget.focusNode ?? _ownFocus;
+
+  @override
+  void initState() {
+    super.initState();
+    _filter = TransactionFilter(query: widget.initialQuery ?? '');
+  }
+
+  @override
+  void dispose() {
+    _ownFocus.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -52,11 +92,57 @@ class _TransactionsPageState extends State<TransactionsPage> {
                     ledger.categoriesById[t.categoryId]?.name ?? '',
               )
             : filtered;
-        final newButton = FilledButton.icon(
-          icon: const Icon(Icons.add),
-          label: const Text('Nova transação'),
-          onPressed: () => showTransactionForm(context),
+        // Seleção só no Ultra: ao sair dele zera (já estamos no build, sem setState).
+        if (!ultra) {
+          _selection = TransactionSelection.empty;
+        }
+        // Seleção só no Ultra; conta apenas as linhas visíveis (filtro escondido não entra).
+        final order = [for (final t in rows) t.id];
+        final selected = ultra
+            ? [
+                for (final t in rows)
+                  if (_selection.contains(t.id)) t,
+              ]
+            : const <Transaction>[];
+        final bulkActions = [
+          BulkAction(
+            label: 'Recategorizar',
+            icon: Icons.category_outlined,
+            onPressed: () => _recategorize(context, s, selected),
+          ),
+          BulkAction(
+            label: 'Confirmar pagamento',
+            icon: Icons.event_available,
+            onPressed: selected.any((t) => t.isPlanned)
+                ? () => _confirmBulk(context, s, selected)
+                : null,
+          ),
+          BulkAction(
+            label: 'Criar regra',
+            icon: Icons.rule,
+            onPressed: () => _createRule(context, s, selected),
+          ),
+          BulkAction(
+            label: 'Excluir',
+            icon: Icons.delete_outline,
+            destructive: true,
+            onPressed: () => _deleteBulk(context, s, selected),
+          ),
+        ];
+        final newButton = Tooltip(
+          message: 'Atalho: N',
+          child: FilledButton.icon(
+            icon: const Icon(Icons.add),
+            label: const Text('Nova transação'),
+            onPressed: () => showTransactionForm(context),
+          ),
         );
+        // Listas do dropdown inline, uma vez por build (categoria de cada `kind`, por nome).
+        final expenseOptions = _optionsOf(
+          s.categories.all,
+          CategoryKind.expense,
+        );
+        final incomeOptions = _optionsOf(s.categories.all, CategoryKind.income);
         final emptyAction = ultra && _filter.hasCriteria
             ? Wrap(
                 alignment: WrapAlignment.center,
@@ -74,70 +160,145 @@ class _TransactionsPageState extends State<TransactionsPage> {
         final pad = MediaQuery.sizeOf(context).width < 600
             ? AppSpace.lg
             : AppSpace.xl;
-        return Align(
-          alignment: Alignment.topCenter,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1200),
-            child: Column(
-              children: [
-                PageHeader(
-                  title: 'Transações',
-                  actions: [
-                    OutlinedButton.icon(
-                      onPressed: () => startImport(context),
-                      icon: const Icon(Icons.upload_file),
-                      label: const Text('Importar'),
-                    ),
-                    MonthSelector(
-                      value: month,
-                      onChanged: (m) => setState(() => _month = m),
-                    ),
-                  ],
-                ),
-                if (ultra)
-                  Padding(
-                    padding: EdgeInsets.fromLTRB(pad, 0, pad, AppSpace.md),
-                    child: TransactionFilterBar(
-                      key: ValueKey(_filterEpoch),
-                      filter: _filter,
-                      accounts: [
-                        for (final a in s.accounts.all)
-                          if (!a.archived) a,
-                      ],
-                      cards: [
-                        for (final c in s.cards.all)
-                          if (!c.archived) c,
-                      ],
-                      categories: s.categories.all,
-                      onChanged: (f) => setState(() => _filter = f),
-                    ),
-                  ),
-                Expanded(
-                  child: Padding(
-                    padding: EdgeInsets.fromLTRB(pad, 0, pad, AppSpace.lg),
-                    child: Column(
-                      children: [
-                        Expanded(
-                          child: _TransactionTable(
-                            rows: rows,
-                            ultra: ultra,
-                            pastBefore: YearMonth.fromDate(
-                              s.ledger.today,
-                            ).firstDay,
-                            services: s,
-                            sort: _sort,
-                            onSort: (c) =>
-                                setState(() => _sort = toggleTxSort(_sort, c)),
-                            emptyAction: emptyAction,
-                            onAction: (t, a) => _onAction(context, s, t, a),
+        return Shortcuts(
+          shortcuts: kSelectionShortcuts,
+          child: Actions(
+            actions: <Type, Action<Intent>>{
+              SelectAllRowsIntent: TypingGuardAction<SelectAllRowsIntent>(
+                onInvoke: (_) {
+                  if (ultra) {
+                    setState(() => _selection = _selection.selectAll(order));
+                  }
+                  return null;
+                },
+              ),
+              ClearSelectionIntent: TypingGuardAction<ClearSelectionIntent>(
+                onInvoke: (_) {
+                  if (ultra) {
+                    _clearSelection();
+                  }
+                  return null;
+                },
+              ),
+            },
+            child: Focus(
+              focusNode: _focus,
+              autofocus: true,
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1200),
+                  child: Column(
+                    children: [
+                      PageHeader(
+                        title: 'Transações',
+                        actions: [
+                          Tooltip(
+                            message: 'Atalho: Ctrl+I',
+                            child: OutlinedButton.icon(
+                              onPressed: () => startImport(context),
+                              icon: const Icon(Icons.upload_file),
+                              label: const Text('Importar'),
+                            ),
+                          ),
+                          MonthSelector(
+                            value: month,
+                            // Seleção é por mês: trocar o mês limpa.
+                            onChanged: (m) => setState(() {
+                              _month = m;
+                              _selection = TransactionSelection.empty;
+                            }),
+                          ),
+                        ],
+                      ),
+                      if (ultra)
+                        Padding(
+                          padding: EdgeInsets.fromLTRB(
+                            pad,
+                            0,
+                            pad,
+                            AppSpace.md,
+                          ),
+                          child: TransactionFilterBar(
+                            key: ValueKey(_filterEpoch),
+                            filter: _filter,
+                            accounts: [
+                              for (final a in s.accounts.all)
+                                if (!a.archived) a,
+                            ],
+                            cards: [
+                              for (final c in s.cards.all)
+                                if (!c.archived) c,
+                            ],
+                            categories: s.categories.all,
+                            searchFocusNode: widget.searchFocusNode,
+                            // Seleção é por filtro: mudar o filtro limpa, como trocar o mês.
+                            onChanged: (f) => setState(() {
+                              _filter = f;
+                              _selection = TransactionSelection.empty;
+                            }),
                           ),
                         ),
-                        _TotalsBar(totals: txTotals(rows), ultra: ultra),
-                      ],
-                    ),
+                      Expanded(
+                        child: Padding(
+                          padding: EdgeInsets.fromLTRB(
+                            pad,
+                            0,
+                            pad,
+                            AppSpace.lg,
+                          ),
+                          child: Column(
+                            children: [
+                              if (selected.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    bottom: AppSpace.sm,
+                                  ),
+                                  child: BulkActionBar(
+                                    count: selected.length,
+                                    actions: bulkActions,
+                                    onClear: _clearSelection,
+                                  ),
+                                ),
+                              Expanded(
+                                child: _TransactionTable(
+                                  rows: rows,
+                                  ultra: ultra,
+                                  pastBefore: YearMonth.fromDate(
+                                    s.ledger.today,
+                                  ).firstDay,
+                                  services: s,
+                                  sort: _sort,
+                                  onSort: (c) => setState(
+                                    () => _sort = toggleTxSort(_sort, c),
+                                  ),
+                                  emptyAction: emptyAction,
+                                  onAction: (t, a) =>
+                                      _onAction(context, s, t, a),
+                                  selection: _selection,
+                                  allSelected: _selection.allState(order),
+                                  onToggleSelect: (id) => _toggleRow(id, order),
+                                  onSelectAll: () => _selectAll(order),
+                                  expenseOptions: ultra ? expenseOptions : null,
+                                  incomeOptions: ultra ? incomeOptions : null,
+                                  onCategoryChanged: ultra
+                                      ? (t, v) => _saveCategory(s, t, v)
+                                      : null,
+                                  onAmountChanged:
+                                      ultra && !s.settings.value.hideValues
+                                      ? (t, v) => _saveAmount(s, t, v)
+                                      : null,
+                                ),
+                              ),
+                              _TotalsBar(totals: txTotals(rows), ultra: ultra),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
+              ),
             ),
           ),
         );
@@ -148,8 +309,51 @@ class _TransactionsPageState extends State<TransactionsPage> {
   void _clearFilters() {
     setState(() {
       _filter = const TransactionFilter();
+      _selection = TransactionSelection.empty;
       _filterEpoch++;
     });
+  }
+
+  /// Shift+clique estende a partir da âncora; clique comum inverte a linha.
+  void _toggleRow(String id, List<String> order) {
+    final shift = HardwareKeyboard.instance.isShiftPressed;
+    setState(() {
+      _selection = shift
+          ? _selection.extendTo(id, order)
+          : _selection.toggle(id);
+    });
+  }
+
+  /// Cabeçalho: com tudo marcado limpa; senão marca as linhas visíveis.
+  void _selectAll(List<String> order) {
+    setState(() {
+      _selection = _selection.allState(order) == true
+          ? TransactionSelection.empty
+          : _selection.selectAll(order);
+    });
+  }
+
+  void _clearSelection() =>
+      setState(() => _selection = TransactionSelection.empty);
+
+  /// Edição inline de categoria (Ultra). "Sem categoria" chega como null.
+  Future<void> _saveCategory(
+    AppServices s,
+    Transaction t,
+    String? categoryId,
+  ) async {
+    await s.transactions.upsert(t.copyWith(categoryId: categoryId));
+  }
+
+  /// Edição inline de valor (Ultra, sem hideValues). Parcelas não chegam aqui.
+  Future<void> _saveAmount(AppServices s, Transaction t, int cents) async {
+    await s.transactions.upsert(t.copyWith(amountCents: cents));
+  }
+
+  void _notify(BuildContext context, String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _onAction(
@@ -286,7 +490,146 @@ class _TransactionsPageState extends State<TransactionsPage> {
     }
     await s.transactions.delete(t.id);
   }
+
+  /// Ações em massa (SPEC §6.3). Cada uma grava com um único `upsertAll`/`deleteWhere`.
+  Future<void> _recategorize(
+    BuildContext context,
+    AppServices s,
+    List<Transaction> selected,
+  ) async {
+    final choice = await showBulkCategoryDialog(
+      context,
+      count: selected.length,
+      categories: s.categories.all,
+    );
+    if (choice == null || !context.mounted) {
+      return;
+    }
+    final result = bulkRecategorize(selected, choice.category);
+    await s.transactions.upsertAll(result.changed);
+    if (!context.mounted) {
+      return;
+    }
+    final skipped = result.skipped > 0
+        ? ' · ${result.skipped} ignoradas (tipo incompatível)'
+        : '';
+    _notify(
+      context,
+      '${_countLabel(result.changed.length, 'recategorizada', 'recategorizadas')}$skipped',
+    );
+  }
+
+  Future<void> _confirmBulk(
+    BuildContext context,
+    AppServices s,
+    List<Transaction> selected,
+  ) async {
+    final date = await showBulkConfirmDialog(
+      context,
+      count: selected.length,
+      initialDate: s.ledger.today,
+    );
+    if (date == null || !context.mounted) {
+      return;
+    }
+    final result = bulkConfirmPlanned(selected, date);
+    await s.transactions.upsertAll(result.changed);
+    if (!context.mounted) {
+      return;
+    }
+    _notify(
+      context,
+      _countLabel(
+        result.changed.length,
+        'provisionado confirmado',
+        'provisionados confirmados',
+      ),
+    );
+  }
+
+  /// Formulário de regra com o padrão da seleção; a regra salva recategoriza a seleção na hora.
+  Future<void> _createRule(
+    BuildContext context,
+    AppServices s,
+    List<Transaction> selected,
+  ) async {
+    final rule = await showRuleForm(
+      context,
+      initialPattern: suggestRulePattern([
+        for (final t in selected) ruleSubject(t),
+      ]),
+      initialCategoryId: commonCategoryId(selected),
+      sampleDescription: ruleSubject(selected.first),
+    );
+    if (rule == null || !context.mounted) {
+      return;
+    }
+    final changed = reapplyRules(
+      compileRules([rule]),
+      selected,
+      categoriesById: s.ledger.categoriesById,
+      overwriteCategory: true,
+    );
+    await s.transactions.upsertAll(changed);
+    if (!context.mounted) {
+      return;
+    }
+    _notify(
+      context,
+      'Regra criada · ${_countLabel(changed.length, 'transação atualizada', 'transações atualizadas')}',
+    );
+  }
+
+  /// Parcelas na seleção pedem o escopo (só as selecionadas ou grupos inteiros).
+  Future<void> _deleteBulk(
+    BuildContext context,
+    AppServices s,
+    List<Transaction> selected,
+  ) async {
+    final groups = installmentGroupsOf(selected).length;
+    final wholeGroupsCount = bulkDeleteIds(
+      selected,
+      s.transactions.all,
+      wholeGroups: true,
+    ).length;
+    final scope = await showBulkDeleteDialog(
+      context,
+      count: selected.length,
+      groups: groups,
+      wholeGroupsCount: wholeGroupsCount,
+    );
+    if (scope == null || !context.mounted) {
+      return;
+    }
+    final ids = bulkDeleteIds(
+      selected,
+      s.transactions.all,
+      wholeGroups: scope == BulkDeleteScope.wholeGroups,
+    );
+    await s.transactions.deleteWhere((t) => ids.contains(t.id));
+    if (!context.mounted) {
+      return;
+    }
+    _clearSelection();
+    _notify(
+      context,
+      _countLabel(ids.length, 'transação excluída', 'transações excluídas'),
+    );
+  }
 }
+
+/// "1 transação" ou "2 transações": singular só para 1.
+String _countLabel(int n, String one, String many) =>
+    n == 1 ? '1 $one' : '$n $many';
+
+/// Categorias de um `kind`, por nome (opções do dropdown inline).
+List<TransactionCategory> _optionsOf(
+  List<TransactionCategory> all,
+  CategoryKind kind,
+) => [
+  for (final c in all)
+    if (c.kind == kind) c,
+]..sort((a, b) => a.name.compareTo(b.name));
 
 enum _DeleteScope { one, all }
 
@@ -330,6 +673,14 @@ class _TransactionTable extends StatelessWidget {
     required this.onSort,
     required this.emptyAction,
     required this.onAction,
+    required this.selection,
+    required this.allSelected,
+    required this.onToggleSelect,
+    required this.onSelectAll,
+    this.expenseOptions,
+    this.incomeOptions,
+    this.onCategoryChanged,
+    this.onAmountChanged,
   });
 
   final List<Transaction> rows;
@@ -340,6 +691,18 @@ class _TransactionTable extends StatelessWidget {
   final ValueChanged<TxSortColumn> onSort;
   final Widget emptyAction;
   final void Function(Transaction, TransactionAction) onAction;
+  final TransactionSelection selection;
+
+  /// Estado do checkbox de cabeçalho (null = parcial).
+  final bool? allSelected;
+  final ValueChanged<String> onToggleSelect;
+  final VoidCallback onSelectAll;
+
+  /// Edição inline (Ultra): opções por `kind` e gravadores; null = célula estática.
+  final List<TransactionCategory>? expenseOptions;
+  final List<TransactionCategory>? incomeOptions;
+  final void Function(Transaction, String?)? onCategoryChanged;
+  final void Function(Transaction, int)? onAmountChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -354,10 +717,14 @@ class _TransactionTable extends StatelessWidget {
     }
     final ledger = services.ledger;
     final list = ListView.builder(
+      // Folga para o FAB "Nova transação" não cobrir a última linha.
+      padding: const EdgeInsets.only(bottom: 64),
       itemExtent: ultra ? kTxRowExtentUltra : kTxRowExtentSimple,
       itemCount: rows.length,
       itemBuilder: (context, i) {
         final t = rows[i];
+        final onCat = onCategoryChanged;
+        final onAmount = onAmountChanged;
         return TransactionRow(
           transaction: t,
           ultra: ultra,
@@ -365,7 +732,17 @@ class _TransactionTable extends StatelessWidget {
           category: ledger.categoriesById[t.categoryId],
           origin: _originName(ledger, t),
           destination: _destinationName(ledger, t),
+          selected: ultra ? selection.contains(t.id) : null,
+          onToggleSelect: ultra ? () => onToggleSelect(t.id) : null,
           onAction: (a) => onAction(t, a),
+          categoryOptions: t.type == TransactionType.income
+              ? incomeOptions
+              : expenseOptions,
+          onCategoryChanged: onCat == null ? null : (v) => onCat(t, v),
+          // Parcela não edita valor inline (ver canEditAmountInline).
+          onAmountChanged: onAmount == null || !canEditAmountInline(t)
+              ? null
+              : (v) => onAmount(t, v),
         );
       },
     );
@@ -397,6 +774,9 @@ class _TransactionTable extends StatelessWidget {
                     ultra: true,
                     sort: sort,
                     onSort: onSort,
+                    selectable: true,
+                    selectAllState: allSelected,
+                    onSelectAll: onSelectAll,
                   ),
                   Expanded(child: list),
                 ],

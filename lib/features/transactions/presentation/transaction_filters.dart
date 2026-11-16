@@ -210,6 +210,7 @@ class TransactionFilterBar extends StatefulWidget {
     required this.cards,
     required this.categories,
     required this.onChanged,
+    this.searchFocusNode,
   });
 
   final TransactionFilter filter;
@@ -217,6 +218,9 @@ class TransactionFilterBar extends StatefulWidget {
   final List<PaymentCard> cards;
   final List<TransactionCategory> categories;
   final ValueChanged<TransactionFilter> onChanged;
+
+  /// Foco do campo de busca; nulo → o próprio campo cria o seu.
+  final FocusNode? searchFocusNode;
 
   @override
   State<TransactionFilterBar> createState() => _TransactionFilterBarState();
@@ -300,6 +304,7 @@ class _TransactionFilterBarState extends State<TransactionFilterBar> {
           width: 240,
           child: TextField(
             controller: _search,
+            focusNode: widget.searchFocusNode,
             decoration: const InputDecoration(
               hintText: 'Buscar descrição ou notas',
               prefixIcon: Icon(Icons.search),
