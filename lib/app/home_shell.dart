@@ -15,6 +15,8 @@ import '../features/debts/presentation/debt_dialogs.dart';
 import '../features/forecast/presentation/forecast_page.dart';
 import '../features/net_worth/presentation/asset_dialogs.dart';
 import '../features/net_worth/presentation/net_worth_page.dart';
+import '../features/reports/presentation/reports_controller.dart';
+import '../features/reports/presentation/reports_page.dart';
 import '../features/importing/presentation/import_flow.dart';
 import '../features/importing/presentation/import_page.dart';
 import '../features/recurring/presentation/recurring_form.dart';
@@ -34,6 +36,7 @@ const _sidebarWidth = 220.0;
 const _railWidth = 64.0;
 const _transactionsIndex = 4;
 const _netWorthIndex = 9;
+const _reportsIndex = 10;
 
 const _navItems = <({String label, IconData icon})>[
   (label: 'Painel', icon: Icons.dashboard_outlined),
@@ -47,10 +50,24 @@ const _navItems = <({String label, IconData icon})>[
   (label: 'Ajustes', icon: Icons.settings_outlined),
   // Sem atalho numérico: '1'..'9' seguem nas 9 primeiras páginas (SPEC §7.3 Fase 11).
   (label: 'Patrimônio', icon: Icons.account_balance_outlined),
+  // Relatórios também sem atalho numérico (SPEC §7.3 Fase 12).
+  (label: 'Relatórios', icon: Icons.insights_outlined),
 ];
 
-/// Ordem da sidebar (índices de `_navItems`): Patrimônio logo depois de Contas.
-const _sidebarOrder = [0, 1, 2, 3, _netWorthIndex, 4, 5, 6, 7, 8];
+/// Ordem da sidebar (índices de `_navItems`): Patrimônio logo depois de Contas; Relatórios entre Categorias e Ajustes.
+const _sidebarOrder = [
+  0,
+  1,
+  2,
+  3,
+  _netWorthIndex,
+  4,
+  5,
+  6,
+  7,
+  _reportsIndex,
+  8,
+];
 
 /// Casca do app: sidebar sempre visível, 220 px com rótulos ou 64 px só com ícones
 /// (abaixo de 900 px de largura). Só a página ativa é construída.
@@ -71,6 +88,11 @@ class _HomeShellState extends State<HomeShell> {
   final _shellFocus = FocusNode(debugLabel: 'shell');
   final _txFocus = FocusNode(debugLabel: 'transactions');
   final _txSearchFocus = FocusNode(debugLabel: 'tx-search');
+  // Criado no primeiro acesso à página ou a um comando de relatório; filtro e relatório escolhido sobrevivem à troca de página.
+  ReportsController? _reportsCtl;
+
+  ReportsController get _reports =>
+      _reportsCtl ??= ReportsController(AppScope.of(context));
 
   @override
   void initState() {
@@ -84,6 +106,7 @@ class _HomeShellState extends State<HomeShell> {
     _shellFocus.dispose();
     _txFocus.dispose();
     _txSearchFocus.dispose();
+    _reportsCtl?.dispose();
     super.dispose();
   }
 
@@ -169,6 +192,10 @@ class _HomeShellState extends State<HomeShell> {
           onNewRecurring: () => showRecurringForm(context),
           onNewAsset: () => showAssetForm(context),
           onNewDebt: () => showDebtForm(context),
+          onOpenReport: (k) {
+            _reports.selected = k;
+            _select(_reportsIndex);
+          },
           onToggleMode: () => s.settings.update(
             (c) => c.copyWith(mode: ultra ? AppMode.simple : AppMode.ultra),
           ),
@@ -288,6 +315,7 @@ class _HomeShellState extends State<HomeShell> {
     7 => const CategoriesPage(),
     8 => const SettingsPage(),
     _netWorthIndex => const NetWorthPage(),
+    _reportsIndex => ReportsPage(controller: _reports),
     _ => const DashboardPage(),
   };
 }

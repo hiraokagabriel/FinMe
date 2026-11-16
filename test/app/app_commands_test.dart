@@ -24,6 +24,7 @@ const _pages = <PageInfo>[
   (label: 'Categorias', icon: Icons.category_outlined),
   (label: 'Ajustes', icon: Icons.settings_outlined),
   (label: 'Patrimônio', icon: Icons.account_balance_outlined),
+  (label: 'Relatórios', icon: Icons.insights_outlined),
 ];
 
 /// Comandos com callbacks que gravam o que foi chamado em [ran].
@@ -37,6 +38,7 @@ List<PaletteEntry> _commands(List<String> ran, {AppSettings? settings}) =>
       onNewRecurring: () => ran.add('recorrencia'),
       onNewAsset: () => ran.add('ativo'),
       onNewDebt: () => ran.add('divida'),
+      onOpenReport: (k) => ran.add('relatorio ${k.name}'),
       onToggleMode: () => ran.add('modo'),
       onToggleTheme: () => ran.add('tema'),
       onToggleHideValues: () => ran.add('ocultar'),
@@ -46,11 +48,11 @@ PaletteEntry _named(List<PaletteEntry> list, String label) =>
     list.firstWhere((e) => e.label == label);
 
 void main() {
-  test('18 comandos na ordem do SPEC, com atalhos corretos', () {
+  test('22 comandos (Simples) na ordem do SPEC, com atalhos corretos', () {
     final ran = <String>[];
     final cmds = _commands(ran);
 
-    expect(cmds.length, 18);
+    expect(cmds.length, 22);
     expect(cmds.map((e) => e.label).toList(), [
       for (final p in _pages) 'Ir para ${p.label}',
       'Nova transação',
@@ -58,6 +60,9 @@ void main() {
       'Nova recorrência',
       'Novo ativo',
       'Nova dívida (devo / me devem)',
+      'Relatório: Tendência',
+      'Relatório: Top estabelecimentos',
+      'Relatório: Comparativo por categoria',
       'Mudar para Modo Ultra',
       'Alternar tema claro/escuro',
       'Ocultar valores',
@@ -73,6 +78,20 @@ void main() {
     expect(_named(cmds, 'Ir para Painel').shortcut, '1');
     expect(_named(cmds, 'Ir para Ajustes').shortcut, '9');
     expect(_named(cmds, 'Ir para Patrimônio').shortcut, isNull);
+    expect(_named(cmds, 'Ir para Relatórios').shortcut, isNull);
+  });
+
+  test('Ultra: 26 comandos, 7 relatórios no grupo Relatórios', () {
+    final ran = <String>[];
+    final cmds = _commands(ran, settings: AppSettings(mode: AppMode.ultra));
+
+    expect(cmds.length, 26);
+    final reports = cmds.where((e) => e.group == 'Relatórios').toList();
+    expect(reports.length, 7);
+    final debt = cmds.indexOf(_named(cmds, 'Nova dívida (devo / me devem)'));
+    expect(cmds[debt + 1].label, 'Relatório: Comparativo por categoria');
+    expect(cmds[debt + 7].label, 'Relatório: Evolução do patrimônio');
+    expect(cmds[debt + 8].label, 'Mudar para Modo Simples');
   });
 
   test('ações chamam os callbacks certos', () {
@@ -98,6 +117,14 @@ void main() {
     ]);
   });
 
+  test('comando de relatório chama onOpenReport com o tipo certo', () {
+    final ran = <String>[];
+    final cmds = _commands(ran, settings: AppSettings(mode: AppMode.ultra));
+    _named(cmds, 'Relatório: Categoria × mês').onRun();
+    _named(cmds, 'Relatório: Gasto por dia').onRun();
+    expect(ran, ['relatorio pivot', 'relatorio heatmap']);
+  });
+
   test('rótulo de modo e de privacidade acompanha as configurações', () {
     final ultra = _commands(
       [],
@@ -120,6 +147,17 @@ void main() {
 
     final loan = fuzzyRank(cmds, 'emprest', keys);
     expect(loan.first.label, 'Nova dívida (devo / me devem)');
+  });
+
+  test('busca fuzzy acha relatórios por palavra-chave', () {
+    final cmds = _commands([], settings: AppSettings(mode: AppMode.ultra));
+    List<String> keys(PaletteEntry e) => [e.label, ...e.keywords];
+
+    final heat = fuzzyRank(cmds, 'heatmap', keys);
+    expect(heat.first.label, 'Relatório: Gasto por dia');
+
+    final where = fuzzyRank(cmds, 'onde gasto', keys);
+    expect(where.first.label, 'Relatório: Top estabelecimentos');
   });
 
   group('transactionEntries', () {

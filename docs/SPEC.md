@@ -1629,6 +1629,13 @@ Exemplos (teste obrigatório; hoje 15/11/2026): `last3` → 2026-09..2026-11; `l
 `ignoredFilters(trend, ReportFilter(flow: income))` → ['tipo']; `(trend, padrão)` → []; `(topMerchants, ReportFilter(flow: income))` → [];
 `(netWorth, ReportFilter(cardIds: {K}, tagKeys: {VIAGEM}, includePlanned: true))` → ['contas e cartões', 'tags', 'provisionados'].
 
+**Decisões da revisão da Fase 12 (valem para §5.28–5.31):**
+- Mês corrente "até hoje": transações **não provisionadas** com data > `today` ficam fora da matriz, da tendência, do fixo × variável e
+  dos estabelecimentos (mesmo critério do Painel/`monthlyHistory` e do heatmap). Parcelas futuras já lançadas não inflam o mês.
+- Categorias × fluxo: na Tendência, `categoryIds` só restringe o lado do fluxo daquelas categorias e `ignoredFilters(trend)` cita
+  'categorias'; no heatmap e no fixo × variável (só despesa), `flow == income` faz ignorar `flow` e `categoryIds`, citados no aviso.
+- CSV exporta valores reais mesmo com valores ocultos (ação explícita; o SnackBar diz "valores reais").
+
 ### 5.28 Comparativo por categoria — `features/reports/domain/category_reports.dart` (Fase 12)
 Dart puro. A matriz mês × categoria também alimenta o pivot (§5.29): calculada uma vez por filtro (cache no `ReportsController`, §6.4).
 ```dart

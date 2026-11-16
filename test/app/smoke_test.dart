@@ -5,6 +5,8 @@ import 'package:finme/app/seed.dart';
 import 'package:finme/core/models/app_settings.dart';
 import 'package:finme/core/services/record_store.dart';
 import 'package:finme/features/debts/domain/debt.dart';
+import 'package:finme/features/reports/presentation/pivot_view.dart';
+import 'package:finme/features/settings/presentation/settings_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -20,6 +22,7 @@ const _pages = [
   'Categorias',
   'Ajustes',
   'Patrimônio',
+  'Relatórios',
 ];
 
 /// Tooltip do item: 'Atalho: N' nas 9 primeiras páginas; Patrimônio não tem atalho numérico.
@@ -96,6 +99,8 @@ void main() {
           tester.getTopLeft(find.widgetWithText(InkWell, label).first).dy;
       expect(dy('Contas'), lessThan(dy('Patrimônio')));
       expect(dy('Patrimônio'), lessThan(dy('Transações')));
+      expect(dy('Categorias'), lessThan(dy('Relatórios')));
+      expect(dy('Relatórios'), lessThan(dy('Ajustes')));
       for (var i = 0; i < _pages.length; i++) {
         // Na sidebar larga, o primeiro item com o rótulo é o da navegação.
         await tester.tap(find.widgetWithText(InkWell, _pages[i]).first);
@@ -183,6 +188,59 @@ void main() {
 
     final tile = find.widgetWithText(InkWell, 'Patrimônio').first;
     expect(find.descendant(of: tile, matching: find.text('1')), findsOneWidget);
+  });
+
+  testWidgets('tecla 9 continua indo para Ajustes', (tester) async {
+    final s = await _boot(tester, AppMode.ultra);
+    await _pumpApp(tester, s, size: const Size(1400, 900));
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit9);
+    await tester.pumpAndSettle();
+    expect(find.byType(SettingsPage), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('paleta: Relatório: Categoria × mês abre o pivot', (
+    tester,
+  ) async {
+    final s = await _boot(tester, AppMode.ultra);
+    await _pumpApp(tester, s, size: const Size(1400, 900));
+
+    await tester.tap(find.byKey(const ValueKey('sidebar-search')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('palette-input')),
+      'Categoria × mês',
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Relatório: Categoria × mês'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(PivotView), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('filtro de Relatórios sobrevive à troca de página', (
+    tester,
+  ) async {
+    final s = await _boot(tester, AppMode.simple);
+    await _pumpApp(tester, s, size: const Size(1400, 900));
+
+    await tester.tap(find.widgetWithText(InkWell, 'Relatórios').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('report-period')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('3 meses').last);
+    await tester.pumpAndSettle();
+    expect(find.text('set/2026 – nov/2026'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(InkWell, 'Painel').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(InkWell, 'Relatórios').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('set/2026 – nov/2026'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('redimensionar 1400 -> 800 não causa overflow', (tester) async {

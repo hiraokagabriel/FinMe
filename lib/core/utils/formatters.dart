@@ -102,6 +102,18 @@ String formatPercent(double ratio, {int decimals = 1}) {
   return '$sign$digits%';
 }
 
+/// CSV de relatórios: "1234,56", "-50,00". Sem R$ nem milhar (igual a `formatMoneyInput`).
+String formatCsvMoney(int cents) => formatMoneyInput(cents);
+
+/// Planilha lê texto iniciado em = + - @ (ou tab/CR) como fórmula: prefixa uma aspa simples.
+/// Espaços antes do `=` não protegem (a planilha os ignora), por isso o teste usa `trimLeft`.
+String csvText(String value) {
+  final body = value.trimLeft();
+  final formula = body.isNotEmpty && '=+-@'.contains(body[0]);
+  final control = value.startsWith('\t') || value.startsWith('\r');
+  return formula || control ? "'$value" : value;
+}
+
 String _two(int n) => n.toString().padLeft(2, '0');
 
 String _groupThousands(int n) {

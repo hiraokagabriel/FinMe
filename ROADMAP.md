@@ -16,13 +16,14 @@ Direção do produto e próximos passos. Tarefas detalhadas e status: `docs/BACK
 - **Fase 5 — Previsibilidade avançada**: cobertura de faturas, linha do tempo de vencimentos (60 dias), parcelas comprometidas, melhor cartão para comprar hoje e mudança de ciclo com vigência.
 - **Fase 6 — Pendências conhecidas**: import de backup tudo-ou-nada, previsão cobre os 60 dias da linha do tempo, `copyWith` limpa anuláveis e fatura de transição sem fusão na mudança de ciclo (T-040..T-046).
 
-## v3 — em andamento (`docs/V3_DIRECTION.md`)
+## v3 — concluída (`docs/V3_DIRECTION.md`)
 
 - **Fase 7 — Identidade visual e polimento**: tipografia Plex + Source Serif 4, neutros quentes, deltas/sparklines, avatar de banco, ordenação, estados vazios, shell só desktop (T-050..T-068).
 - **Fase 8 — Importação, regras e categorização**: CSV com perfis, OFX, prévia com deduplicação, casamento com provisionados e parcelas, categorização offline em cascata, regras e dicionário editáveis (T-070..T-092).
 - **Fase 9 — Produtividade**: paleta Ctrl+K, atalhos globais, multi-seleção com ações em massa e edição inline (T-100..T-115).
 - **Fase 10 — Subcategorias, tags, metas e "posso gastar hoje"** (T-120..T-142).
 - **Fase 11 — Patrimônio e devo/me devem** (T-150..T-164).
+- **Fase 12 — Relatórios**: 7 relatórios curados com filtros globais e CSV (T-170..T-190). **v3 concluída.**
 
 ## Próximos passos sugeridos
 

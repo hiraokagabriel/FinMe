@@ -4,6 +4,8 @@ import '../core/models/app_settings.dart';
 import '../core/theme/app_palettes.dart';
 import '../core/utils/formatters.dart';
 import '../core/widgets/money.dart';
+import '../features/reports/domain/report_filter.dart';
+import '../features/reports/presentation/reports_page.dart';
 import '../features/transactions/domain/transaction.dart';
 import 'command_palette.dart';
 import 'ledger.dart';
@@ -11,7 +13,7 @@ import 'ledger.dart';
 /// Página na paleta: rótulo e ícone (mesmos de `_navItems` do shell).
 typedef PageInfo = ({String label, IconData icon});
 
-/// Comandos globais, na ordem do SPEC §7.3: 'Ir para' por página, depois as ações.
+/// Comandos globais, na ordem do SPEC §7.3: 'Ir para' por página, depois as ações e os relatórios.
 List<PaletteEntry> buildAppCommands({
   required AppSettings settings,
   required List<PageInfo> pages,
@@ -21,6 +23,7 @@ List<PaletteEntry> buildAppCommands({
   required VoidCallback onNewRecurring,
   required VoidCallback onNewAsset,
   required VoidCallback onNewDebt,
+  required ValueChanged<ReportKind> onOpenReport,
   required VoidCallback onToggleMode,
   required VoidCallback onToggleTheme,
   required VoidCallback onToggleHideValues,
@@ -69,6 +72,14 @@ List<PaletteEntry> buildAppCommands({
       keywords: const ['empréstimo', 'emprestei', 'devo', 'me devem', 'dívida'],
       onRun: onNewDebt,
     ),
+    for (final k in ultra ? kUltraReports : kSimpleReports)
+      PaletteEntry(
+        label: 'Relatório: ${reportKindLabel(k)}',
+        icon: reportKindIcon(k),
+        group: 'Relatórios',
+        keywords: ['relatório', 'análise', ..._reportWords(k)],
+        onRun: () => onOpenReport(k),
+      ),
     PaletteEntry(
       label: ultra ? 'Mudar para Modo Simples' : 'Mudar para Modo Ultra',
       icon: Icons.tune,
@@ -89,6 +100,22 @@ List<PaletteEntry> buildAppCommands({
     ),
   ];
 }
+
+/// Palavras de busca extras de cada relatório (SPEC §7.3 Fase 12).
+List<String> _reportWords(ReportKind k) => switch (k) {
+  ReportKind.categoryComparison => [
+    'comparar',
+    'mês anterior',
+    'média',
+    'categoria',
+  ],
+  ReportKind.trend => ['12 meses', 'receitas', 'despesas', 'saldo', 'evolução'],
+  ReportKind.pivot => ['pivot', 'tabela', 'planilha', 'categoria', 'mês'],
+  ReportKind.heatmap => ['heatmap', 'calendário', 'dia'],
+  ReportKind.topMerchants => ['lojas', 'onde gasto', 'ranking', 'top'],
+  ReportKind.fixedVariable => ['fixo', 'variável', 'recorrente', 'parcelas'],
+  ReportKind.netWorth => ['patrimônio', 'evolução', 'líquido'],
+};
 
 /// Uma entrada por transação de [found] (já filtrada e ordenada pelo chamador).
 List<PaletteEntry> transactionEntries(
