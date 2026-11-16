@@ -53,6 +53,7 @@ lib/
     goals/{domain,presentation}        # Fase 10: metas/caixinhas (reserva virtual dentro de uma conta)
     net_worth/{domain,presentation}    # Fase 11: ativos manuais com snapshots e patrimônio líquido (página Patrimônio)
     debts/{domain,presentation}        # Fase 11: devo / me devem (pessoa, valor, pagamentos que geram transação)
+    reports/{domain,presentation}      # Fase 12: relatórios curados (filtros globais, cache no ReportsController, CSV)
     dashboard/presentation
     settings/presentation
     onboarding/presentation
@@ -101,6 +102,10 @@ class YearMonth implements Comparable<YearMonth> {
 - `String formatDate(DateTime d)` `"14/11/2026"`; `String formatShortDate(DateTime d)` `"14/11"`.
 - `String formatMonth(YearMonth m)` `"nov/2026"`; `String formatMonthLong(YearMonth m)` `"Novembro 2026"`.
 - `String formatPercent(double ratio, {int decimals = 1})` (Fase 7): `0.1234` → `"12,3%"`, `-0.05` → `"-5,0%"`, `0` → `"0,0%"`; vírgula decimal, arredondamento meio-para-cima.
+- Fase 12 (CSV de relatórios; mesmo formato do CSV de transações de `backup_service.dart`, que mantém as cópias privadas dele):
+  `String formatCsvMoney(int cents)` → sem "R$" e sem separador de milhar, vírgula decimal: `123456` → `"1234,56"`, `-5000` → `"-50,00"`, `0` → `"0,00"`, `7` → `"0,07"`.
+  `String csvText(String value)` → texto que começa com `=`, `+`, `-` ou `@` ganha `'` na frente (planilha não interpreta como fórmula):
+  `'=SOMA(A1)'` → `"'=SOMA(A1)"`, `'-x'` → `"'-x"`, `'Mercado'` → `'Mercado'`, `''` → `''`.
 
 ### 3.4 `lib/core/utils/id.dart`
 - `String newId()` → único por processo (timestamp em micros base36 + contador + random). Sem dependência.
@@ -1458,7 +1463,7 @@ Regras:
    Pagamento acima do restante é bloqueado (sem troco nem crédito). Data do pagamento entre a data da dívida e hoje.
 3. **Quitar** = registrar um pagamento (total ou parcial): cria uma transação **paga** na conta escolhida — `income` quando me devem (entra dinheiro),
    `expense` quando devo (sai) — com categoria opcional, e grava o id dela no pagamento. Patrimônio neutro: conta ± valor, a receber/a pagar ∓ valor.
-4. **Desfazer** = remover o pagamento e excluir a transação ligada (se ainda existir). Editar ou excluir essa transação pela tela de Transações
+4. **Desfazer** = remover o pagamento (grava a dívida **primeiro**) e depois excluir a transação ligada (se ainda existir); se a exclusão falhar, a transação fica órfã e visível, com aviso (revisão da Fase 11). Editar ou excluir essa transação pela tela de Transações
    **não** altera a dívida (limite conhecido): o histórico de pagamentos no Ultra mostra 'Transação excluída' quando o id não existe mais.
 5. Editar dívida: valor >= pago; direção travada se há pagamentos. Excluir dívida com pagamentos é bloqueado ('Desfaça os pagamentos antes de excluir').
 6. **Previsão e "posso gastar"** (decisão): "devo" com vencimento e restante > 0 vira evento `expense` **sem conta** no vencimento (vencida → hoje,
@@ -1541,6 +1546,282 @@ Cartão K (crédito, fecha 28, vence 5, paga por A): compra 30000 em 05/09; comp
   `deltaRatio(4920000, 4670000)` ≈ −0,0508.
 Variações: estorno de 10000 no cartão K em 12/11 → cartão de nov 110000; `invoicePayment` de 40000 de A com data 20/11 → nov: cartão 80000 e contas 800000,
 líquido igual (4670000); pagamento de 50000 contra dívida de 30000 → cartão 0 (nunca negativo); `cardPurchaseDate` da 2ª parcela de compra de 31/01/2026 em 3× → 28/01/2026.
+
+### 5.27 Relatórios: filtros, período e escopo — `features/reports/domain/report_filter.dart` (Fase 12)
+Dart puro. Base de todos os relatórios (§5.28–5.31). Relatórios leem só **transações gravadas** (`transactions.all`): ocorrências projetadas de
+recorrência (ainda não materializadas) nunca entram. Dinheiro em centavos `int`; razões (`double?`) só para exibir percentuais.
+```dart
+enum ReportKind { categoryComparison, trend, pivot, heatmap, topMerchants, fixedVariable, netWorth } // ordem da lista no Ultra
+const List<ReportKind> kUltraReports = ReportKind.values;
+const List<ReportKind> kSimpleReports = [ReportKind.trend, ReportKind.topMerchants, ReportKind.categoryComparison];
+String reportKindLabel(ReportKind k);
+  // 'Comparativo por categoria', 'Tendência', 'Categoria × mês', 'Gasto por dia', 'Top estabelecimentos', 'Fixo × variável', 'Evolução do patrimônio'
+String reportKindSlug(ReportKind k);
+  // 'comparativo-categorias', 'tendencia', 'categoria-mes', 'gasto-por-dia', 'estabelecimentos', 'fixo-variavel', 'patrimonio'
+enum ReportPeriodPreset { last3, last6, last12, thisYear, lastYear, custom }
+String reportPeriodLabel(ReportPeriodPreset p); // '3 meses', '6 meses', '12 meses', 'Ano atual', 'Ano anterior', 'Personalizado'
+enum ReportFlow { expense, income }
+const int kReportMaxMonths = 60;
+class ReportFilter {
+  const ReportFilter({this.preset = ReportPeriodPreset.last12, this.customFrom, this.customTo,
+    this.accountIds = const {}, this.cardIds = const {}, this.categoryIds = const {}, this.tagKeys = const {},
+    this.flow = ReportFlow.expense, this.includePlanned = false});
+  final ReportPeriodPreset preset;
+  final YearMonth? customFrom, customTo;     // só valem com preset custom
+  final Set<String> accountIds, cardIds;     // vazios = todas as contas e cartões
+  final Set<String> categoryIds;             // vazio = todas; raiz selecionada inclui as filhas
+  final Set<String> tagKeys;                 // já em tagKey (§5.21); vazio = sem filtro; "tem alguma" (hasAnyTag)
+  final ReportFlow flow;                     // despesas (padrão) ou receitas
+  final bool includePlanned;                 // padrão false
+  ReportFilter copyWith({...});              // customFrom/customTo anuláveis com sentinela _keep (§4)
+  ReportFilter get periodOnly;               // mesmo preset/customFrom/customTo; resto no padrão (Modo Simples)
+  bool get hasScopeFilters;                  // algum set não vazio || flow != expense || includePlanned
+  // == e hashCode por conteúdo: sets comparados como conjuntos (ordem de inserção não importa; hash com Object.hashAllUnordered)
+}
+typedef ReportRange = ({YearMonth from, YearMonth to});
+ReportRange resolveReportRange(ReportFilter f, DateTime today);
+List<YearMonth> monthsOf(ReportRange r);     // from..to inclusive, ordem cronológica
+ReportFlow? reportFlowOf(Transaction t);
+  // expense (conta, cartão de crédito ou débito) → expense; income com accountId != null → income;
+  // income em cartão (estorno), transfer e invoicePayment → null (fora de todos os relatórios)
+bool matchesReportScope(Transaction t, ReportFilter f, CategoryTree tree);
+  // ignora período e flow. true se TODAS: (!t.isPlanned || f.includePlanned);
+  // contas/cartões: os dois sets vazios, ou f.accountIds.contains(t.accountId), ou f.cardIds.contains(t.cardId);
+  // categorias: set vazio, ou (t.categoryId != null && (contains(t.categoryId) || contains(tree.rootOf(t.categoryId!))));
+  // tags: hasAnyTag(t, f.tagKeys)
+int roundDiv(int a, int b);                  // b > 0; divisão inteira arredondada meio-para-longe-do-zero
+String reportCategoryLabel(String? id, CategoryTree tree, {bool isDirect = false});
+  // null → 'Sem categoria'; tree.label(id) vazio → 'Categoria removida'; isDirect → '{label} › (sem subcategoria)'; senão tree.label(id)
+List<String> ignoredFilters(ReportKind k, ReportFilter f);
+  // rótulos dos filtros ATIVOS que o relatório não usa (tabela abaixo), na ordem fixa:
+  // 'contas e cartões', 'categorias', 'tags', 'tipo', 'provisionados'. Período nunca entra.
+```
+`resolveReportRange` (cur = `YearMonth.fromDate(today)`): `last3` → (cur−2, cur); `last6` → (cur−5, cur); `last12` → (cur−11, cur);
+`thisYear` → (jan do ano de cur, cur); `lastYear` → (jan, dez do ano anterior); `custom` → `from = customFrom ?? cur−11`, `to = customTo ?? cur`;
+`from > to` → troca; mais de `kReportMaxMonths` meses → `from = to − 59`. Meses futuros são permitidos (só têm provisionados).
+`roundDiv`: `a >= 0` → `(2a + b) ~/ (2b)`; senão `−((−2a + b) ~/ (2b))`.
+
+Filtros por relatório ("sim" = respeita; os "não" ativos aparecem em `ignoredFilters`):
+
+| Relatório | Período | Contas/cartões | Categorias | Tags | Tipo | Provisionados |
+|---|---|---|---|---|---|---|
+| Comparativo por categoria | mês de referência = `range.to` (+ meses anteriores) | sim | sim | sim | sim | sim |
+| Tendência | sim | sim | sim | sim | não (sempre receitas e despesas) | sim |
+| Categoria × mês (pivot) | sim | sim | sim | sim | sim | sim |
+| Gasto por dia | sim | sim | sim | sim | não (sempre despesas) | sim |
+| Top estabelecimentos | sim | sim | sim | sim | sim | sim |
+| Fixo × variável | sim | sim | sim | sim | não (sempre despesas) | sim |
+| Evolução do patrimônio | sim (∩ 24 meses do Ledger) | não | não | não | não | não |
+
+Decisões: estorno (receita em cartão) fica fora, como em `spendingByCategory` (§5.6), para os números baterem com o Painel e Categorias.
+Despesa de cartão de crédito conta pela data da compra/parcela (`t.date`), como em §5.6. Quitação de dívida (§5.25) é receita/despesa comum e entra.
+Exemplos (teste obrigatório; hoje 15/11/2026): `last3` → 2026-09..2026-11; `last12` → 2025-12..2026-11; `thisYear` → 2026-01..2026-11;
+`lastYear` → 2025-01..2025-12; `custom(2026-05, 2026-02)` → 2026-02..2026-05; `custom(2020-01, 2026-11)` → 2021-12..2026-11 (60 meses);
+`custom` sem datas → igual a `last12`; `monthsOf(2025-11..2026-02)` → [2025-11, 2025-12, 2026-01, 2026-02].
+`roundDiv(155000, 3) == 51667`; `roundDiv(5, 2) == 3`; `roundDiv(4, 3) == 1`; `roundDiv(-1, 2) == -1`; `roundDiv(-11, 2) == -6`; `roundDiv(0, 7) == 0`.
+`reportFlowOf`: despesa em conta, em cartão de crédito e em cartão de débito → expense; receita em conta → income; receita em cartão → null; transfer → null; invoicePayment → null.
+`matchesReportScope` (árvore de §5.20; t = despesa paga na conta A, categoria `mer`, tags ['Viagem']): filtro padrão → true; `categoryIds {ali}` → true;
+`{mer}` → true; `{res}` → false; `{tra}` → false; `tagKeys {VIAGEM}` → true; `{CASA}` → false; `accountIds {A}` → true; `{B}` → false; só `cardIds {K}` → false;
+`accountIds {B}` + `cardIds {K}` com t no cartão K (sem conta) → true; t provisionada → false, com `includePlanned` → true; t sem categoria com `categoryIds {ali}` → false.
+`ReportFilter(accountIds: {'a', 'b'}) == ReportFilter(accountIds: {'b', 'a'})` e mesmo `hashCode`; `copyWith(customFrom: null)` limpa; `periodOnly` de um filtro com
+`preset custom`, datas, `cardIds {K}`, `flow income` e `includePlanned` → só preset e datas mantidos, `hasScopeFilters == false`.
+`reportCategoryLabel(null, ...)` → 'Sem categoria'; `('mer')` → 'Alimentação › Mercado'; `('ali', isDirect: true)` → 'Alimentação › (sem subcategoria)'; `('apagada')` → 'Categoria removida'.
+`ignoredFilters(trend, ReportFilter(flow: income))` → ['tipo']; `(trend, padrão)` → []; `(topMerchants, ReportFilter(flow: income))` → [];
+`(netWorth, ReportFilter(cardIds: {K}, tagKeys: {VIAGEM}, includePlanned: true))` → ['contas e cartões', 'tags', 'provisionados'].
+
+### 5.28 Comparativo por categoria — `features/reports/domain/category_reports.dart` (Fase 12)
+Dart puro. A matriz mês × categoria também alimenta o pivot (§5.29): calculada uma vez por filtro (cache no `ReportsController`, §6.4).
+```dart
+typedef MonthCategoryTotals = Map<YearMonth, Map<String?, int>>;
+MonthCategoryTotals monthlyCategoryTotals(Iterable<Transaction> txs, ReportFilter f,
+  {required YearMonth from, required YearMonth to, required CategoryTree tree});
+  // UMA passada: reportFlowOf(t) == f.flow && matchesReportScope(t, f, tree) && from <= mês de t.date <= to;
+  // soma amountCents em [mês][t.categoryId] — categoria PRÓPRIA, sem rollUp. Mês sem valor fica ausente.
+class CategoryComparisonRow {
+  const CategoryComparisonRow({required this.categoryId, this.isDirect = false, required this.currentCents,
+    required this.previousCents, required this.averageCents, this.children = const []});
+  final String? categoryId;      // raiz (ou null = Sem categoria); no drill-down: filha, ou o próprio pai com isDirect
+  final bool isDirect;           // linha "(sem subcategoria)": lançado direto no pai
+  final int currentCents, previousCents, averageCents;
+  final List<CategoryComparisonRow> children; // só em raiz com filhas; senão const []
+  int get deltaCents => currentCents - previousCents;
+  double? get changeRatio => deltaRatio(previousCents, currentCents);        // §5.10
+  double? get averageChangeRatio => deltaRatio(averageCents, currentCents);
+}
+class CategoryComparison {
+  const CategoryComparison({required this.month, required this.averageMonths, required this.rows, required this.total});
+  final YearMonth month; final int averageMonths;
+  final List<CategoryComparisonRow> rows; // raízes
+  final CategoryComparisonRow total;       // categoryId null, sem children: somas das raízes; averageCents = roundDiv(soma das somas, n)
+}
+CategoryComparison categoryComparison(MonthCategoryTotals totals,
+  {required YearMonth month, required int averageMonths, required CategoryTree tree});
+```
+Regras:
+1. `current` = mês `month`; `previous` = `month − 1`; `average` = `roundDiv(soma de month−1 .. month−averageMonths, averageMonths)` (meses sem valor contam como 0).
+   `totals` precisa cobrir `month − averageMonths .. month` (o controller garante, §6.4).
+2. Raiz = `tree.rootOf(categoryId)` (`null` fica `null`). Uma raiz entra se current, previous ou a soma da média ≠ 0.
+3. Raiz com filhas (`tree.hasChildren`): `children` = uma linha por filha com algum valor + a linha `isDirect` (id do pai) se o pai tem valor próprio.
+4. Ordem (raízes e children): `currentCents` desc, `previousCents` desc, `foldText(reportCategoryLabel)` asc; `null` (Sem categoria) sempre por último; a linha `isDirect` sempre por último entre as filhas.
+Exemplo (teste obrigatório; árvore de §5.20; `month` 2026-11, `averageMonths` 3; despesas pagas por mês e categoria própria):
+ago: `mer` 30000, `tra` 10000 · set: `mer` 40000, `res` 10000, `tra` 10000 · out: `mer` 50000, `res` 20000, `ali` 5000, `tra` 20000 ·
+nov: `mer` 60000, `res` 15000, `tra` 5000, sem categoria 3000. Ignorados em nov: receita 500000 em conta (categoria `sal`), transferência 100000, `invoicePayment` 50000,
+estorno de 1000 no cartão (categoria `tra`), despesa provisionada `mer` 99999.
+- `ali`: current 75000, previous 75000, average 51667 (155000/3), delta 0, `changeRatio` 0.0, `averageChangeRatio` ≈ 0,4516.
+  children: `mer` (60000, 50000, 40000, delta 10000, 0.2), `res` (15000, 20000, 10000, −5000, −0.25), direta `ali` (0, 5000, 1667, −5000, −1.0) — nessa ordem.
+- `tra`: (5000, 20000, 13333, −15000, −0.75), sem children.
+- `null`: (3000, 0, 0), `changeRatio` null.
+- Ordem das raízes: `ali`, `tra`, `null`. `total`: (83000, 95000, 65000).
+Variações: `includePlanned: true` → `mer` current 159999 e `ali` current 174999; `averageMonths: 6` → `ali` average 25833 (155000/6);
+`categoryIds {tra}` → só a linha `tra`; `flow: income` → só a linha `sal` (current 500000, previous 0, average 0).
+
+### 5.29 Pivot categoria × mês — `features/reports/domain/category_pivot.dart` (Fase 12)
+```dart
+class PivotRow {
+  const PivotRow({required this.categoryId, this.isDirect = false, required this.cells, required this.totalCents, this.children = const []});
+  final String? categoryId; final bool isDirect;
+  final List<int> cells;          // um valor por mês, na ordem de CategoryPivot.months
+  final int totalCents;           // soma de cells
+  final List<PivotRow> children;  // mesma regra 3 de §5.28
+}
+class CategoryPivot {
+  const CategoryPivot({required this.months, required this.rows, required this.columnTotals, required this.grandTotalCents, required this.maxCellCents});
+  final List<YearMonth> months; final List<PivotRow> rows;  // raízes
+  final List<int> columnTotals;   // soma das raízes por mês
+  final int grandTotalCents;      // soma de columnTotals
+  final int maxCellCents;         // maior célula entre as RAÍZES (0 se vazio); intensidade do fundo da célula na UI
+}
+CategoryPivot categoryPivot(MonthCategoryTotals totals, {required List<YearMonth> months, required CategoryTree tree});
+  // raízes por tree.rootOf; entra a raiz (e a filha / linha direta) com totalCents != 0. Ordem padrão: totalCents desc, label asc; null por último.
+enum PivotSortKey { label, total, month }
+List<PivotRow> sortPivotRows(List<PivotRow> rows, {required PivotSortKey key, int monthIndex = 0, required bool ascending, required CategoryTree tree});
+  // ordena raízes e children (lista nova); empate → foldText(reportCategoryLabel) asc; null sempre por último; isDirect sempre por último entre as filhas
+```
+Exemplo (teste obrigatório; mesmos dados de §5.28, `months` ago..nov 2026): `ali` cells [30000, 50000, 75000, 75000] total 230000, children `mer`
+[30000, 40000, 50000, 60000] 180000, `res` [0, 10000, 20000, 15000] 45000, direta [0, 0, 5000, 0] 5000; `tra` [10000, 10000, 20000, 5000] 45000;
+`null` [0, 0, 0, 3000] 3000. Ordem padrão `ali`, `tra`, `null`. `columnTotals` [40000, 60000, 95000, 83000]; `grandTotalCents` 278000; `maxCellCents` 75000.
+`sortPivotRows(key: month, monthIndex: 0, ascending: false)` → `ali`, `tra`, `null`; `(key: total, ascending: true)` → `tra` (45000), `ali`, `null`;
+`(key: label, ascending: false)` → `tra`, `ali`, `null`; children de `ali` com `(key: total, ascending: true)` → `res`, `mer`, direta.
+`months` sem dados → `rows` vazio, `columnTotals` zeros, `grandTotalCents` 0.
+
+### 5.30 Tendência e fixo × variável — `features/reports/domain/monthly_flow.dart` (Fase 12)
+```dart
+class TrendPoint {
+  const TrendPoint({required this.month, required this.incomeCents, required this.expenseCents});
+  final YearMonth month; final int incomeCents; final int expenseCents;
+  int get balanceCents => incomeCents - expenseCents;   // saldo do mês
+}
+List<TrendPoint> monthlyTrend(Iterable<Transaction> txs, ReportFilter f, {required List<YearMonth> months, required CategoryTree tree});
+  // ignora f.flow; um ponto por mês de months (zeros inclusos); income/expense por reportFlowOf; matchesReportScope
+List<int?> movingAverage(List<int> values, {int window = 3});
+  // mesmo tamanho; i < window − 1 → null; senão roundDiv(soma de values[i−window+1..i], window)
+class FixedVariableMonth {
+  const FixedVariableMonth({required this.month, required this.recurringCents, required this.installmentCents, required this.variableCents});
+  final YearMonth month; final int recurringCents; final int installmentCents; final int variableCents;
+  int get fixedCents => recurringCents + installmentCents;
+  int get totalCents => fixedCents + variableCents;
+  double? get fixedRatio => totalCents == 0 ? null : fixedCents / totalCents;
+}
+List<FixedVariableMonth> fixedVariableByMonth(Iterable<Transaction> txs, ReportFilter f, {required List<YearMonth> months, required CategoryTree tree});
+  // só reportFlowOf == expense (ignora f.flow); matchesReportScope; um item por mês.
+  // t.recurringId != null → recorrente; senão t.installmentGroupId != null → parcela; senão variável
+```
+Exemplo tendência (teste obrigatório; `months` set..nov 2026): set: receita em conta 500000, despesa 60000 · out: receita 500000, despesa no cartão K 95000,
+transferência A→B 100000, `invoicePayment` 50000 · nov: receita 520000, despesa 83000, estorno 1000 no cartão K, despesa provisionada 99999 em 20/11.
+→ set (500000, 60000, saldo 440000), out (500000, 95000, 405000), nov (520000, 83000, 437000). `includePlanned` → nov despesa 182999, saldo 337001.
+`cardIds {K}` → set (0, 0), out (0, 95000), nov (0, 0). `ReportFilter(flow: income)` → igual ao padrão (flow ignorado).
+`movingAverage([440000, 405000, 437000])` → [null, null, 427333]; `movingAverage([5, -6, -5], window: 2)` → [null, -1, -6]; `movingAverage([])` → [].
+Exemplo fixo × variável (teste obrigatório; `months` out..nov 2026): out: 'Aluguel' 150000 (`recurringId` 'rent'), 'Streaming' 4000 no cartão (`recurringId` 'st'),
+'Mercado' 46000; `buildInstallments` de 'LOJA EXEMPLO' 60000 em 3× a partir de 20/10 (20000 em 20/10, 20/11, 20/12); nov: Aluguel 150000 e Streaming 4000
+(recorrentes), 'Mercado' 26000, receita 500000 com `recurringId` (ignorada).
+→ out: recorrentes 154000, parcelas 20000, variável 46000, fixo 174000, total 220000, `fixedRatio` ≈ 0,7909; nov: 154000, 20000, 26000, 174000, 200000, 0,87.
+Mês sem despesas → todos 0 e `fixedRatio` null. Uma parcela com `recurringId` também preenchido conta como recorrente.
+
+### 5.31 Gasto por dia e top estabelecimentos — `features/reports/domain/spending_heatmap.dart`, `merchant_report.dart` (Fase 12)
+```dart
+// spending_heatmap.dart
+class DaySpending { const DaySpending({required this.date, required this.cents, required this.count});
+  final DateTime date; final int cents; final int count; }   // count = nº de transações no dia
+class SpendingHeatmap {
+  const SpendingHeatmap({required this.from, required this.to, required this.days, required this.thresholds});
+  final DateTime from, to;                   // dateOnly, inclusivos
+  final Map<DateTime, DaySpending> days;     // chave dateOnly; só dias com gasto
+  final List<int> thresholds;                // [t1, t2, t3]; [] se não há dias
+  int levelOf(int cents);                    // <= 0 → 0; <= t1 → 1; <= t2 → 2; <= t3 → 3; senão 4
+  DaySpending? get maxDay;                   // maior cents; empate → data mais antiga; null se vazio
+  int get totalCents; int get activeDays;    // soma e nº de dias com gasto
+}
+SpendingHeatmap spendingHeatmap(Iterable<Transaction> txs, ReportFilter f, {required DateTime from, required DateTime to, required CategoryTree tree});
+  // só reportFlowOf == expense (ignora f.flow); matchesReportScope; from <= dateOnly(t.date) <= to
+// merchant_report.dart
+class MerchantTotal {
+  const MerchantTotal({required this.key, required this.label, required this.totalCents, required this.purchaseCount,
+    required this.lastDate, required this.categoryId});
+  final String key;            // chave de agrupamento
+  final String label;          // t.description da transação mais recente do grupo
+  final int totalCents;
+  final int purchaseCount;     // compras distintas: parcelas do mesmo installmentGroupId contam 1
+  final DateTime lastDate;
+  final String? categoryId;    // da transação mais recente
+  int get averageCents => roundDiv(totalCents, purchaseCount); // ticket médio
+}
+String merchantKey(Transaction t);
+  // k = normalizeDescription(ruleSubject(t)) (§3.7; ruleSubject = importedDescription ?? description); k vazio → foldText(t.description)
+List<MerchantTotal> topMerchants(Iterable<Transaction> txs, ReportFilter f, {required YearMonth from, required YearMonth to, required CategoryTree tree});
+  // reportFlowOf == f.flow; matchesReportScope; mês de t.date em [from, to]. Ordem: totalCents desc, purchaseCount desc, key asc.
+  // Desempenho: memoriza merchantKey por texto bruto (ruleSubject) dentro da chamada (Map local): normalizar é o passo caro.
+```
+Limiares por quantil: `v` = cents dos dias com gasto em ordem asc, `n = v.length`; `t_k = v[((n − 1) * k) ~/ 4]` para k = 1, 2, 3.
+"Mais recente" do grupo de estabelecimento: maior `date`; empate → maior `id`.
+Exemplo heatmap (teste obrigatório; `from` 01/11/2026, `to` 30/11/2026): despesas de 1000 (01/11), 2000 (02/11), 1500 + 1500 (03/11, duas), 4000 (04/11),
+5000 (05/11), 6000 (06/11), 7000 (07/11), 8000 (08/11); receita 9000 em 09/11 (fora); despesa 50000 em 31/10 (fora do período).
+→ 8 dias; `days[03/11]` = (3000, count 2); `thresholds` [2000, 4000, 6000]; `levelOf`: 0 → 0, 1000 → 1, 2000 → 1, 2500 → 2, 4000 → 2, 6000 → 3, 7000 → 4;
+`maxDay` 08/11 (8000); `totalCents` 36000; `activeDays` 8. Um único dia com 500 → `thresholds` [500, 500, 500] e `levelOf(500) == 1`. Sem despesas → `days` vazio,
+`thresholds` [], `maxDay` null, `totalCents` 0 (`levelOf` com `thresholds` vazio: `<= 0` → 0, senão 4).
+Exemplo estabelecimentos (teste obrigatório; período 2026-09..2026-11):
+'Uber' com `importedDescription` 'UBER *TRIP 8X7Y2 SAO PAULO BR' 2500 em 10/09; 'Uber' com 'UBER *TRIP 1A2B3 SAO PAULO BR' 3500 em 20/10; 'Uber Trip' manual 1500 em 05/11;
+'IFOOD*RESTAURANTE 12/09' 4000 em 12/09; 'iFood*Restaurante 12/11' 6000 em 12/11; `buildInstallments` de 'LOJA EXEMPLO' 30000 em 3× a partir de 20/09
+(10000 em 20/09, 20/10, 20/11); '123456' 700 em 01/10; receita 'Salário' 500000 (fora com flow expense).
+→ ordem e valores: 'LOJA EXEMPLO' (total 30000, compras 1, ticket 30000, última 20/11); 'IFOOD RESTAURANTE' (10000, 2, 5000, 12/11, label 'iFood*Restaurante 12/11');
+'UBER TRIP' (7500, 3, 2500, 05/11, label 'Uber Trip'); '123456' (700, 1, 700). Período 2026-10..2026-11 → 'LOJA EXEMPLO' (20000, 1), 'IFOOD RESTAURANTE' (6000, 1),
+'UBER TRIP' (5000, 2), '123456' (700, 1). `flow: income` → só 'SALARIO' (500000, 1).
+
+### 5.32 CSV dos relatórios e desempenho — `features/reports/domain/report_csv.dart` (Fase 12)
+Dart puro (`package:csv`, já permitido). Mesmo formato do CSV de transações (§3.5): separador `;`, vírgula decimal, sem "R$", texto protegido por `csvText`,
+datas `formatDate`, meses `formatMonth`, percentuais `formatPercent` (null → ''). O BOM UTF-8 é acrescentado na gravação (UI). O CSV exporta os valores reais
+mesmo com `hideValues` (exportar é ação explícita). Ordem das linhas = ordem padrão do domínio (a ordenação por clique na tabela é só visual).
+```dart
+String reportCsv(List<List<String>> rows);   // const ListToCsvConverter(fieldDelimiter: ';').convert(rows)
+List<List<String>> comparisonCsvRows(CategoryComparison c, {required CategoryTree tree, required bool includeChildren});
+  // ['Categoria', formatMonth(month), formatMonth(month − 1), 'Média {n} meses', 'Variação', 'Variação %', 'Vs. média %'];
+  // raízes com reportCategoryLabel; includeChildren → filhas logo abaixo do pai (rótulo completo 'Pai › Filha' / 'Pai › (sem subcategoria)'); última linha 'Total'
+List<List<String>> trendCsvRows(List<TrendPoint> points, {required List<int?> expenseAverage, required List<int?> balanceAverage});
+  // ['Mês', 'Receitas', 'Despesas', 'Saldo do mês', 'Média 3m despesas', 'Média 3m saldo'] (null → ''); última linha 'Total' (somas; médias '')
+List<List<String>> pivotCsvRows(CategoryPivot p, {required CategoryTree tree});
+  // ['Categoria', ...formatMonth de cada mês, 'Total']; raiz seguida das filhas (rótulo completo); última linha 'Total' com columnTotals e grandTotalCents
+List<List<String>> heatmapCsvRows(SpendingHeatmap h);   // ['Data', 'Total', 'Transações']; dias com gasto em ordem asc
+List<List<String>> merchantsCsvRows(List<MerchantTotal> list, {required CategoryTree tree});
+  // ['Estabelecimento', 'Chave', 'Total', 'Compras', 'Ticket médio', 'Última compra', 'Categoria'] (categoria por reportCategoryLabel)
+List<List<String>> fixedVariableCsvRows(List<FixedVariableMonth> months);
+  // ['Mês', 'Recorrentes', 'Parcelas', 'Fixo', 'Variável', 'Total', '% fixo']; última linha 'Total' (somas; % = fixo total / total)
+List<List<String>> netWorthCsvRows(List<NetWorthPoint> points);
+  // ['Mês', 'Data', 'Contas', 'Ativos', 'A receber', 'A pagar', 'Dívida de cartão', 'Patrimônio líquido'] (passivos positivos, como no tipo)
+```
+Exemplos (teste obrigatório, dados de §5.28–5.31): linha `ali` do comparativo → `['Alimentação', '750,00', '750,00', '516,67', '0,00', '0,0%', '45,2%']`;
+linha `null` → `['Sem categoria', '30,00', '0,00', '0,00', '30,00', '', '']`; `includeChildren` → depois de `ali`: 'Alimentação › Mercado', 'Alimentação › Restaurante',
+'Alimentação › (sem subcategoria)'; Total → `['Total', '830,00', '950,00', '650,00', '-120,00', '-12,6%', '27,7%']`.
+`reportCsv` da tendência começa com `'Mês;Receitas;Despesas;Saldo do mês;Média 3m despesas;Média 3m saldo\r\nset/2026;5000,00;600,00;4400,00;;\r\n'`
+(terminador de linha padrão do `ListToCsvConverter`: `\r\n`). Pivot: linha Total `['Total', '400,00', '600,00', '950,00', '830,00', '2780,00']`.
+Heatmap: `['03/11/2026', '30,00', '2']`. Estabelecimentos (transações sem categoria): `['iFood*Restaurante 12/11', 'IFOOD RESTAURANTE', '100,00', '2', '50,00', '12/11/2026', 'Sem categoria']`.
+Estabelecimento com descrição '=1+1' → primeira coluna `"'=1+1"`.
+
+**Desempenho (teste obrigatório, `test/features/reports/reports_performance_test.dart`).** Base sintética determinística (`Random(42)`), hoje 15/11/2026:
+20.000 transações espalhadas em 24 meses (2024-12..2026-11), 90% despesas e 10% receitas em conta; 5 contas, 8 cartões de crédito; 10 categorias raiz de despesa com
+3 filhas cada (40 de despesa) + 2 de receita; 600 descrições brutas distintas (ex.: 'LOJA {i} {código de 5 caracteres com dígito}'), 30% com `importedDescription`;
+30% com a tag 'viagem'; 10% com `recurringId`; 10% parcelas (`installmentGroupId` de grupos de 3); 5% provisionadas. Filtros: (a) `custom` 2024-12..2026-11 sem escopo e
+(b) o mesmo período com `cardIds` de 4 cartões, `categoryIds` de 5 raízes, `tagKeys {VIAGEM}` e `includePlanned`. Para cada filtro, cronometrar (Stopwatch, uma chamada,
+sem aquecimento) cada relatório: `monthlyCategoryTotals` + `categoryComparison`; `categoryPivot` (sobre a mesma matriz); `monthlyTrend` + 2× `movingAverage`;
+`spendingHeatmap` (731 dias); `topMerchants`; `fixedVariableByMonth`; e `reportCsv` de `pivotCsvRows` e de `merchantsCsvRows`. Cada um **< 300 ms**.
 
 ## 6. Camada de app
 
@@ -1670,6 +1951,45 @@ Cada getter é preguiçoso e memoizado; o cache inteiro é invalidado quando qua
 - Excluir categoria (Fase 10): com filhas → bloqueado com SnackBar 'Mova ou exclua as subcategorias antes'. Limpar a categoria dos dependentes usa
   `t.copyWith(categoryId: null)` (preserva `tags`, `externalId`, `importedDescription`).
 
+### 6.4 Relatórios: `features/reports/presentation/reports_controller.dart` (Fase 12)
+Cache dos relatórios por filtro. Fica fora do `Ledger` (os relatórios dependem de um filtro que é estado de tela, não do app) e não muda `ledger.dart`.
+O `HomeShell` cria **um** controller (preguiçoso, no primeiro acesso à página ou comando de relatório) e o descarta no `dispose`: filtro e relatório
+selecionado sobrevivem à troca de página; não são persistidos entre execuções.
+```dart
+class ReportsController extends ChangeNotifier {
+  ReportsController(this.services);           // services.ledger.addListener(_onLedgerChanged)
+  final AppServices services;
+  ReportFilter get filter; set filter(ReportFilter v);   // igual (==) → nada; senão limpa o cache e notifica
+  ReportKind get selected; set selected(ReportKind v);   // padrão trend; notifica (não limpa cache)
+  int get averageMonths; set averageMonths(int v);       // 3 (padrão) ou 6; outro valor → ignora; limpa só o comparativo
+  bool get ultra;                              // services.settings.value.mode == AppMode.ultra
+  List<ReportKind> get available;              // ultra ? kUltraReports : kSimpleReports
+  ReportKind get current;                      // available.contains(selected) ? selected : available.first
+  ReportFilter get effectiveFilter;            // ultra ? filter : filter.periodOnly
+  ReportRange get range;                       // resolveReportRange(effectiveFilter, services.ledger.today)
+  CategoryComparison get comparison;           // month: range.to; averageMonths: ultra ? averageMonths : 3
+  CategoryPivot get pivot;                     // months: monthsOf(range)
+  List<TrendPoint> get trend;
+  List<int?> get expenseAverage;               // movingAverage(despesas de trend)
+  List<int?> get balanceAverage;               // movingAverage(saldos de trend)
+  SpendingHeatmap get heatmap;                 // from: range.from.firstDay; to: includePlanned ? range.to.lastDay : min(range.to.lastDay, today)
+  List<MerchantTotal> get merchants;
+  List<FixedVariableMonth> get fixedVariable;
+  List<NetWorthPoint> get netWorth;            // ledger.netWorthHistory com range.from <= month <= range.to (lista nova, sem recálculo)
+  List<String> ignoredFor(ReportKind k);       // ignoredFilters(k, effectiveFilter)
+  String csvFor(ReportKind k);                 // reportCsv(<k>CsvRows(...)); comparativo com includeChildren: ultra
+  String csvFileName(ReportKind k);            // 'finme-{slug}-{from.key}_{to.key}.csv'; comparativo: 'finme-{slug}-{to.key}.csv'
+}
+```
+Regras:
+1. Entradas: `services.transactions.all`, `services.ledger.categoryTree`, `services.ledger.today`, `services.ledger.netWorthHistory` (§6.2, Fase 11).
+2. Cada getter é preguiçoso e memoizado em campo privado. A matriz `MonthCategoryTotals` é calculada uma vez sobre
+   `[min(range.from, range.to − 6), range.to]` e serve o comparativo (com 3 ou 6 meses) e o pivot.
+3. Cache inteiro zerado quando o `Ledger` notifica (qualquer repositório, configurações — inclusive troca de modo — ou virada de dia) e quando `filter` muda;
+   depois `notifyListeners()`. `dispose` remove o listener do `Ledger`.
+4. A UI lê só do controller (`ListenableBuilder(listenable: controller)`); nada de relatório é calculado em `build`. Views podem somar as linhas já agregadas
+   (totais de até 60 meses) e ordenar listas.
+
 ## 7. UI
 
 Visual conforme `CLAUDE.md` (paleta, tipografia, espaçamento) e `docs/V3_DIRECTION.md`. Tom: sóbrio, entre sério e wabi-sabi. Cores via `context.colors` (extensão em `core/theme/app_colors.dart`).
@@ -1710,7 +2030,8 @@ Fase 7 (arquivos novos, exportados por `widgets.dart`):
 ### 7.3 Shell e telas
 `HomeShell`: só desktop, sempre com sidebar (`colors.sidebar`). Largura ≥ 900 → sidebar 220px com itens ícone+rótulo, item ativo com `primarySubtle`, rodapé com toggle "Modo: Simples/Ultra"; Ultra mostra badge de contagem (faturas vencidas/pendências). < 900 → sidebar colapsada de 64px só com ícones (rótulo em `Tooltip`; badge vira ponto `danger` 8px; rodapé vira `IconButton` de modo com tooltip "Modo: Simples/Ultra"). Largura animada com `AnimatedContainer` (`AppMotion.normal`). Sem `Drawer` nem `AppBar`.
 Páginas (índice): 0 Painel, 1 Previsão, 2 Cartões, 3 Contas, 4 Transações, 5 Importar (Fase 8), 6 Recorrentes, 7 Categorias, 8 Ajustes,
-9 Patrimônio (Fase 11; na sidebar aparece logo depois de Contas, sem atalho numérico — ver "Patrimônio e devo/me devem (Fase 11)").
+9 Patrimônio (Fase 11; na sidebar aparece logo depois de Contas, sem atalho numérico — ver "Patrimônio e devo/me devem (Fase 11)"),
+10 Relatórios (Fase 12; na sidebar entre Categorias e Ajustes, sem atalho numérico — ver "Relatórios (Fase 12)").
 Botão global "Nova transação" (FAB / botão no cabeçalho).
 
 | Tela | Simples | Ultra |
@@ -2163,13 +2484,133 @@ Pagamentos: `AlertDialog` 'Pagamentos · {pessoa}' com os pagamentos por data de
 `PaletteEntry(label: 'Nova dívida (devo / me devem)', icon: Icons.handshake_outlined, keywords: ['devo', 'me devem', 'emprestei', 'empréstimo', 'pessoa', 'quitar'])`.
 O shell passa `() => showAssetForm(context)` e `() => showDebtForm(context)`.
 
+#### Relatórios (Fase 12)
+Decisões de navegação: **página nova "Relatórios"** (índice 10, `Icons.insights_outlined`), tela **curada** (lista fixa de relatórios, sem construtor livre).
+Na sidebar fica **entre Categorias e Ajustes**: `const _sidebarOrder = [0, 1, 2, 3, 9, 4, 5, 6, 7, 10, 8]`. Sem atalho numérico (`GoToPageIntent` continua 0..8);
+`_NavTile.number` `null` como Patrimônio; sem badge. Paleta: 'Ir para Relatórios' (sem `shortcut`, vem do laço de páginas) e um comando por relatório disponível
+no modo atual. Visual da Fase 7: Plex/Source Serif, valores tabulares (`MoneyText`/`AppText.tabular`), tokens via `context.colors`, tooltips ricos
+(fundo `surface`, borda `border`, texto 12 `textPrimary`), `AppMotion`, `EmptyState`, `SortableHeaderLabel`, `DeltaBadge`. Respeita `hideValues`
+(`MoneyText`; eixos de gráfico sem rótulos de valor; tooltips 'R$ ••••'). Janela desktop: tabelas largas rolam na horizontal.
+Ordenação por cabeçalho (todas as tabelas dos relatórios): clicar numa coluna nova ordena desc em colunas de valor e asc na coluna de texto; clicar na coluna ativa inverte.
+
+| Recurso | Simples | Ultra |
+|---|---|---|
+| Relatórios disponíveis | Tendência, Top estabelecimentos, Comparativo por categoria (só raízes, média de 3 meses) | os 7 (§5.27 `kUltraReports`) |
+| Filtros | só período (presets + personalizado) | período, contas/cartões, categorias, tags, tipo (despesas/receitas), incluir provisionados, 'Limpar filtros' |
+| Export CSV | sim (relatório atual) | sim |
+| Paleta | 'Ir para Relatórios' + 3 comandos | 'Ir para Relatórios' + 7 comandos |
+
+Ícones por relatório (`IconData reportKindIcon(ReportKind)`, em `reports_page.dart`): comparativo `Icons.compare_arrows`, tendência `Icons.bar_chart`,
+pivot `Icons.grid_on`, gasto por dia `Icons.calendar_view_month`, estabelecimentos `Icons.storefront_outlined`, fixo × variável `Icons.pie_chart_outline`,
+patrimônio `Icons.account_balance_outlined`.
+
+**`ReportsPage`** (`features/reports/presentation/reports_page.dart`, `StatelessWidget`; `const ReportsPage({super.key, required this.controller})`):
+`ListenableBuilder(listenable: controller)` > `Column`:
+1. `PageHeader(title: 'Relatórios', actions: [OutlinedButton.icon(Icons.download, 'Exportar CSV')])` (key `report-export`).
+2. `ReportFilterBar` fixo (não rola com o conteúdo), padding horizontal `AppSpace.xl`, seguido de `Divider`.
+3. `Expanded(Row)`: lista de relatórios (largura 200, `ListView` de itens densos 40 px com ícone + `reportKindLabel`, item atual com fundo `primarySubtle`,
+   key `report-tab-{kind.name}`, tocar → `controller.selected = kind`), `VerticalDivider`, e a área do relatório: `AnimatedSwitcher(AppMotion.normal)` com
+   `KeyedSubtree(ValueKey(current))`. Acima da view, quando `ignoredFor(current)` não é vazio: 'Filtros ignorados neste relatório: {lista com ", "}'
+   (12 `textSecondary`, key `report-ignored`).
+Cada view ocupa o espaço restante e rola sozinha (as tabelas têm cabeçalho fixo). Views (dados vindos do controller):
+`categoryComparison` → `CategoryComparisonView`; `trend` → `TrendView`; `pivot` → `PivotView`; `heatmap` → `HeatmapView`; `topMerchants` → `MerchantsView`;
+`fixedVariable` → `FixedVariableView`; `netWorth` → `NetWorthReportView`.
+Exportar: `getSaveLocation(suggestedName: controller.csvFileName(current), acceptedTypeGroups: [XTypeGroup(label: 'CSV', extensions: ['csv'])])`;
+`null` → nada; grava `'﻿' + controller.csvFor(current)` (`File.writeAsString`); SnackBar 'CSV exportado.' / 'Não foi possível exportar o CSV.'.
+A função de gravação é injetável para teste: `ReportsPage({..., this.saveCsv})` com
+`typedef SaveReportCsv = Future<bool> Function(String suggestedName, String csv)` (padrão: `file_selector` + `File`; `false` = cancelado).
+
+**`ReportFilterBar`** (`features/reports/presentation/report_filter_bar.dart`, `StatelessWidget`):
+```dart
+const ReportFilterBar({super.key, required this.filter, required this.range, required this.ultra, required this.onChanged,
+  required this.accounts, required this.cards, required this.categoryTree, required this.tags});
+final ReportFilter filter; final ReportRange range; final bool ultra; final ValueChanged<ReportFilter> onChanged;
+final List<Account> accounts; final List<PaymentCard> cards; final CategoryTree categoryTree; final List<String> tags; // tags = ledger.allTags
+Future<Set<String>?> showReportMultiSelect(BuildContext context, {required String title,
+  required List<({String id, String label, bool indent})> options, required Set<String> selected});
+```
+`Wrap` (spacing `AppSpace.sm`): `DropdownButton<ReportPeriodPreset>` (key `report-period`, rótulos `reportPeriodLabel`); com `custom`, dois `MonthSelector`
+'De' / 'Até' (keys `report-from`, `report-to`; padrão = `range` atual); texto do intervalo '{formatMonth(from)} – {formatMonth(to)}' (12 `textSecondary`, key `report-range`).
+Ultra: botões `OutlinedButton` com contagem — 'Contas e cartões: Todos' / 'Contas e cartões: {n}' (key `report-filter-accounts`; opções = contas e depois cartões,
+arquivados com sufixo ' (arquivada)'/' (arquivado)'; ids de conta vão para `accountIds`, de cartão para `cardIds`), 'Categorias: Todas' / '{n}'
+(key `report-filter-categories`; opções `categoryTree.options(flow == expense ? expense : income)` com `label`, filhas com `indent`), 'Tags: Todas' / '{n}'
+(key `report-filter-tags`; desabilitado sem tags; opções = `tags`, seleção guardada como `tagKey`); `SegmentedButton<ReportFlow>` 'Despesas' / 'Receitas'
+(key `report-flow`; trocar o tipo limpa `categoryIds`); `FilterChip` 'Incluir provisionados' (key `report-planned`); `TextButton` 'Limpar filtros'
+(key `report-clear`, só com `hasScopeFilters`) → `onChanged(filter.periodOnly)`.
+`showReportMultiSelect`: `AlertDialog` (máx. 420 × 480) com `CheckboxListTile` denso por opção (indent 24 nas filhas), botões 'Limpar' (devolve `{}`),
+'Cancelar' (`null`) e 'Aplicar' (seleção). Guarda contra duplo pop.
+
+**`CategoryComparisonView`** (`category_comparison_view.dart`, `StatefulWidget`):
+`({required CategoryComparison data, required CategoryTree tree, required bool ultra, required ReportFlow flow, required bool isCurrentMonth, required ValueChanged<int> onAverageMonthsChanged})`
+(`flow` = `controller.effectiveFilter.flow`; `isCurrentMonth` = `data.month` é o mês de `ledger.today`).
+Cabeçalho: 'Mês de referência: {formatMonthLong(month)}' (+ ' (até hoje)' se `isCurrentMonth`) e, Ultra, `SegmentedButton<int>` 'Média 3 meses'/'Média 6 meses'
+(key `comparison-average`). Tabela (cabeçalho fixo com `SortableHeaderLabel`; padrão: mês atual desc; null sempre por último):
+Ultra: Categoria (240) | {mês} | {mês anterior} | Média {n}m | Variação (`MoneyText(signed: true)`) | % (`DeltaBadge(ratio: changeRatio, higherIsBetter: flow == income)`) |
+Vs. média (`DeltaBadge(ratio: averageChangeRatio, higherIsBetter: flow == income)`). Raiz com filhas tem chevron (key `comparison-expand-{id}`, `AnimatedRotation` `AppMotion.fast`); filhas indentadas 24 px
+com o nome da filha ou '(sem subcategoria)'. Simples: Categoria | {mês} | {mês anterior} | % ; sem drill-down. Linha final 'Total' (w600) de `data.total`.
+Linhas 36 px (Ultra) / 44 px (Simples). Vazio (`rows` vazio) → `EmptyState(icon: Icons.category_outlined, message: 'Sem lançamentos no período com estes filtros.')`.
+
+**`TrendView`** (`trend_view.dart`, `StatefulWidget`; estado `_showAverage`, só Ultra):
+`({required List<TrendPoint> points, required List<int?> expenseAverage, required List<int?> balanceAverage, required bool ultra, required bool hideValues})`
++ `String trendTooltipText(TrendPoint p, {required bool hideValues})` pública: '{formatMonthLong}\nReceitas: R$ X\nDespesas: R$ Y\nSaldo do mês: R$ Z'.
+`BarChart` (altura 220) com 2 barras por mês: receitas `colors.success`, despesas `colors.chartBar`; rótulo X `formatMonth` (todos até 12 pontos, senão 1 a cada 3);
+eixo Y `formatMoney` (oculto com `hideValues`); tooltip rico com `trendTooltipText`. Ultra: `LineChart` (altura 160) do saldo do mês (`colors.primary`, largura 2,
+sem pontos, sem área) com `HorizontalLine` em 0 (`colors.danger` α 0.4, tracejada) se algum saldo < 0; `FilterChip` 'Média móvel 3 meses' (key `trend-average`) desenha
+`balanceAverage` no `LineChart` e `expenseAverage` como 2ª linha (tracejadas, `colors.textSecondary`; nulls viram lacuna). Legenda abaixo dos gráficos.
+Tabela: Mês | Receitas | Despesas | Saldo do mês (`colorBySign`) (+ Ultra com média: 'Média 3m despesas', 'Média 3m saldo'; null → '–'); rodapé 'Total' com somas.
+Tudo zero → `EmptyState(icon: Icons.bar_chart, message: 'Sem lançamentos no período com estes filtros.')`.
+
+**`PivotView`** (`pivot_view.dart`, `StatefulWidget`; estado: `PivotSortKey _key = total`, `_monthIndex`, `_ascending = false`, `Set<String> _expanded`):
+`({required CategoryPivot pivot, required CategoryTree tree})`. Linhas exibidas = `sortPivotRows(pivot.rows, ...)` (raízes; filhas abaixo do pai se expandido).
+`LayoutBuilder` > `Scrollbar` > `SingleChildScrollView(horizontal)` > `SizedBox(width: max(maxWidth, 240 + 96 × meses + 112))` > `Column`: cabeçalho fixo
+(36 px, fundo `surface`, borda inferior `border`; `SortableHeaderLabel` 'Categoria', cada `formatMonth`, 'Total' — clique ordena por ela, alterna asc/desc; keys
+`pivot-sort-label`, `pivot-sort-{i}`, `pivot-sort-total`), `Expanded(ListView.builder(itemExtent: 32))` e rodapé 'Total' fixo com `columnTotals` e `grandTotalCents`.
+Célula: `MoneyText` tabular alinhado à direita; 0 → '–' `textSecondary`; fundo `colors.primary` α `0.04 + 0.20 × célula / maxCellCents` nas raízes (sem fundo se
+`maxCellCents == 0`); filhas sem fundo, rótulo indentado 24 px em 12 px. Chevron nas raízes com filhas (key `pivot-expand-{id}`). Linha: key `pivot-row-{id ?? 'none'}`.
+Vazio → `EmptyState(icon: Icons.grid_on, message: 'Sem lançamentos no período com estes filtros.')`.
+
+**`HeatmapView`** (`heatmap_view.dart`, `StatelessWidget`): `({required SpendingHeatmap heatmap, required bool hideValues})`
++ `String heatmapTooltipText(DateTime day, DaySpending? s, {required bool hideValues})` pública: com gasto 'dd/mm/aaaa · R$ X · N transações' ('1 transação' no singular);
+sem gasto 'dd/mm/aaaa · sem gastos'; `hideValues` → 'R$ ••••'.
+Grade estilo calendário: colunas = semanas, linhas = dias da semana (domingo no topo). `offset = from.weekday % 7`; dia i (0 = `from`) → coluna `(i + offset) ~/ 7`,
+linha `(i + offset) % 7`. Dias gerados com `DateTime(from.year, from.month, from.day + i)` até `to`; diferença de dias sempre via `DateTime.utc` (sem erro de horário de verão).
+Célula 12×12, gap 2, raio 2; cor nível 0 = `colors.border`; níveis 1–4 = `colors.primary` α 0.25 / 0.45 / 0.70 / 1.0 (`heatmap.levelOf`). `Tooltip` por célula
+(key `heatmap-day-{dateKey}`). Rótulos de mês acima da primeira coluna de cada mês ('jan', 'fev'... = `formatMonth` antes da '/'), rótulos 'Dom', 'Qua', 'Sáb' à esquerda.
+Rolagem horizontal. Abaixo: legenda 'Menos ▢▢▢▢▢ Mais' e resumo 'Total R$ X · N dias com gasto · Maior dia: dd/mm (R$ Y)' (sem `maxDay` → só o total).
+Sem dias → `EmptyState(icon: Icons.calendar_view_month, message: 'Sem gastos no período com estes filtros.')`.
+
+**`MerchantsView`** (`merchants_view.dart`, `StatefulWidget`; estado: coluna de ordenação, asc/desc, `_showAll`):
+`({required List<MerchantTotal> merchants, required CategoryTree tree, required bool ultra})`. Ultra: Estabelecimento (`label`, apoio `key` em 11 px `textSecondary`
+quando difere de `foldText(label)`) | Total | Compras | Ticket médio | Última compra | Categoria (`reportCategoryLabel`). Simples: Estabelecimento | Total | Compras.
+Cabeçalho fixo com `SortableHeaderLabel` (padrão Total desc). Mostra as 50 primeiras; botão 'Mostrar todos ({n})' (key `merchants-show-all`) quando há mais.
+`ListView.builder` com `itemExtent` 36 (Ultra) / 44 (Simples); rodapé '{n} estabelecimentos'. Vazio → `EmptyState(icon: Icons.storefront_outlined,
+message: 'Sem compras no período com estes filtros.')`.
+
+**`FixedVariableView`** (`fixed_variable_view.dart`, `StatelessWidget`; só Ultra): `({required List<FixedVariableMonth> months, required bool hideValues})`
++ `String fixedVariableTooltipText(FixedVariableMonth m, {required bool hideValues})` pública: '{formatMonthLong}\nRecorrentes: R$ A\nParcelas: R$ B\nVariável: R$ C\nFixo: {formatPercent} do total'
+(sem total → linha 'Fixo: –'). `BarChart` empilhado (altura 220; `rodStackItems`: recorrentes `colors.primary`, parcelas `colors.warning`, variável `colors.chartBar` α 0.35),
+legenda, e tabela Mês | Recorrentes | Parcelas | Fixo | Variável | Total | % fixo; rodapé 'Total' (somas; % = fixo/total do período). Apoio (12 `textSecondary`):
+'Fixo = lançamentos de recorrências e parcelas. Variável = o resto.' Tudo zero → `EmptyState(icon: Icons.pie_chart_outline, message: 'Sem gastos no período com estes filtros.')`.
+
+**`NetWorthReportView`** (`net_worth_report_view.dart`, `StatelessWidget`; só Ultra): `({required List<NetWorthPoint> points, required bool hideValues})`.
+`NetWorthChart(points: points, hideValues: hideValues)` (Fase 11) e tabela Mês | Contas | Ativos | A receber | A pagar | Dívida de cartão | Líquido | Variação
+(`MoneyText(signed: true, colorBySign: true)` vs. ponto anterior da lista; o primeiro '–'). Apoio: 'Histórico disponível: últimos 24 meses. Filtros de conta, categoria,
+tag, tipo e provisionados não se aplicam ao patrimônio.' Sem pontos → `EmptyState(icon: Icons.account_balance_outlined, message: 'Sem histórico de patrimônio no período.')`.
+
+**Paleta**: `buildAppCommands` ganha `required ValueChanged<ReportKind> onOpenReport`; depois das entradas de Patrimônio ('Nova dívida ...'), uma entrada por
+relatório de `ultra ? kUltraReports : kSimpleReports`: `PaletteEntry(label: 'Relatório: {reportKindLabel}', icon: reportKindIcon(k), group: 'Relatórios',
+keywords: ['relatório', 'análise', ...palavras do relatório], onRun: () => onOpenReport(k))`. Palavras: comparativo ['comparar', 'mês anterior', 'média', 'categoria'];
+tendência ['12 meses', 'receitas', 'despesas', 'saldo', 'evolução']; pivot ['pivot', 'tabela', 'planilha', 'categoria', 'mês']; gasto por dia ['heatmap', 'calendário', 'dia'];
+estabelecimentos ['lojas', 'onde gasto', 'ranking', 'top']; fixo × variável ['fixo', 'variável', 'recorrente', 'parcelas']; patrimônio ['patrimônio', 'evolução', 'líquido'].
+O shell passa `(k) { _reports.selected = k; _select(10); }`.
+
 ### 7.4 Onboarding
 Uma tela: escolher modo (Simples/Ultra) + checkbox "Criar dados de exemplo" (fictícios: "Banco Alfa", "Banco Beta"; nunca bancos reais). Grava `onboardingDone`.
 
 ## 8. Testes
 - Unitários obrigatórios para todo `domain/` e `core/utils|models|services`.
 - `test/` espelha `lib/` (`test/features/cards/domain/invoice_cycle_test.dart`).
-- Widget smoke test: app sobe com `MemoryRecordStore` e navega pelas 10 páginas (9 na Fase 8; Patrimônio na Fase 11) sem exceção (janela larga 1400×900 e estreita 800×700 com sidebar colapsada).
+- Widget smoke test: app sobe com `MemoryRecordStore` e navega pelas 11 páginas (9 na Fase 8; Patrimônio na Fase 11; Relatórios na Fase 12) sem exceção (janela larga 1400×900 e estreita 800×700 com sidebar colapsada).
 - Fixtures de importação (Fase 8): `test/fixtures/import/` com arquivos **fictícios** (texto exato no BACKLOG, T-074/T-075). Nunca dado real.
 - Atalhos (Fase 9): testes de widget usam `tester.sendKeyEvent` / `sendKeyDownEvent(LogicalKeyboardKey.controlLeft)` e cobrem o caso
   "tecla com foco em campo de texto não dispara".
@@ -2177,4 +2618,13 @@ Uma tela: escolher modo (Simples/Ultra) + checkbox "Criar dados de exemplo" (fic
   `Ledger` testado com repositórios em memória (`goals` incluído).
 - Fase 11: domínio puro com os exemplos de §5.24–5.26 (o de §5.26 monta as compras do cartão com `buildInstallments`); `Ledger` com
   repositórios em memória (`assets` e `debts` incluídos); smoke test navega as 10 páginas.
+- Fase 12: domínio puro com os exemplos de §5.27–5.32 (parcelas com `buildInstallments`); teste de desempenho de §5.32 (20.000 transações × 24 meses,
+  cada relatório < 300 ms); `ReportsController` com `bootstrap` em memória; views testadas com dados montados pelas funções de domínio dentro do app de teste
+  (`AppScope` + tema, para `MoneyText`/`context.colors`); smoke test navega as 11 páginas.
 - Portão: `bash tool/check.sh` → `CHECK OK`.
+
+### Decisões da revisão da Fase 11
+- Dívida: data não pode ser futura nem posterior ao primeiro pagamento.
+- `cardDebtAt`: `invoicePayment` provisionado não abate a dívida do cartão.
+- Ativo encerrado que recebe valor > 0 é reativado (`archived = false`).
+- Diálogos de dívida mascaram valores com `hideValues` (inclusive o valor pré-preenchido).

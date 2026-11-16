@@ -271,7 +271,7 @@ class _DataCardState extends State<_DataCard> {
       context,
       title: 'Apagar todos os dados?',
       message:
-          'Contas, cartões, lançamentos, recorrências, metas, regras e perfis de importação serão removidos. O dicionário volta ao padrão. Esta ação não pode ser desfeita.',
+          'Contas, cartões, lançamentos, recorrências, metas, ativos, dívidas, regras e perfis de importação serão removidos. O dicionário volta ao padrão. Esta ação não pode ser desfeita.',
       confirmLabel: 'Apagar',
       destructive: true,
     );
@@ -285,6 +285,8 @@ class _DataCardState extends State<_DataCard> {
       await _s.transactions.replaceAll(const []);
       await _s.recurring.replaceAll(const []);
       await _s.goals.replaceAll(const []);
+      await _s.assets.replaceAll(const []);
+      await _s.debts.replaceAll(const []);
       await _s.categories.replaceAll(defaultCategories());
       await _s.rules.replaceAll(const []);
       await _s.importProfiles.replaceAll(const []);

@@ -23,6 +23,7 @@ const _pages = <PageInfo>[
   (label: 'Recorrentes', icon: Icons.autorenew),
   (label: 'Categorias', icon: Icons.category_outlined),
   (label: 'Ajustes', icon: Icons.settings_outlined),
+  (label: 'Patrimônio', icon: Icons.account_balance_outlined),
 ];
 
 /// Comandos com callbacks que gravam o que foi chamado em [ran].
@@ -34,6 +35,8 @@ List<PaletteEntry> _commands(List<String> ran, {AppSettings? settings}) =>
       onNewTransaction: () => ran.add('nova'),
       onImport: () => ran.add('importar'),
       onNewRecurring: () => ran.add('recorrencia'),
+      onNewAsset: () => ran.add('ativo'),
+      onNewDebt: () => ran.add('divida'),
       onToggleMode: () => ran.add('modo'),
       onToggleTheme: () => ran.add('tema'),
       onToggleHideValues: () => ran.add('ocultar'),
@@ -43,16 +46,18 @@ PaletteEntry _named(List<PaletteEntry> list, String label) =>
     list.firstWhere((e) => e.label == label);
 
 void main() {
-  test('15 comandos na ordem do SPEC, com atalhos corretos', () {
+  test('18 comandos na ordem do SPEC, com atalhos corretos', () {
     final ran = <String>[];
     final cmds = _commands(ran);
 
-    expect(cmds.length, 15);
+    expect(cmds.length, 18);
     expect(cmds.map((e) => e.label).toList(), [
       for (final p in _pages) 'Ir para ${p.label}',
       'Nova transação',
       'Importar arquivo',
       'Nova recorrência',
+      'Novo ativo',
+      'Nova dívida (devo / me devem)',
       'Mudar para Modo Ultra',
       'Alternar tema claro/escuro',
       'Ocultar valores',
@@ -66,6 +71,8 @@ void main() {
     expect(_named(cmds, 'Nova transação').shortcut, 'N');
     expect(_named(cmds, 'Importar arquivo').shortcut, 'Ctrl+I');
     expect(_named(cmds, 'Ir para Painel').shortcut, '1');
+    expect(_named(cmds, 'Ir para Ajustes').shortcut, '9');
+    expect(_named(cmds, 'Ir para Patrimônio').shortcut, isNull);
   });
 
   test('ações chamam os callbacks certos', () {
@@ -74,10 +81,21 @@ void main() {
     _named(cmds, 'Nova transação').onRun();
     _named(cmds, 'Importar arquivo').onRun();
     _named(cmds, 'Nova recorrência').onRun();
+    _named(cmds, 'Novo ativo').onRun();
+    _named(cmds, 'Nova dívida (devo / me devem)').onRun();
     _named(cmds, 'Mudar para Modo Ultra').onRun();
     _named(cmds, 'Alternar tema claro/escuro').onRun();
     _named(cmds, 'Ocultar valores').onRun();
-    expect(ran, ['nova', 'importar', 'recorrencia', 'modo', 'tema', 'ocultar']);
+    expect(ran, [
+      'nova',
+      'importar',
+      'recorrencia',
+      'ativo',
+      'divida',
+      'modo',
+      'tema',
+      'ocultar',
+    ]);
   });
 
   test('rótulo de modo e de privacidade acompanha as configurações', () {
@@ -99,6 +117,9 @@ void main() {
 
     final dark = fuzzyRank(cmds, 'escuro', keys);
     expect(dark.first.label, 'Alternar tema claro/escuro');
+
+    final loan = fuzzyRank(cmds, 'emprest', keys);
+    expect(loan.first.label, 'Nova dívida (devo / me devem)');
   });
 
   group('transactionEntries', () {

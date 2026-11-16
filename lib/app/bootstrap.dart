@@ -7,7 +7,9 @@ import '../core/utils/date_utils.dart';
 import '../features/accounts/domain/account.dart';
 import '../features/cards/domain/payment_card.dart';
 import '../features/categories/domain/transaction_category.dart';
+import '../features/debts/domain/debt.dart';
 import '../features/goals/domain/goal.dart';
+import '../features/net_worth/domain/asset.dart';
 import '../features/importing/domain/import_profile.dart';
 import '../features/importing/domain/merchant_dictionary.dart';
 import '../features/recurring/domain/recurrence.dart';
@@ -29,6 +31,8 @@ const _boxes = [
   'fm_import_profiles',
   'fm_dictionary',
   'fm_goals',
+  'fm_assets',
+  'fm_debts',
 ];
 
 /// Monta os serviços do app. Sem [storeFactory] usa Hive; testes passam `MemoryRecordStore`.
@@ -103,6 +107,18 @@ Future<AppServices> bootstrap({
     toMap: (g) => g.toMap(),
     idOf: (g) => g.id,
   );
+  final assets = CollectionRepository<Asset>(
+    store: stores['fm_assets']!,
+    fromMap: Asset.fromMap,
+    toMap: (a) => a.toMap(),
+    idOf: (a) => a.id,
+  );
+  final debts = CollectionRepository<Debt>(
+    store: stores['fm_debts']!,
+    fromMap: Debt.fromMap,
+    toMap: (d) => d.toMap(),
+    idOf: (d) => d.id,
+  );
 
   if (categories.isEmpty) {
     await categories.upsertAll(defaultCategories());
@@ -122,6 +138,8 @@ Future<AppServices> bootstrap({
     rules: rules,
     dictionary: dictionary,
     goals: goals,
+    assets: assets,
+    debts: debts,
     clock: now,
     onDayChanged: () => materializeRecurring(services),
   );
@@ -136,6 +154,8 @@ Future<AppServices> bootstrap({
     importProfiles: importProfiles,
     dictionary: dictionary,
     goals: goals,
+    assets: assets,
+    debts: debts,
     ledger: ledger,
     clock: now,
   );

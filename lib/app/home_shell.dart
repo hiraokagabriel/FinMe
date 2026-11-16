@@ -9,7 +9,12 @@ import '../features/cards/domain/payment_card.dart';
 import '../features/cards/presentation/cards_page.dart';
 import '../features/categories/presentation/categories_page.dart';
 import '../features/dashboard/presentation/dashboard_page.dart';
+import '../features/debts/domain/debt.dart';
+import '../features/debts/domain/debt_math.dart';
+import '../features/debts/presentation/debt_dialogs.dart';
 import '../features/forecast/presentation/forecast_page.dart';
+import '../features/net_worth/presentation/asset_dialogs.dart';
+import '../features/net_worth/presentation/net_worth_page.dart';
 import '../features/importing/presentation/import_flow.dart';
 import '../features/importing/presentation/import_page.dart';
 import '../features/recurring/presentation/recurring_form.dart';
@@ -28,6 +33,7 @@ const _collapseBreakpoint = 900.0;
 const _sidebarWidth = 220.0;
 const _railWidth = 64.0;
 const _transactionsIndex = 4;
+const _netWorthIndex = 9;
 
 const _navItems = <({String label, IconData icon})>[
   (label: 'Painel', icon: Icons.dashboard_outlined),
@@ -39,7 +45,12 @@ const _navItems = <({String label, IconData icon})>[
   (label: 'Recorrentes', icon: Icons.autorenew),
   (label: 'Categorias', icon: Icons.category_outlined),
   (label: 'Ajustes', icon: Icons.settings_outlined),
+  // Sem atalho numérico: '1'..'9' seguem nas 9 primeiras páginas (SPEC §7.3 Fase 11).
+  (label: 'Patrimônio', icon: Icons.account_balance_outlined),
 ];
+
+/// Ordem da sidebar (índices de `_navItems`): Patrimônio logo depois de Contas.
+const _sidebarOrder = [0, 1, 2, 3, _netWorthIndex, 4, 5, 6, 7, 8];
 
 /// Casca do app: sidebar sempre visível, 220 px com rótulos ou 64 px só com ícones
 /// (abaixo de 900 px de largura). Só a página ativa é construída.
@@ -156,6 +167,8 @@ class _HomeShellState extends State<HomeShell> {
           onNewTransaction: () => showTransactionForm(context),
           onImport: () => startImport(context),
           onNewRecurring: () => showRecurringForm(context),
+          onNewAsset: () => showAssetForm(context),
+          onNewDebt: () => showDebtForm(context),
           onToggleMode: () => s.settings.update(
             (c) => c.copyWith(mode: ultra ? AppMode.simple : AppMode.ultra),
           ),
@@ -274,6 +287,7 @@ class _HomeShellState extends State<HomeShell> {
     6 => const RecurringPage(),
     7 => const CategoriesPage(),
     8 => const SettingsPage(),
+    _netWorthIndex => const NetWorthPage(),
     _ => const DashboardPage(),
   };
 }
@@ -298,6 +312,12 @@ List<int> _badges(AppServices s, bool ultra) {
   counts[2] = overdue;
   counts[_transactionsIndex] = s.transactions.all
       .where((t) => t.isPlanned && t.date.isBefore(today))
+      .length;
+  // Patrimônio: dívidas "devo" vencidas (SPEC §7.3 Fase 11).
+  counts[_netWorthIndex] = s.debts.all
+      .where(
+        (d) => d.direction == DebtDirection.iOwe && isDebtOverdue(d, today),
+      )
       .length;
   return counts;
 }
@@ -336,16 +356,19 @@ class _Sidebar extends StatelessWidget {
         _SearchEntry(collapsed: collapsed, onTap: onSearch),
         Expanded(
           child: ListView.builder(
-            itemCount: _navItems.length,
-            itemBuilder: (context, i) => _NavTile(
-              label: _navItems[i].label,
-              icon: _navItems[i].icon,
-              number: i + 1,
-              selected: i == index,
-              badge: badges[i],
-              collapsed: collapsed,
-              onTap: () => onSelect(i),
-            ),
+            itemCount: _sidebarOrder.length,
+            itemBuilder: (context, k) {
+              final i = _sidebarOrder[k];
+              return _NavTile(
+                label: _navItems[i].label,
+                icon: _navItems[i].icon,
+                number: i < 9 ? i + 1 : null,
+                selected: i == index,
+                badge: badges[i],
+                collapsed: collapsed,
+                onTap: () => onSelect(i),
+              );
+            },
           ),
         ),
         const Divider(height: 1),
@@ -437,8 +460,8 @@ class _NavTile extends StatelessWidget {
   final String label;
   final IconData icon;
 
-  /// Número do atalho (1..9) da página.
-  final int number;
+  /// Número do atalho (1..9) da página; null = sem atalho numérico (Patrimônio).
+  final int? number;
   final bool selected;
   final int badge;
   final bool collapsed;
@@ -506,10 +529,12 @@ class _NavTile extends StatelessWidget {
         child: content,
       ),
     );
-    tile = Tooltip(
-      message: collapsed ? '$label · $number' : 'Atalho: $number',
-      child: tile,
-    );
+    final n = number;
+    if (collapsed) {
+      tile = Tooltip(message: n == null ? label : '$label · $n', child: tile);
+    } else if (n != null) {
+      tile = Tooltip(message: 'Atalho: $n', child: tile);
+    }
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: AppSpace.sm, vertical: 2),
       child: tile,

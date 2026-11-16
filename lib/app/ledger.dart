@@ -13,6 +13,10 @@ import '../features/cards/domain/card_insights.dart' as insights;
 import '../features/cards/domain/invoice.dart';
 import '../features/cards/domain/payment_card.dart';
 import '../features/categories/domain/category_spending.dart';
+import '../features/debts/domain/debt.dart';
+import '../features/debts/domain/debt_math.dart' as debt_math;
+import '../features/net_worth/domain/asset.dart';
+import '../features/net_worth/domain/net_worth.dart' as net_worth;
 import '../features/categories/domain/transaction_category.dart';
 import '../features/categories/domain/category_tree.dart';
 import '../features/forecast/domain/forecast.dart';
@@ -44,6 +48,8 @@ class Ledger extends ChangeNotifier {
     this.rules,
     this.dictionary,
     this.goals,
+    this.assets,
+    this.debts,
     this.onDayChanged,
     this.scheduleMidnightTimer = true,
   }) {
@@ -70,6 +76,13 @@ class Ledger extends ChangeNotifier {
 
   /// Fase 10: opcional como as anteriores (null = sem metas).
   final CollectionRepository<Goal>? goals;
+
+  /// Fase 11: opcionais como as anteriores (null = vazio). `debts` também entra na previsão (SPEC §5.25 regra 6).
+  final CollectionRepository<Asset>? assets;
+  final CollectionRepository<Debt>? debts;
+
+  /// Horizonte do patrimônio líquido (SPEC §5.26): meses terminando no mês de hoje.
+  static const int netWorthMonths = 24;
 
   /// Chamado na virada de dia (bootstrap passa `materializeRecurring`). Evita import circular.
   final Future<void> Function()? onDayChanged;
@@ -102,6 +115,9 @@ class Ledger extends ChangeNotifier {
   Map<String, int>? _reserved;
   spend.SpendableToday? _spendable;
   List<String>? _allTags;
+  List<net_worth.NetWorthPoint>? _netWorth;
+  List<debt_math.PersonDebtSummary>? _debtsByPerson;
+  List<String>? _debtPeople;
 
   List<Listenable> get _sources => [
     accounts,
@@ -113,6 +129,8 @@ class Ledger extends ChangeNotifier {
     ?rules,
     ?dictionary,
     ?goals,
+    ?assets,
+    ?debts,
   ];
 
   /// Dia do cache. Se o relógio andou para outro dia, invalida e agenda [onDayChanged].
@@ -213,7 +231,34 @@ class Ledger extends ChangeNotifier {
       today: today,
       months: settings.value.forecastMonths,
       minDays: invoiceTimelineDays,
+      extraEvents: debt_math.debtForecastEvents(debts?.all ?? const []),
     );
+  }
+
+  /// Patrimônio líquido dos últimos [netWorthMonths] meses; o último ponto é hoje (SPEC §5.26).
+  List<net_worth.NetWorthPoint> get netWorthHistory {
+    _ensureFresh();
+    return _netWorth ??= net_worth.netWorthHistory(
+      accounts: accounts.all,
+      cards: cards.all,
+      transactions: transactions.all,
+      assets: assets?.all ?? const [],
+      debts: debts?.all ?? const [],
+      today: today,
+      months: netWorthMonths,
+    );
+  }
+
+  /// Devo / me devem agrupados por pessoa (SPEC §5.25). Vazio sem `debts`.
+  List<debt_math.PersonDebtSummary> get debtsByPerson {
+    _ensureFresh();
+    return _debtsByPerson ??= debt_math.debtsByPerson(debts?.all ?? const []);
+  }
+
+  /// Sugestões do campo Pessoa (SPEC §5.25), quitadas inclusive.
+  List<String> get debtPeople {
+    _ensureFresh();
+    return _debtPeople ??= debt_math.debtPeople(debts?.all ?? const []);
   }
 
   /// Faturas de todos os cartões de crédito (inclui arquivados; ids batem com `forecast.events`).
@@ -433,6 +478,9 @@ class Ledger extends ChangeNotifier {
     _reserved = null;
     _spendable = null;
     _allTags = null;
+    _netWorth = null;
+    _debtsByPerson = null;
+    _debtPeople = null;
   }
 
   void _invalidate() {

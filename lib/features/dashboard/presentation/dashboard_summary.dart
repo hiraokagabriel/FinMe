@@ -65,6 +65,9 @@ class DashboardSummary {
     this.monthExpenseCents,
     this.monthExpenseDelta,
     this.expenseTrend,
+    this.netWorthCents,
+    this.netWorthDelta,
+    this.netWorthTrend,
   });
 
   final int currentCents;
@@ -91,6 +94,12 @@ class DashboardSummary {
   final int? monthExpenseCents;
   final double? monthExpenseDelta;
   final List<int>? expenseTrend;
+
+  /// Ultra: patrimônio líquido de hoje, variação vs. mês anterior e `netCents` dos 6 últimos meses.
+  /// Simples: `null`.
+  final int? netWorthCents;
+  final double? netWorthDelta;
+  final List<int>? netWorthTrend;
 
   /// Simples: 8 vencimentos e 3 categorias. Ultra: 15 e 8.
   factory DashboardSummary.of(Ledger ledger, {required bool ultra}) {
@@ -139,6 +148,7 @@ class DashboardSummary {
 
     final history = ultra ? ledger.monthlyHistory : null;
     final mtd = ultra ? ledger.expenseMonthToDate : null;
+    final netHistory = ultra ? ledger.netWorthHistory : null;
 
     final month = YearMonth.fromDate(today);
     final direct = ledger.spendingFor(month);
@@ -186,6 +196,17 @@ class DashboardSummary {
           ? null
           : deltaRatio(mtd.previous, mtd.current),
       expenseTrend: history?.map((m) => m.expenseCents).toList(),
+      netWorthCents: netHistory?.last.netCents,
+      netWorthDelta: netHistory == null
+          ? null
+          : deltaRatio(
+              netHistory[netHistory.length - 2].netCents,
+              netHistory.last.netCents,
+            ),
+      netWorthTrend: netHistory
+          ?.skip(netHistory.length > 6 ? netHistory.length - 6 : 0)
+          .map((p) => p.netCents)
+          .toList(),
     );
   }
 

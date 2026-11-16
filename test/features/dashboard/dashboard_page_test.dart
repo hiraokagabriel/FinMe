@@ -268,8 +268,8 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.text('Gasto no mês'), findsOneWidget);
-    expect(find.byType(Sparkline), findsNWidgets(2));
-    expect(find.byType(DeltaBadge), findsNWidgets(2));
+    expect(find.byType(Sparkline), findsNWidgets(3));
+    expect(find.byType(DeltaBadge), findsNWidgets(3));
     final withDelta = tester
         .widgetList<DeltaBadge>(find.byType(DeltaBadge))
         .where((b) => b.ratio != null)
@@ -279,6 +279,7 @@ void main() {
       [
         summary.balanceDelta,
         summary.monthExpenseDelta,
+        summary.netWorthDelta,
       ].whereType<double>().length,
     );
   });

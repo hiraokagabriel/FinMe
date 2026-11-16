@@ -1,6 +1,7 @@
 import 'package:finme/features/accounts/domain/account.dart';
 import 'package:finme/features/cards/domain/payment_card.dart';
 import 'package:finme/features/forecast/domain/forecast.dart';
+import 'package:finme/features/forecast/domain/spendable.dart';
 import 'package:finme/features/recurring/domain/recurrence.dart';
 import 'package:finme/features/recurring/domain/recurring_rule.dart';
 import 'package:finme/features/transactions/domain/installments.dart';
@@ -508,5 +509,89 @@ void main() {
     expect(e.date, DateTime(2027, 4, 1));
     expect(e.amountCents, -4000);
     expect(e.accountId, 'A');
+  });
+
+  group('extraEvents (Fase 11)', () {
+    final hoje = DateTime(2026, 11, 15);
+    Forecast run(List<ForecastEvent> extras) => ForecastService.compute(
+      accounts: [acc('A', initial: 100000)],
+      cards: const [],
+      transactions: const [],
+      recurring: const [],
+      today: hoje,
+      extraEvents: extras,
+    );
+    ForecastEvent extra(
+      DateTime date,
+      int cents, {
+      ForecastEventKind kind = ForecastEventKind.expense,
+      String? accountId,
+    }) => ForecastEvent(
+      date: date,
+      amountCents: cents,
+      description: 'Devo a Bruno',
+      kind: kind,
+      sourceId: 'debt_${date.day}_$cents',
+      accountId: accountId,
+    );
+
+    test(
+      'despesa sem conta entra no consolidado, nos meses e nao nas contas',
+      () {
+        final f = run([extra(DateTime(2026, 12, 1), -30000)]);
+
+        expect(f.events.where((e) => e.accountId == null), hasLength(1));
+        expect(balOn(f, DateTime(2026, 11, 30)), 100000);
+        expect(balOn(f, DateTime(2026, 12, 1)), 70000);
+        expect(f.months[1].expenseCents, 30000);
+        expect(f.accountNegativeDates, isEmpty);
+      },
+    );
+
+    test('extra passado entra em hoje; extra apos o horizonte e ignorado', () {
+      final passado = run([extra(DateTime(2026, 11, 10), -5000)]);
+      expect(only(passado, 'debt_10_-5000').date, hoje);
+      expect(balOn(passado, hoje), 95000);
+
+      final depois = run([extra(DateTime(2027, 5, 1), -5000)]);
+      expect(depois.events, isEmpty);
+    });
+
+    test('extra grande abaixo de zero define firstNegativeDate', () {
+      final f = run([extra(DateTime(2026, 11, 20), -150000)]);
+      expect(f.firstNegativeDate, DateTime(2026, 11, 20));
+    });
+
+    test('extra sem conta reduz o posso gastar como despesa planejada', () {
+      final f = run([extra(DateTime(2026, 11, 20), -80000)]);
+      final s = spendableToday(
+        forecast: f,
+        recurring: const [],
+        accountsById: {'A': acc('A', initial: 100000)},
+        reservedByAccount: const {},
+        horizonEnd: ForecastService.horizonEnd(today: hoje),
+      );
+      expect(s.plannedCents, 80000);
+      expect(s.freeCents, 20000);
+    });
+
+    test('sem extraEvents o resultado nao muda', () {
+      final semParam = ForecastService.compute(
+        accounts: [acc('A', initial: 100000)],
+        cards: const [],
+        transactions: const [],
+        recurring: const [],
+        today: hoje,
+      );
+      final comVazio = run(const []);
+      List<String> resumo(Forecast f) => [
+        for (final e in f.events) '${e.date}|${e.amountCents}|${e.sourceId}',
+      ];
+      expect(resumo(comVazio), resumo(semParam));
+      expect(
+        comVazio.daily.map((d) => d.balanceCents).toList(),
+        semParam.daily.map((d) => d.balanceCents).toList(),
+      );
+    });
   });
 }

@@ -21,6 +21,7 @@ class DashboardKpiRow extends StatelessWidget {
     final c = context.colors;
     final balanceTrend = summary.balanceTrend;
     final expenseTrend = summary.expenseTrend;
+    final netTrend = summary.netWorthTrend;
     return Wrap(
       spacing: AppSpace.md,
       runSpacing: AppSpace.md,
@@ -63,6 +64,21 @@ class DashboardKpiRow extends StatelessWidget {
                       delta: summary.monthExpenseDelta,
                       values: expenseTrend,
                       higherIsBetter: false,
+                    ),
+            ),
+          ),
+        if (summary.netWorthCents case final net?)
+          _slot(
+            KpiTile(
+              label: 'Patrimônio líquido',
+              cents: net,
+              color: net < 0 ? c.danger : null,
+              trend: netTrend == null
+                  ? null
+                  : _Trend(
+                      delta: summary.netWorthDelta,
+                      values: netTrend,
+                      higherIsBetter: true,
                     ),
             ),
           ),

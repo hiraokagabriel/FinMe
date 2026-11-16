@@ -4,9 +4,11 @@ import 'package:finme/app/seed.dart';
 import 'package:finme/core/models/app_settings.dart';
 import 'package:finme/core/services/record_store.dart';
 import 'package:finme/core/theme/app_theme.dart';
+import 'package:finme/features/debts/domain/debt.dart';
 import 'package:finme/features/goals/domain/goal.dart';
 import 'package:finme/features/importing/domain/import_profile.dart';
 import 'package:finme/features/importing/domain/merchant_dictionary.dart';
+import 'package:finme/features/net_worth/domain/asset.dart';
 import 'package:finme/features/rules/domain/transaction_rule.dart';
 import 'package:finme/features/settings/presentation/settings_page.dart';
 import 'package:flutter/material.dart';
@@ -107,6 +109,18 @@ void main() {
             targetCents: 50000,
           ),
         );
+        await s.assets.upsert(
+          Asset(id: 'a1', name: 'Carro', kind: AssetKind.vehicle),
+        );
+        await s.debts.upsert(
+          Debt(
+            id: 'd1',
+            person: 'Ana',
+            direction: DebtDirection.owedToMe,
+            amountCents: 50000,
+            date: DateTime(2026, 11, 1),
+          ),
+        );
       });
       await tester.tap(find.text('Ultra'));
       await tester.pump();
@@ -114,6 +128,7 @@ void main() {
       await tester.ensureVisible(find.text('Apagar todos os dados'));
       await tester.tap(find.text('Apagar todos os dados'));
       await tester.pumpAndSettle();
+      expect(find.textContaining('ativos, dívidas'), findsOneWidget);
       await tester.tap(find.text('Apagar'));
       await tester.pumpAndSettle();
 
@@ -121,6 +136,8 @@ void main() {
       expect(s.importProfiles.all, isEmpty);
       expect(s.dictionary.all, defaultDictionary());
       expect(s.goals.all, isEmpty);
+      expect(s.assets.all, isEmpty);
+      expect(s.debts.all, isEmpty);
       expect(tester.takeException(), isNull);
     },
   );

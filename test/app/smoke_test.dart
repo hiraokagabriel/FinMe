@@ -4,6 +4,7 @@ import 'package:finme/app/bootstrap.dart';
 import 'package:finme/app/seed.dart';
 import 'package:finme/core/models/app_settings.dart';
 import 'package:finme/core/services/record_store.dart';
+import 'package:finme/features/debts/domain/debt.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,7 +19,14 @@ const _pages = [
   'Recorrentes',
   'Categorias',
   'Ajustes',
+  'Patrimônio',
 ];
+
+/// Tooltip do item: 'Atalho: N' nas 9 primeiras páginas; Patrimônio não tem atalho numérico.
+String _shortcutTip(int i) => 'Atalho: ${i + 1}';
+
+/// Rótulo do item colapsado: 'Rótulo · N'; Patrimônio fica só com o rótulo.
+String _railTip(int i) => i < 9 ? '${_pages[i]} · ${i + 1}' : _pages[i];
 
 Future<AppServices> _boot(WidgetTester tester, AppMode mode) async {
   final s = (await tester.runAsync(() async {
@@ -84,12 +92,18 @@ void main() {
       await _pumpApp(tester, s, size: const Size(1400, 900));
 
       expect(find.byTooltip('Atalho: N'), findsOneWidget);
+      double dy(String label) =>
+          tester.getTopLeft(find.widgetWithText(InkWell, label).first).dy;
+      expect(dy('Contas'), lessThan(dy('Patrimônio')));
+      expect(dy('Patrimônio'), lessThan(dy('Transações')));
       for (var i = 0; i < _pages.length; i++) {
         // Na sidebar larga, o primeiro item com o rótulo é o da navegação.
         await tester.tap(find.widgetWithText(InkWell, _pages[i]).first);
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull, reason: _pages[i]);
-        expect(find.byTooltip('Atalho: ${i + 1}'), findsWidgets);
+        if (i < 9) {
+          expect(find.byTooltip(_shortcutTip(i)), findsWidgets);
+        }
       }
 
       await _openAndCancelTransactionForm(tester);
@@ -118,7 +132,7 @@ void main() {
 
         for (var i = 0; i < _pages.length; i++) {
           final label = _pages[i];
-          await tester.tap(find.byTooltip('$label · ${i + 1}'));
+          await tester.tap(find.byTooltip(_railTip(i)));
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull, reason: label);
         }
@@ -147,6 +161,28 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byTooltip('Modo: Simples'), findsOneWidget);
     expect(s.settings.value.mode, AppMode.simple);
+  });
+
+  testWidgets('Patrimônio: badge de dívidas "devo" vencidas só no Ultra', (
+    tester,
+  ) async {
+    final s = await _boot(tester, AppMode.ultra);
+    await tester.runAsync(
+      () => s.debts.upsert(
+        Debt(
+          id: 'venc',
+          person: 'Bruno',
+          direction: DebtDirection.iOwe,
+          amountCents: 1000,
+          date: DateTime(2026, 10, 1),
+          dueDate: DateTime(2026, 11, 1),
+        ),
+      ),
+    );
+    await _pumpApp(tester, s, size: const Size(1400, 900));
+
+    final tile = find.widgetWithText(InkWell, 'Patrimônio').first;
+    expect(find.descendant(of: tile, matching: find.text('1')), findsOneWidget);
   });
 
   testWidgets('redimensionar 1400 -> 800 não causa overflow', (tester) async {

@@ -5,7 +5,9 @@ import '../core/services/settings_controller.dart';
 import '../features/accounts/domain/account.dart';
 import '../features/cards/domain/payment_card.dart';
 import '../features/categories/domain/transaction_category.dart';
+import '../features/debts/domain/debt.dart';
 import '../features/goals/domain/goal.dart';
+import '../features/net_worth/domain/asset.dart';
 import '../features/importing/domain/import_profile.dart';
 import '../features/importing/domain/merchant_dictionary.dart';
 import '../features/recurring/domain/recurring_rule.dart';
@@ -26,6 +28,8 @@ class AppServices {
     required this.importProfiles,
     required this.dictionary,
     required this.goals,
+    required this.assets,
+    required this.debts,
     required this.ledger,
     this.clock = DateTime.now,
   });
@@ -40,6 +44,8 @@ class AppServices {
   final CollectionRepository<ImportProfile> importProfiles;
   final CollectionRepository<DictionaryEntry> dictionary;
   final CollectionRepository<Goal> goals;
+  final CollectionRepository<Asset> assets;
+  final CollectionRepository<Debt> debts;
   final Ledger ledger;
   final DateTime Function() clock;
 }

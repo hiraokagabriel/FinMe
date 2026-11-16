@@ -19,6 +19,8 @@ List<PaletteEntry> buildAppCommands({
   required VoidCallback onNewTransaction,
   required VoidCallback onImport,
   required VoidCallback onNewRecurring,
+  required VoidCallback onNewAsset,
+  required VoidCallback onNewDebt,
   required VoidCallback onToggleMode,
   required VoidCallback onToggleTheme,
   required VoidCallback onToggleHideValues,
@@ -54,6 +56,18 @@ List<PaletteEntry> buildAppCommands({
       icon: Icons.autorenew,
       keywords: const ['assinatura', 'fixo'],
       onRun: onNewRecurring,
+    ),
+    PaletteEntry(
+      label: 'Novo ativo',
+      icon: Icons.home_work_outlined,
+      keywords: const ['imóvel', 'carro', 'investimento', 'patrimônio'],
+      onRun: onNewAsset,
+    ),
+    PaletteEntry(
+      label: 'Nova dívida (devo / me devem)',
+      icon: Icons.handshake_outlined,
+      keywords: const ['empréstimo', 'emprestei', 'devo', 'me devem', 'dívida'],
+      onRun: onNewDebt,
     ),
     PaletteEntry(
       label: ultra ? 'Mudar para Modo Simples' : 'Mudar para Modo Ultra',

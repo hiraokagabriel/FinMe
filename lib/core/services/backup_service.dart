@@ -9,9 +9,11 @@ import '../../features/accounts/domain/account.dart';
 import '../../features/cards/domain/payment_card.dart';
 import '../../features/categories/domain/category_tree.dart';
 import '../../features/categories/domain/transaction_category.dart';
+import '../../features/debts/domain/debt.dart';
 import '../../features/goals/domain/goal.dart';
 import '../../features/importing/domain/import_profile.dart';
 import '../../features/importing/domain/merchant_dictionary.dart';
+import '../../features/net_worth/domain/asset.dart';
 import '../../features/recurring/domain/recurring_rule.dart';
 import '../../features/rules/domain/transaction_rule.dart';
 import '../../features/transactions/domain/transaction.dart';
@@ -53,6 +55,8 @@ class BackupService {
     'importProfiles': [for (final p in s.importProfiles.all) p.toMap()],
     'dictionary': [for (final e in s.dictionary.all) e.toMap()],
     'goals': [for (final g in s.goals.all) g.toMap()],
+    'assets': [for (final a in s.assets.all) a.toMap()],
+    'debts': [for (final d in s.debts.all) d.toMap()],
   });
 
   /// Lê tudo antes de gravar: JSON ou registro inválido lança [FormatException] e nada muda.
@@ -77,6 +81,8 @@ class BackupService {
       importProfiles: s.importProfiles.all,
       dictionary: s.dictionary.all,
       goals: s.goals.all,
+      assets: s.assets.all,
+      debts: s.debts.all,
     );
     try {
       await s.accounts.replaceAll(b.accounts);
@@ -89,6 +95,8 @@ class BackupService {
       await s.importProfiles.replaceAll(b.importProfiles);
       await s.dictionary.replaceAll(b.dictionary);
       await s.goals.replaceAll(b.goals);
+      await s.assets.replaceAll(b.assets);
+      await s.debts.replaceAll(b.debts);
       await materializeRecurring(s);
     } catch (e, st) {
       // Cada restauração tem try próprio: uma falha não impede as demais.
@@ -103,6 +111,8 @@ class BackupService {
         () => s.importProfiles.replaceAll(retrato.importProfiles),
         () => s.dictionary.replaceAll(retrato.dictionary),
         () => s.goals.replaceAll(retrato.goals),
+        () => s.assets.replaceAll(retrato.assets),
+        () => s.debts.replaceAll(retrato.debts),
       ];
       for (final restore in restores) {
         try {
@@ -184,6 +194,8 @@ class BackupService {
     List<ImportProfile> importProfiles,
     List<DictionaryEntry> dictionary,
     List<Goal> goals,
+    List<Asset> assets,
+    List<Debt> debts,
   })
   _parse(Map<String, dynamic> data) {
     try {
@@ -234,6 +246,9 @@ class BackupService {
           for (final row in _goalRows(data))
             if (accountIds.contains(row['accountId'])) row,
         ], Goal.fromMap),
+        // Fase 11: chave ausente → []. Sem validação de vínculo (DebtPayment.transactionId órfão fica como está).
+        assets: _rows(_optMaps(data, 'assets'), Asset.fromMap),
+        debts: _rows(_optMaps(data, 'debts'), Debt.fromMap),
       );
     } on TypeError catch (e) {
       throw FormatException('Backup com campos inválidos: $e');

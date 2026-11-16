@@ -8,9 +8,11 @@ import 'package:finme/core/models/year_month.dart';
 import 'package:finme/core/services/backup_service.dart';
 import 'package:finme/core/services/record_store.dart';
 import 'package:finme/core/utils/date_utils.dart';
+import 'package:finme/features/debts/domain/debt.dart';
 import 'package:finme/features/goals/domain/goal.dart';
 import 'package:finme/features/importing/domain/import_profile.dart';
 import 'package:finme/features/importing/domain/merchant_dictionary.dart';
+import 'package:finme/features/net_worth/domain/asset.dart';
 import 'package:finme/features/rules/domain/transaction_rule.dart';
 import 'package:finme/features/transactions/domain/transaction.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -53,6 +55,8 @@ List<Object?> _state(AppServices s) => [
   [for (final p in s.importProfiles.all) p.toMap()],
   [for (final e in s.dictionary.all) e.toMap()],
   [for (final g in s.goals.all) g.toMap()],
+  [for (final a in s.assets.all) a.toMap()],
+  [for (final d in s.debts.all) d.toMap()],
 ];
 
 Future<AppServices> _bootstrap({
@@ -543,6 +547,129 @@ void main() {
     },
   );
 
+  test(
+    'export→import devolve ativos (snapshots, arquivado) e dívidas (pagamentos com transactionId)',
+    () async {
+      final src = await _bootstrap();
+      final dst = await _bootstrap(demo: false);
+      await src.assets.upsert(
+        Asset(
+          id: 'a1',
+          name: 'Carro X',
+          kind: AssetKind.vehicle,
+          snapshots: [
+            AssetSnapshot(
+              id: 's1',
+              date: DateTime(2026, 10, 1),
+              valueCents: 4000000,
+            ),
+            AssetSnapshot(
+              id: 's2',
+              date: DateTime(2026, 11, 1),
+              valueCents: 3800000,
+              note: 'FIPE',
+            ),
+          ],
+          archived: true,
+        ),
+      );
+      await src.debts.upsert(
+        Debt(
+          id: 'd1',
+          person: 'Ana',
+          direction: DebtDirection.owedToMe,
+          amountCents: 50000,
+          date: DateTime(2026, 11, 1),
+          description: 'Jantar',
+          dueDate: DateTime(2026, 12, 1),
+          payments: [
+            DebtPayment(
+              id: 'p1',
+              date: DateTime(2026, 11, 5),
+              amountCents: 20000,
+              transactionId: 'tx_pagamento',
+            ),
+            DebtPayment(
+              id: 'p2',
+              date: DateTime(2026, 11, 10),
+              amountCents: 5000,
+            ),
+          ],
+        ),
+      );
+
+      await BackupService.importJson(dst, BackupService.exportJson(src));
+
+      expect(dst.assets.all, src.assets.all);
+      expect(dst.debts.all, src.debts.all);
+    },
+  );
+
+  test('backup sem assets/debts: coleções vazias e o resto importa', () async {
+    final src = await _bootstrap();
+    final dst = await _bootstrap(demo: false);
+    await dst.assets.upsert(
+      Asset(id: 'local', name: 'Local', kind: AssetKind.other),
+    );
+    await dst.debts.upsert(
+      Debt(
+        id: 'local',
+        person: 'Local',
+        direction: DebtDirection.iOwe,
+        amountCents: 100,
+        date: _now(),
+      ),
+    );
+    final map =
+        jsonDecode(BackupService.exportJson(src)) as Map<String, dynamic>;
+    map
+      ..remove('assets')
+      ..remove('debts');
+
+    await BackupService.importJson(dst, jsonEncode(map));
+
+    expect(dst.assets.all, isEmpty);
+    expect(dst.debts.all, isEmpty);
+    expect(dst.transactions.all.length, src.transactions.all.length);
+  });
+
+  test(
+    'ativo ou dívida inválidos no backup: FormatException e nada gravado',
+    () async {
+      final src = await _bootstrap();
+      final dst = await _bootstrap(demo: false);
+      await dst.assets.upsert(
+        Asset(id: 'local', name: 'Local', kind: AssetKind.other),
+      );
+      final antes = _state(dst);
+      final map =
+          jsonDecode(BackupService.exportJson(src)) as Map<String, dynamic>;
+      final debt = Debt(
+        id: 'ruim',
+        person: 'Bruno',
+        direction: DebtDirection.iOwe,
+        amountCents: 100,
+        date: _now(),
+      ).toMap();
+      final asset = Asset(
+        id: 'ruim',
+        name: 'Carro',
+        kind: AssetKind.vehicle,
+      ).toMap();
+      for (final (key, row) in [
+        ('debts', {...debt, 'amountCents': 0}),
+        ('assets', {...asset, 'name': 42}),
+      ]) {
+        map[key] = [row];
+        await expectLater(
+          BackupService.importJson(dst, jsonEncode(map)),
+          throwsFormatException,
+        );
+        expect(_state(dst), antes);
+      }
+    },
+  );
+
   for (final box in [
     'fm_transactions',
     'fm_settings',
@@ -550,6 +677,8 @@ void main() {
     'fm_import_profiles',
     'fm_dictionary',
     'fm_goals',
+    'fm_assets',
+    'fm_debts',
   ]) {
     test('import com falha em $box restaura tudo (tudo-ou-nada)', () async {
       final src = await _bootstrap();
@@ -600,6 +729,34 @@ void main() {
           targetCents: 9000,
         ),
       );
+      await dst.assets.upsert(
+        Asset(id: 'local_ativo', name: 'Local', kind: AssetKind.other),
+      );
+      await dst.debts.upsert(
+        Debt(
+          id: 'local_divida',
+          person: 'Local',
+          direction: DebtDirection.iOwe,
+          amountCents: 700,
+          date: _now(),
+        ),
+      );
+      await src.assets.upsert(
+        Asset(
+          id: 'backup_ativo',
+          name: 'Do backup',
+          kind: AssetKind.realEstate,
+        ),
+      );
+      await src.debts.upsert(
+        Debt(
+          id: 'backup_divida',
+          person: 'Do backup',
+          direction: DebtDirection.owedToMe,
+          amountCents: 800,
+          date: _now(),
+        ),
+      );
       final json = BackupService.exportJson(src);
       final before = _state(dst);
 
@@ -611,6 +768,8 @@ void main() {
 
       expect(_state(dst), before);
       expect(dst.goals.byId('local_meta'), isNotNull);
+      expect(dst.assets.byId('local_ativo'), isNotNull);
+      expect(dst.debts.byId('local_divida'), isNotNull);
       expect(dst.transactions.byId('local'), isNotNull);
       expect(dst.settings.value.mode, AppMode.ultra);
     });

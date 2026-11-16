@@ -1222,7 +1222,7 @@ aceite: total de testes igual ao de `flutter test`; `bash tool/check.sh` → `CH
 > Ondas (tarefas da mesma onda têm arquivos disjuntos): **A** T-150, T-151, T-152 · **B** T-153 · **C** (Fase 10 fechada) T-154, T-158 · **D** T-155, T-156, T-157, T-159 · **E** T-160, T-161 · **F** T-162 · **G** T-163 · **H** T-164.
 > Datas nos testes: `DateTime(2026, 11, 15)` como "hoje" (salvo indicação). App de teste igual a `test/features/goals/goals_section_test.dart` (`bootstrap` em memória, `clock`).
 
-### T-150 · Ativos: entidade `Asset` e regras de snapshot (domínio) · `todo` · deps: — · parallel: yes
+### T-150 · Ativos: entidade `Asset` e regras de snapshot (domínio) · `done` · deps: — · parallel: yes
 files: `lib/features/net_worth/domain/asset.dart` (novo), `test/features/net_worth/asset_test.dart` (novo)
 contrato: SPEC §4.10 inteiro (`AssetKind`, `assetKindLabel`, `AssetSnapshot`, `Asset`) e §5.24 inteiro (`assetSnapshotError`, `removeSnapshotError`, `closeAsset`, `assetsValueAt`, regras 1–5). Dart puro; datas com `dateOnly`/`dateKey`/`parseDateKey`; nada de `package:flutter`.
 aceite:
@@ -1232,7 +1232,7 @@ aceite:
 - Round-trip de `Asset` com 2 snapshots (um com nota) e `archived: true`; `fromMap` sem `snapshots`/`archived` → `[]`/`false`; `kind` desconhecido → `investment`; snapshot inválido (sem `valueCents`) ignorado.
 - `assetKindLabel` dos 4 tipos; `lastChangeCents` com 1 snapshot → `null`; sem snapshots: `currentValueCents == 0`, `latest == null`.
 
-### T-151 · Devo / me devem: entidade `Debt` e regras (domínio) · `todo` · deps: — · parallel: yes
+### T-151 · Devo / me devem: entidade `Debt` e regras (domínio) · `done` · deps: — · parallel: yes
 files: `lib/features/debts/domain/debt.dart` (novo), `lib/features/debts/domain/debt_math.dart` (novo), `test/features/debts/debt_test.dart` (novo)
 contrato: SPEC §4.11 inteiro (`DebtDirection`, `DebtPayment`, `Debt`) e §5.25 inteiro (`debtPaymentError`, `debtTransactionDescription`, `settleDebt`, `undoDebtPayment`, `isDebtOverdue`, `debtTotalsAt`, `debtForecastEvents`, `PersonDebtSummary`, `debtsByPerson`, `debtPeople`, regras 1–7). Dart puro; mensagens com `formatMoney`; agrupamento com `foldText(person.trim())`; importa `Transaction` (§4.4) e `ForecastEvent`/`ForecastEventKind` de `forecast.dart` (sem mudar `forecast.dart`).
 aceite:
@@ -1242,7 +1242,7 @@ aceite:
 - `settleDebt` em dívida `iOwe` → transação `expense` com 'Pago a Bruno'; categoria passada chega na transação.
 - `debtForecastEvents`: evento com `kind == ForecastEventKind.expense`, `accountId == null`, `sourceId == debt.id`; dívida com descrição → 'Devo a Bruno · {descrição}'; pagamento parcial reduz o valor do evento para o restante.
 
-### T-152 · Previsão aceita eventos extras · `todo` · deps: — · parallel: yes
+### T-152 · Previsão aceita eventos extras · `done` · deps: — · parallel: yes
 files: `lib/features/forecast/domain/forecast.dart`, `test/features/forecast_test.dart`
 contrato: SPEC §5.7 (parâmetro `Iterable<ForecastEvent> extraEvents = const []` em `ForecastService.compute`; bullet "Extras (Fase 11)" do passo 3). Os extras entram em `events` antes da ordenação existente e seguem o mesmo caminho (meses, `daily`, `firstNegativeDate`; `accountNegativeDates` só se `accountId` não nulo). Nenhum chamador muda (parâmetro opcional).
 aceite (hoje 15/11/2026, uma conta A com 100000, sem outras transações):
@@ -1251,7 +1251,7 @@ aceite (hoje 15/11/2026, uma conta A com 100000, sem outras transações):
 - Extra de −150000 em 20/11 → `firstNegativeDate == 20/11/2026`.
 - Sem `extraEvents` → resultado idêntico ao atual (testes existentes de previsão, linha do tempo e `spendable_test.dart` passam sem mudança).
 
-### T-153 · Patrimônio líquido: histórico mensal e dívida de cartão (domínio) · `todo` · deps: T-150, T-151 · parallel: yes
+### T-153 · Patrimônio líquido: histórico mensal e dívida de cartão (domínio) · `done` · deps: T-150, T-151 · parallel: yes
 files: `lib/features/net_worth/domain/net_worth.dart` (novo), `test/features/net_worth/net_worth_test.dart` (novo)
 contrato: SPEC §5.26 inteiro (`NetWorthPoint`, `cardPurchaseDate`, `cardDebtAt`, `netWorthHistory`, regras 1–5 e a decisão "Dívida de cartão"). Reusa `monthlyHistory` (§5.10) para `accountsCents`, `assetsValueAt` (§5.24) e `debtTotalsAt` (§5.25). Dart puro.
 aceite (dados exatos do exemplo de §5.26; transações do cartão com `buildInstallments`):
@@ -1261,7 +1261,7 @@ aceite (dados exatos do exemplo de §5.26; transações do cartão com `buildIns
 - Cartão de débito com despesa paga → não entra em `cardDebtCents`; recorrência de cartão de crédito não materializada → não entra; cartão arquivado com saldo devedor → entra.
 - `netWorthHistory(months: 24)` → 24 pontos em ordem cronológica, último no mês de hoje.
 
-### T-154 · Ledger, persistência e `AppServices` da Fase 11 · `todo` · deps: T-150, T-151, T-152, T-153, T-142 (Fase 10 fechada) · parallel: yes (com T-158)
+### T-154 · Ledger, persistência e `AppServices` da Fase 11 · `done` · deps: T-150, T-151, T-152, T-153, T-142 (Fase 10 fechada) · parallel: yes (com T-158)
 files: `lib/app/bootstrap.dart`, `lib/app/app_scope.dart`, `lib/app/ledger.dart`, `test/app/ledger_net_worth_test.dart` (novo)
 contrato: SPEC §3.5 (boxes `fm_assets`, `fm_debts`), §6.1 (`assets` e `debts` obrigatórios em `AppServices`), §6.2 bloco Fase 11 (`assets`/`debts` opcionais no `Ledger`, entram em `_sources`; `forecast` com `extraEvents: debtForecastEvents(...)`; `netWorthMonths = 24`; `netWorthHistory`, `debtsByPerson`, `debtPeople` memoizados e zerados em `_clearCache`).
 aceite:
@@ -1272,7 +1272,7 @@ aceite:
 - Registrar pagamento de 80000 em d2 (`debts.upsert(settleDebt(...).debt)`) → o evento some da previsão (cache invalidado).
 - `debtsByPerson`/`debtPeople` refletem `debts.all`; `test/app/ledger_test.dart` e `ledger_goals_test.dart` (Ledger sem `assets`/`debts`) passam sem mudança; sem `debts` → `debtsByPerson == []`.
 
-### T-155 · Backup e "apagar dados" cobrem ativos e dívidas · `todo` · deps: T-154 · parallel: yes
+### T-155 · Backup e "apagar dados" cobrem ativos e dívidas · `done` · deps: T-154 · parallel: yes
 files: `lib/core/services/backup_service.dart`, `lib/features/settings/presentation/settings_page.dart`, `test/core/backup_service_test.dart`, `test/features/settings/settings_page_test.dart`
 contrato: SPEC §3.5 "Fase 11: `fm_assets` e `fm_debts`" (chaves `assets` e `debts`, versão 1, ausência → `[]`, sem validação de vínculo, retrato/restauração, apagar dados e nova mensagem de confirmação).
 aceite:
@@ -1281,7 +1281,7 @@ aceite:
 - Falha na gravação (store que lança uma vez em `fm_debts`) restaura ativos e dívidas anteriores (padrão do teste de rollback existente).
 - Ajustes Ultra → "Apagar todos os dados" confirmado → ativos e dívidas vazios; a mensagem do diálogo menciona 'ativos, dívidas'.
 
-### T-156 · Ativos: diálogos (form, atualizar valor, histórico) · `todo` · deps: T-154 · parallel: yes
+### T-156 · Ativos: diálogos (form, atualizar valor, histórico) · `done` · deps: T-154 · parallel: yes
 files: `lib/features/net_worth/presentation/asset_dialogs.dart` (novo), `test/features/net_worth/asset_dialogs_test.dart` (novo)
 contrato: SPEC §7.3 Fase 11, bloco **Diálogos de ativo** (`showAssetForm`, `showAssetValueDialog`, `showAssetHistory`) e §6.3 "Ativos (Fase 11)". `DropdownButtonFormField` com `initialValue`; cores via `context.colors`; guarda contra duplo pop.
 aceite:
@@ -1291,7 +1291,7 @@ aceite:
 - Histórico: lista os snapshots do mais recente para o mais antigo com a variação; excluir com 2 snapshots → sobra 1; excluir o único → SnackBar 'O ativo precisa de pelo menos um valor' e nada muda.
 - Nenhuma ação cria transação (`transactions.all` inalterado).
 
-### T-157 · Dívidas: diálogos (form, quitar, pagamentos) · `todo` · deps: T-154 · parallel: yes
+### T-157 · Dívidas: diálogos (form, quitar, pagamentos) · `done` · deps: T-154 · parallel: yes
 files: `lib/features/debts/presentation/debt_dialogs.dart` (novo), `test/features/debts/debt_dialogs_test.dart` (novo)
 contrato: SPEC §7.3 Fase 11, bloco **Diálogos de dívida** (`showDebtForm`, `showSettleDebtDialog`, `showDebtPayments`) e §6.3 "Dívidas (Fase 11)" (ordem de gravação transação → dívida, compensação, SnackBars, desfazer). `Autocomplete<String>` com `ledger.debtPeople`; dropdowns com `initialValue`; categoria por `ledger.categoryTree.options(kind)` + `label`.
 aceite (app de teste com 'Conta Alfa' saldo 200000 e conta arquivada 'Conta Velha'):
@@ -1303,7 +1303,7 @@ aceite (app de teste com 'Conta Alfa' saldo 200000 e conta arquivada 'Conta Velh
 - Pagamentos: 'Desfazer' com confirmação → pagamento removido e transação excluída; pagamento cuja transação foi apagada mostra 'Transação excluída' e desfazer só remove o pagamento.
 - Sem conta ativa → 'Cadastre uma conta para registrar o pagamento.' e 'Confirmar' desabilitado.
 
-### T-158 · Gráfico de evolução do patrimônio · `todo` · deps: T-153 · parallel: yes (com T-154)
+### T-158 · Gráfico de evolução do patrimônio · `done` · deps: T-153 · parallel: yes (com T-154)
 files: `lib/features/net_worth/presentation/net_worth_chart.dart` (novo), `test/features/net_worth/net_worth_chart_test.dart` (novo)
 contrato: SPEC §7.3 Fase 11, bloco **`NetWorthChart`** (`NetWorthChart`, `netWorthTooltipText`; fl_chart como em `forecast_chart.dart`; tooltip rico da Fase 7). Cores via `context.colors`; sem gradiente.
 aceite (pontos montados à mão):
@@ -1312,7 +1312,7 @@ aceite (pontos montados à mão):
 - `hideValues: true` → todos os valores 'R$ ••••'.
 - Widget com 12 pontos renderiza um `LineChart` sem exceção; com 1 ponto → 'Ainda sem histórico para o gráfico.'; com um ponto negativo existe a linha horizontal em 0 (`extraLinesData.horizontalLines` não vazio).
 
-### T-159 · Painel Ultra: KPI "Patrimônio líquido" · `todo` · deps: T-154 · parallel: yes
+### T-159 · Painel Ultra: KPI "Patrimônio líquido" · `done` · deps: T-154 · parallel: yes
 files: `lib/features/dashboard/presentation/dashboard_summary.dart`, `lib/features/dashboard/presentation/dashboard_sections.dart`, `test/features/dashboard/dashboard_net_worth_test.dart` (novo)
 contrato: SPEC §7.3 Fase 11, parágrafo **Painel Ultra** (`netWorthCents`, `netWorthDelta`, `netWorthTrend` em `DashboardSummary`; 6º `KpiTile` depois de 'Gasto no mês' com `_Trend(higherIsBetter: true)`).
 aceite:
@@ -1320,7 +1320,7 @@ aceite:
 - Simples: os três campos `null` e o texto 'Patrimônio líquido' não aparece no Painel.
 - Testes existentes do Painel (incluindo `spendable_card_test.dart` e `dashboard_categories_test.dart`) passam.
 
-### T-160 · Patrimônio: seção de ativos · `todo` · deps: T-156 · parallel: yes (com T-161)
+### T-160 · Patrimônio: seção de ativos · `done` · deps: T-156 · parallel: yes (com T-161)
 files: `lib/features/net_worth/presentation/assets_section.dart` (novo), `test/features/net_worth/assets_section_test.dart` (novo)
 contrato: SPEC §7.3 Fase 11 (linha "Ativos" da tabela; bloco **`AssetsSection`**), §6.3 "Ativos (Fase 11)" (encerrar, reativar, excluir com confirmação). Usa os diálogos de T-156.
 aceite (app de teste; ativos 'Carro' 3800000 com 2 snapshots e 'Tesouro' 200000):
@@ -1329,7 +1329,7 @@ aceite (app de teste; ativos 'Carro' 3800000 com 2 snapshots e 'Tesouro' 200000)
 - Ultra: 'Atualizado em 01/11/2026', variação '-R$ 2.000,00', rodapé 'Total' 'R$ 40.000,00'.
 - Ultra: menu 'Encerrar' com confirmação → 'Carro' some, `assets-show-archived` aparece; marcar → 'Carro' volta com 'Encerrado'; 'Reativar' → `archived` false. 'Excluir' confirmado → removido do repositório.
 
-### T-161 · Patrimônio: seção devo / me devem · `todo` · deps: T-157 · parallel: yes (com T-160)
+### T-161 · Patrimônio: seção devo / me devem · `done` · deps: T-157 · parallel: yes (com T-160)
 files: `lib/features/debts/presentation/debts_section.dart` (novo), `test/features/debts/debts_section_test.dart` (novo)
 contrato: SPEC §7.3 Fase 11 (linha "Devo / me devem" da tabela; bloco **`DebtsSection`**: totais de `ledger.netWorthHistory.last`, 'Por pessoa' de `ledger.debtsByPerson`, filtros, ordem, keys), §6.3 "Dívidas (Fase 11)" (excluir bloqueado com pagamentos). Usa os diálogos de T-157.
 aceite (app de teste com 'Conta Alfa'; dívidas d1 só com p1, d2, d3, d4 e d6 de §5.25):
@@ -1340,7 +1340,7 @@ aceite (app de teste com 'Conta Alfa'; dívidas d1 só com p1, d2, d3, d4 e d6 d
 - Menu 'Excluir' em d1 (tem pagamento) → SnackBar 'Desfaça os pagamentos antes de excluir' e nada muda; em d4 confirmado → removida.
 - Sem dívidas → `EmptyState` com 'Nova dívida'.
 
-### T-162 · Página Patrimônio · `todo` · deps: T-158, T-160, T-161 · parallel: no
+### T-162 · Página Patrimônio · `done` · deps: T-158, T-160, T-161 · parallel: no
 files: `lib/features/net_worth/presentation/net_worth_page.dart` (novo), `test/features/net_worth/net_worth_page_test.dart` (novo)
 contrato: SPEC §7.3 Fase 11 (tabela; bloco **`NetWorthPage`**: KPI com delta/sparkline no Ultra e linha de apoio no Simples, 'Evolução' com seletor 12/24, 'Composição' com variação da contribuição, `AssetsSection`, `DebtsSection`, botões do cabeçalho).
 aceite (app de teste com os dados de §5.26 — hoje 15/11/2026):
@@ -1351,7 +1351,7 @@ aceite (app de teste com os dados de §5.26 — hoje 15/11/2026):
 - Patrimônio negativo (só uma dívida 'Devo' de 10000) → valor do KPI em `danger`.
 - `hideValues` → nenhum valor em claro na página.
 
-### T-163 · Shell e paleta: página Patrimônio e comandos novos · `todo` · deps: T-162, T-156, T-157 · parallel: no
+### T-163 · Shell e paleta: página Patrimônio e comandos novos · `done` · deps: T-162, T-156, T-157 · parallel: no
 files: `lib/app/home_shell.dart`, `lib/app/app_commands.dart`, `test/app/smoke_test.dart`, `test/app/app_commands_test.dart`
 contrato: SPEC §7.3 Fase 11 (decisões de navegação: índice 9 `Patrimônio` com `Icons.account_balance_outlined`, `_sidebarOrder`, `_NavTile.number` `int?`, badge Ultra de dívidas `iOwe` vencidas; parágrafo **Paleta**: `onNewAsset`/`onNewDebt` e as 2 entradas depois de 'Nova recorrência'), §7.3 "Páginas (índice)". `_pageFor(9) => const NetWorthPage()`. `GoToPageIntent`/`app_shortcuts.dart` não mudam.
 aceite:
@@ -1360,7 +1360,214 @@ aceite:
 - `buildAppCommands`: 'Ir para Patrimônio' sem `shortcut`; 'Novo ativo' e 'Nova dívida (devo / me devem)' logo depois de 'Nova recorrência'; `fuzzyRank` com 'emprest' acha 'Nova dívida (devo / me devem)'; `onRun` chama o callback certo.
 - Ultra com uma dívida `iOwe` vencida → badge '1' no item Patrimônio; Simples sem badge.
 
-### T-164 · Documentação da Fase 11 · `todo` · deps: T-150..T-163 · parallel: no
+### T-164 · Documentação da Fase 11 · `done` · deps: T-150..T-163 · parallel: no
 files: `CONTEXT.md`, `ROADMAP.md`, `docs/BACKLOG.md`
 contrato: CONTEXT §4 (árvore com `features/net_worth/` e `features/debts/` e seus arquivos; `home_shell.dart` com 10 páginas), §5 (página Patrimônio índice 9 depois de Contas, sem atalho; KPI e Painel Ultra; diferenças Simples/Ultra), §6 (patrimônio líquido, dívida de cartão = saldo devedor já contratado com parcelas futuras, snapshots de ativo, quitação parcial que gera transação, "devo" com vencimento na Previsão e no "posso gastar", "me devem" fora), §7 (boxes `fm_assets` e `fm_debts`; backup e apagar dados cobrem as duas), §8 (testes novos, total), §10 (commit), §11 (status), §12 (limites: editar/excluir a transação de quitação pela tela de Transações não altera a dívida; registrar "me devem" não tira dinheiro de conta — o empréstimo feito precisa ser lançado à parte; quitação de "devo" é despesa e entra no gasto por categoria; dívidas não aparecem em `Ledger.upcoming` (Próximos vencimentos), só nos eventos da previsão; valor de ativo é declarado, sem interpolação; `cardPurchaseDate` aproxima o dia em parcelas com dia clampado; Patrimônio sem atalho numérico). ROADMAP: Fase 11 em "v3". BACKLOG: T-150..T-163 `done`.
+aceite: total de testes igual ao de `flutter test`; `bash tool/check.sh` → `CHECK OK`.
+
+## Fase 12 — Relatórios
+
+> Origem: `docs/V3_DIRECTION.md` (Relatórios). Contratos: SPEC §2 (`reports/`), §3.3 (Fase 12), §5.27–5.32, §6.4, §7.3 "Páginas (índice)" e "Relatórios (Fase 12)", §8.
+> Sem dependência nova (`csv`, `fl_chart` e `file_selector` já existem). Domínio puro primeiro, com os exemplos do SPEC como teste; controller com cache; views; página; shell por último.
+> Decisões fechadas: tela curada com 7 relatórios (`ReportKind`); Simples = Tendência, Top estabelecimentos e Comparativo (só raízes, média 3 meses) com filtro só de período; Ultra = os 7 e todos os filtros. Relatórios usam só transações gravadas (sem recorrências projetadas); estorno, transferência e pagamento de fatura ficam fora (igual a §5.6); despesa de cartão pela data da compra/parcela. Comparativo usa o último mês do período como referência e meses cheios (o mês atual vai "até hoje"). Fixo = `recurringId` ou parcela; variável = o resto. Patrimônio reaproveita `ledger.netWorthHistory` (24 meses; filtros de escopo não se aplicam). Cache no `ReportsController` (fora do `Ledger`; `ledger.dart` não muda), criado pelo shell e vivo enquanto o app roda; matriz mês × categoria compartilhada entre comparativo e pivot. CSV `;` + vírgula decimal + BOM, valores reais mesmo com `hideValues`, ordem padrão do domínio. Página **Relatórios** índice 10, entre Categorias e Ajustes, sem atalho numérico; um comando de paleta por relatório.
+> Dependência da Fase 11: T-177 usa `NetWorthPoint` (T-153); T-179 usa `ledger.netWorthHistory` (T-154); T-187 usa `NetWorthChart` (T-158); T-189 toca `home_shell.dart`, `app_commands.dart`, `smoke_test.dart` e `app_commands_test.dart` (também tocados por T-163) → só começa com a Fase 11 fechada (T-164 `done`). Nenhuma tarefa da Fase 12 toca `ledger.dart`, `bootstrap.dart`, `app_scope.dart` ou `backup_service.dart`.
+> Ondas (tarefas da mesma onda têm arquivos disjuntos): **A** T-170, T-171 · **B** T-172, T-173, T-174, T-175, T-180 · **C** T-176, T-181, T-182, T-183, T-184, T-185, T-187 (T-187 exige T-153 e T-158) · **D** T-177, T-186 · **E** T-178, T-179 (T-179 exige T-154) · **F** T-188 · **G** (Fase 11 fechada) T-189 · **H** T-190.
+> Datas nos testes: `DateTime(2026, 11, 15)` como "hoje" (salvo indicação). Domínio: árvore de categorias de §5.20 (`ali`, `mer`, `res`, `tra`, `sal`). Views: app de teste igual a `test/features/net_worth/net_worth_chart_test.dart` (`bootstrap` em memória, `AppScope`, tema), com os dados montados pelas funções de domínio.
+
+### T-170 · Filtros, período e escopo dos relatórios (domínio) · `todo` · deps: — · parallel: yes
+files: `lib/features/reports/domain/report_filter.dart` (novo), `test/features/reports/report_filter_test.dart` (novo)
+contrato: SPEC §5.27 inteiro (`ReportKind`, `kUltraReports`, `kSimpleReports`, `reportKindLabel`, `reportKindSlug`, `ReportPeriodPreset`, `reportPeriodLabel`, `ReportFlow`, `kReportMaxMonths`, `ReportFilter` com `copyWith`/`periodOnly`/`hasScopeFilters`/`==`/`hashCode`, `ReportRange`, `resolveReportRange`, `monthsOf`, `reportFlowOf`, `matchesReportScope`, `roundDiv`, `reportCategoryLabel`, `ignoredFilters` e a tabela de filtros por relatório). Dart puro; usa `YearMonth`, `CategoryTree`, `hasAnyTag`, `kCategoryPathSeparator`.
+aceite:
+- Todos os exemplos de §5.27.
+- `reportKindLabel` e `reportKindSlug` dos 7; `reportPeriodLabel` dos 6; `kSimpleReports == [trend, topMerchants, categoryComparison]`.
+- `ReportFilter()` padrão: `last12`, sets vazios, `expense`, `includePlanned false`, `hasScopeFilters false`; `copyWith` omitido mantém; o filtro guarda `Set.unmodifiable` (mudar o set passado ao construtor depois não altera o filtro).
+- `resolveReportRange` em 15/01/2026: `last3` → 2025-11..2026-01; `thisYear` → 2026-01..2026-01.
+- `ignoredFilters` para cada `ReportKind` com um filtro que liga tudo (`accountIds`, `categoryIds`, `tagKeys`, `flow income`, `includePlanned`): comparativo, pivot e estabelecimentos → []; tendência, gasto por dia e fixo × variável → ['tipo']; patrimônio → os 5 rótulos na ordem fixa.
+
+### T-171 · `formatCsvMoney` e `csvText` em formatters · `todo` · deps: — · parallel: yes
+files: `lib/core/utils/formatters.dart`, `test/core/formatters_csv_test.dart` (novo)
+contrato: SPEC §3.3 bullet "Fase 12". Mesma lógica de `_csvMoney`/`_csvText` de `backup_service.dart` (que não muda nesta tarefa).
+aceite:
+- `formatCsvMoney(123456) == '1234,56'`, `(-5000) == '-50,00'`, `(0) == '0,00'`, `(7) == '0,07'`, `(123456789) == '1234567,89'` (sem ponto de milhar).
+- `csvText('=SOMA(A1)') == "'=SOMA(A1)"`; `'+1'`, `'-x'` e `'@a'` ganham `'` na frente; `'Mercado'` e `''` inalterados.
+- Testes existentes de formatters passam sem mudança.
+
+### T-172 · Matriz mês × categoria e comparativo (domínio) · `todo` · deps: T-170 · parallel: yes
+files: `lib/features/reports/domain/category_reports.dart` (novo), `test/features/reports/category_reports_test.dart` (novo)
+contrato: SPEC §5.28 inteiro (`MonthCategoryTotals`, `monthlyCategoryTotals`, `CategoryComparisonRow`, `CategoryComparison`, `categoryComparison`, regras 1–4). Reusa `deltaRatio` (§5.10), `roundDiv`/`reportFlowOf`/`matchesReportScope`/`reportCategoryLabel` (§5.27), `foldText`.
+aceite:
+- Exemplo de §5.28 completo (linhas, children na ordem, `total`) e as 4 variações.
+- `monthlyCategoryTotals` guarda a categoria própria (`mer`, não `ali`); mês sem lançamentos fica ausente do mapa; despesa fora de `[from, to]` ignorada.
+- Categoria apagada (id desconhecido) vira raiz própria e aparece antes de `null`.
+- Raiz sem filhas → `children` vazio; raiz com filhas mas só gasto direto → `children` só com a linha `isDirect`.
+
+### T-173 · Tendência, média móvel e fixo × variável (domínio) · `todo` · deps: T-170 · parallel: yes
+files: `lib/features/reports/domain/monthly_flow.dart` (novo), `test/features/reports/monthly_flow_test.dart` (novo)
+contrato: SPEC §5.30 inteiro (`TrendPoint`, `monthlyTrend`, `movingAverage`, `FixedVariableMonth`, `fixedVariableByMonth`). Uma passada sobre as transações por função (mapa mês → índice).
+aceite:
+- Exemplos de tendência e de fixo × variável de §5.30, com as variações (`includePlanned`, `cardIds {K}`, `flow income` ignorado, mês vazio, parcela com `recurringId`).
+- `monthlyTrend` devolve exatamente `months.length` pontos na ordem de `months`, inclusive meses sem lançamento (zeros).
+- `movingAverage` com `window` maior que a lista → tudo `null`.
+- Fixo × variável com 'Aluguel' na categoria `tra` (demais sem categoria) e `categoryIds {tra}` → out: recorrentes 150000, parcelas 0, variável 0.
+
+### T-174 · Gasto por dia (heatmap, domínio) · `todo` · deps: T-170 · parallel: yes
+files: `lib/features/reports/domain/spending_heatmap.dart` (novo), `test/features/reports/spending_heatmap_test.dart` (novo)
+contrato: SPEC §5.31 parte `spending_heatmap.dart` (`DaySpending`, `SpendingHeatmap` com `levelOf`/`maxDay`/`totalCents`/`activeDays`, `spendingHeatmap`, limiares por quantil).
+aceite:
+- Exemplo de heatmap de §5.31 inteiro (8 dias, limiares, níveis, `maxDay`, total), dia único e período sem despesas.
+- `maxDay` com empate (dois dias de 8000) → o mais antigo.
+- Transação com hora (`DateTime(2026, 11, 3, 23, 59)`) cai no dia 03/11; `from`/`to` inclusivos.
+- `ReportFilter(flow: income)` → mesmo resultado do padrão (flow ignorado); despesa provisionada só entra com `includePlanned`.
+
+### T-175 · Top estabelecimentos (domínio) · `todo` · deps: T-170 · parallel: yes
+files: `lib/features/reports/domain/merchant_report.dart` (novo), `test/features/reports/merchant_report_test.dart` (novo)
+contrato: SPEC §5.31 parte `merchant_report.dart` (`MerchantTotal`, `merchantKey`, `topMerchants`; memo local de `merchantKey` por texto bruto). Reusa `normalizeDescription`/`foldText` (§3.7) e `ruleSubject` (`features/rules/domain/rule_engine.dart`).
+aceite:
+- Exemplo de estabelecimentos de §5.31 (3 cenários) com `label`, `purchaseCount`, `averageCents` e `lastDate` exatos.
+- `merchantKey`: `importedDescription` vence `description`; descrição só de dígitos sem `importedDescription` → `foldText` da descrição.
+- Empate de total → mais compras primeiro; empate de total e compras → `key` asc.
+- `categoryId` vem da transação mais recente (empate de data → maior `id`).
+
+### T-176 · Pivot categoria × mês (domínio) · `todo` · deps: T-172 · parallel: yes
+files: `lib/features/reports/domain/category_pivot.dart` (novo), `test/features/reports/category_pivot_test.dart` (novo)
+contrato: SPEC §5.29 inteiro (`PivotRow`, `CategoryPivot` com `maxCellCents`, `categoryPivot`, `PivotSortKey`, `sortPivotRows`). Entrada é a `MonthCategoryTotals` de T-172.
+aceite:
+- Exemplo de §5.29 completo (cells, totais, `columnTotals`, `grandTotalCents`, `maxCellCents`) e as 4 ordenações.
+- `sortPivotRows` devolve lista nova (a original intacta); `null` por último e `isDirect` por último entre as filhas em qualquer ordenação.
+- Soma de `columnTotals` == `grandTotalCents` == soma dos `totalCents` das raízes; soma das filhas == total do pai.
+- `months` sem dados → `rows` vazio, zeros, `maxCellCents == 0`.
+
+### T-177 · CSV dos relatórios (domínio) · `todo` · deps: T-171, T-172, T-173, T-174, T-175, T-176, T-153 · parallel: yes (com T-186)
+files: `lib/features/reports/domain/report_csv.dart` (novo), `test/features/reports/report_csv_test.dart` (novo)
+contrato: SPEC §5.32 bloco de código e exemplos (`reportCsv` e os 7 `*CsvRows`). Valores com `formatCsvMoney`, texto com `csvText`, `formatDate`, `formatMonth`, `formatPercent` (null → ''), rótulos com `reportCategoryLabel`. `NetWorthPoint` de `features/net_worth/domain/net_worth.dart`.
+aceite:
+- Todos os exemplos de §5.32 (linhas do comparativo com e sem `includeChildren`, Total, início exato do texto da tendência, Total do pivot, heatmap, estabelecimento sem categoria, proteção de fórmula).
+- Cabeçalhos exatos dos 7 relatórios; nº de linhas = cabeçalho + itens (+ 'Total' onde o SPEC define).
+- `netWorthCsvRows` com o ponto de out/2026 de §5.26 → `['out/2026', '31/10/2026', '8700,00', '42000,00', '500,00', '800,00', '1200,00', '49200,00']`.
+- `fixedVariableCsvRows` do exemplo de §5.30: linha nov `['nov/2026', '1540,00', '200,00', '1740,00', '260,00', '2000,00', '87,0%']`; Total `['Total', '3080,00', '400,00', '3480,00', '720,00', '4200,00', '82,9%']`.
+
+### T-178 · Teste de desempenho dos relatórios · `todo` · deps: T-172, T-173, T-174, T-175, T-176, T-177 · parallel: yes (com T-179)
+files: `test/features/reports/reports_performance_test.dart` (novo)
+contrato: SPEC §5.32 parágrafo **Desempenho** (base sintética `Random(42)`, 20.000 transações × 24 meses, dois filtros, lista de medições). Gerador local no próprio arquivo, sem dado real; transações pelo construtor de `Transaction` e `buildInstallments`.
+aceite:
+- Base com exatamente 20.000 transações em 2024-12..2026-11 (assert no teste) e as proporções do SPEC (±2 pontos percentuais, assert).
+- Cada medição dos dois filtros < 300 ms (`expect(sw.elapsedMilliseconds, lessThan(300), reason: '<relatório>')`).
+- Sanidade: com o filtro (a), `categoryPivot(...).grandTotalCents` == soma das despesas não provisionadas da base; `topMerchants` não vazio.
+- Se algum relatório passar de 300 ms: otimizar a função de domínio (sem mudar contrato), nunca afrouxar o limite.
+
+### T-179 · `ReportsController` (cache por filtro) · `todo` · deps: T-177, T-154 · parallel: yes (com T-178)
+files: `lib/features/reports/presentation/reports_controller.dart` (novo), `test/features/reports/reports_controller_test.dart` (novo)
+contrato: SPEC §6.4 inteiro (API, regras 1–4). `ChangeNotifier` (`package:flutter/foundation.dart` só aqui; domínio continua puro).
+aceite (`bootstrap` em memória com `clock` 15/11/2026; dados de §5.28 e §5.30 gravados):
+- `identical(c.trend, c.trend)`, idem `pivot`, `comparison`, `merchants`, `heatmap`, `fixedVariable`.
+- `c.filter = ReportFilter(preset: last3)` → notifica 1×, `range == (2026-09, 2026-11)`, `trend.length == 3`; atribuir filtro igual (`==`) → não notifica.
+- `transactions.upsert` de despesa nova em nov → controller notifica e `pivot.grandTotalCents` muda; depois de `c.dispose()`, novo `upsert` não lança.
+- Simples: `effectiveFilter == filter.periodOnly` (com `cardIds` no filtro, os números ignoram o cartão); `available == kSimpleReports`; `selected = pivot` → `current == trend`.
+- Ultra: `averageMonths = 6` → `comparison.averageMonths == 6`; `averageMonths = 5` → ignorado; Simples usa 3.
+- `heatmap.to` == 15/11/2026 sem provisionados e 30/11/2026 com `includePlanned`.
+- `netWorth` com `last3` → 3 pontos (set, out, nov) iguais aos últimos 3 de `ledger.netWorthHistory`.
+- `csvFileName(trend)` com `last3` == 'finme-tendencia-2026-09_2026-11.csv'; `csvFileName(categoryComparison)` == 'finme-comparativo-categorias-2026-11.csv'; `csvFor(pivot)` começa com 'Categoria;set/2026;out/2026;nov/2026;Total'.
+- `ignoredFor(netWorth)` com `cardIds` (Ultra) → ['contas e cartões'].
+
+### T-180 · Barra de filtros dos relatórios · `todo` · deps: T-170 · parallel: yes
+files: `lib/features/reports/presentation/report_filter_bar.dart` (novo), `test/features/reports/report_filter_bar_test.dart` (novo)
+contrato: SPEC §7.3 "Relatórios (Fase 12)", bloco **`ReportFilterBar`** (`ReportFilterBar`, `showReportMultiSelect`). Cores via `context.colors`; diálogo com guarda contra duplo pop.
+aceite (contas 'Conta A' e 'Conta Velha' arquivada; cartão 'Cartão K'; árvore de §5.20; tags ['Viagem', 'casa']):
+- Simples: só `report-period` e `report-range` ('dez/2025 – nov/2026' com `last12`); nenhum `report-filter-*`, `report-flow`, `report-planned`.
+- Escolher 'Personalizado' → `onChanged` com `preset custom`; com custom aparecem `report-from`/`report-to` e mudar 'De' chama `onChanged` com `customFrom` novo.
+- Ultra: `report-filter-accounts` abre o diálogo com 'Conta A', 'Conta Velha (arquivada)' e 'Cartão K'; marcar 'Conta A' e 'Cartão K' + 'Aplicar' → `accountIds {A}`, `cardIds {K}`; com esse filtro o botão mostra 'Contas e cartões: 2'.
+- Categorias: opções com 'Alimentação › Mercado' indentada; 'Limpar' → `categoryIds {}`; 'Cancelar' → `onChanged` não é chamado.
+- Tags: selecionar 'Viagem' → `tagKeys {VIAGEM}`; sem tags o botão fica desabilitado.
+- `report-flow` 'Receitas' → `flow income` com `categoryIds` vazio; `report-planned` → `includePlanned true`; `report-clear` só aparece com `hasScopeFilters` e devolve `periodOnly`.
+
+### T-181 · View do comparativo por categoria · `todo` · deps: T-172 · parallel: yes
+files: `lib/features/reports/presentation/category_comparison_view.dart` (novo), `test/features/reports/category_comparison_view_test.dart` (novo)
+contrato: SPEC §7.3 "Relatórios (Fase 12)", bloco **`CategoryComparisonView`** e a regra de ordenação por cabeçalho. `SortableHeaderLabel`, `DeltaBadge`, `MoneyText`, `EmptyState`, `AppMotion`.
+aceite (dados de §5.28 via `categoryComparison`):
+- Ultra: 'Mês de referência: Novembro 2026 (até hoje)'; linhas Alimentação, Transporte, Sem categoria nessa ordem; 'R$ 516,67' na média de Alimentação; Total 'R$ 830,00'.
+- `comparison-expand-ali` → aparecem 'Mercado', 'Restaurante', '(sem subcategoria)'; tocar de novo → somem.
+- Clicar no cabeçalho do mês anterior → desc (Alimentação 75000, Transporte 20000) e 'Sem categoria' continua por último; 2º clique → asc.
+- `comparison-average` 'Média 6 meses' → chama `onAverageMonthsChanged(6)`.
+- Simples: sem `comparison-average`, sem chevron, sem colunas 'Média'/'Vs. média'.
+- `hideValues` → nenhum valor em claro; `rows` vazio → 'Sem lançamentos no período com estes filtros.'.
+
+### T-182 · View de tendência · `todo` · deps: T-173 · parallel: yes
+files: `lib/features/reports/presentation/trend_view.dart` (novo), `test/features/reports/trend_view_test.dart` (novo)
+contrato: SPEC §7.3 "Relatórios (Fase 12)", bloco **`TrendView`** (`TrendView`, `trendTooltipText`). fl_chart como em `forecast_chart.dart`/`net_worth_chart.dart`; sem gradiente.
+aceite (pontos de §5.30):
+- `trendTooltipText(nov)` == 'Novembro 2026\nReceitas: R$ 5.200,00\nDespesas: R$ 830,00\nSaldo do mês: R$ 4.370,00'; `hideValues` → 'R$ ••••' nas 3.
+- Ultra: 1 `BarChart` e 1 `LineChart`; `trend-average` ligado → o `LineChart` tem 3 linhas; desligado → 1.
+- Simples: só o `BarChart`, sem `trend-average`.
+- Tabela: 'set/2026' … 'nov/2026' e rodapé 'Total' com 'R$ 15.200,00' em receitas.
+- Saldo negativo num mês → `extraLinesData.horizontalLines` não vazio no `LineChart`; todos zero → `EmptyState`.
+
+### T-183 · View fixo × variável · `todo` · deps: T-173 · parallel: yes
+files: `lib/features/reports/presentation/fixed_variable_view.dart` (novo), `test/features/reports/fixed_variable_view_test.dart` (novo)
+contrato: SPEC §7.3 "Relatórios (Fase 12)", bloco **`FixedVariableView`** (`FixedVariableView`, `fixedVariableTooltipText`).
+aceite (meses de §5.30):
+- `fixedVariableTooltipText(nov)` == 'Novembro 2026\nRecorrentes: R$ 1.540,00\nParcelas: R$ 200,00\nVariável: R$ 260,00\nFixo: 87,0% do total'; mês vazio → última linha 'Fixo: –'.
+- `BarChart` com `rodStackItems` de 3 itens por barra.
+- Tabela com '79,1%' em out, '87,0%' em nov e rodapé 'Total' com '82,9%'.
+- Apoio 'Fixo = lançamentos de recorrências e parcelas. Variável = o resto.'; tudo zero → `EmptyState`.
+
+### T-184 · View gasto por dia (heatmap) · `todo` · deps: T-174 · parallel: yes
+files: `lib/features/reports/presentation/heatmap_view.dart` (novo), `test/features/reports/heatmap_view_test.dart` (novo)
+contrato: SPEC §7.3 "Relatórios (Fase 12)", bloco **`HeatmapView`** (`HeatmapView`, `heatmapTooltipText`; grade por `offset = from.weekday % 7`, dias via `DateTime(y, m, d + i)`, diferença por `DateTime.utc`).
+aceite (heatmap de §5.31, 01/11..30/11/2026):
+- 30 células `heatmap-day-*`; `heatmap-day-20261101` (domingo) na linha 0 da coluna 0 e `heatmap-day-20261130` (segunda) na linha 1 da coluna 4 (comparar `getTopLeft`).
+- `heatmapTooltipText(03/11, (3000, 2))` == '03/11/2026 · R$ 30,00 · 2 transações'; count 1 → '1 transação'; sem gasto → '03/11/2026 · sem gastos'; `hideValues` → 'R$ ••••'.
+- Resumo 'Total R$ 360,00 · 8 dias com gasto · Maior dia: 08/11 (R$ 80,00)'.
+- Intervalo de 12 meses (01/12/2025..30/11/2026) renderiza sem exceção e rola na horizontal; sem dias → `EmptyState`.
+
+### T-185 · View top estabelecimentos · `todo` · deps: T-175 · parallel: yes
+files: `lib/features/reports/presentation/merchants_view.dart` (novo), `test/features/reports/merchants_view_test.dart` (novo)
+contrato: SPEC §7.3 "Relatórios (Fase 12)", bloco **`MerchantsView`** e a regra de ordenação por cabeçalho.
+aceite (lista de §5.31 com período set..nov):
+- Ultra: 'LOJA EXEMPLO' primeiro; colunas 'Ticket médio', 'Última compra', 'Categoria'; 'iFood*Restaurante 12/11' com apoio 'IFOOD RESTAURANTE'; rodapé '4 estabelecimentos'.
+- Clicar 'Compras' → desc: 'Uber Trip' (3) primeiro.
+- Simples: só Estabelecimento, Total e Compras.
+- 60 estabelecimentos → 50 linhas e `merchants-show-all` 'Mostrar todos (60)'; tocar → 60 (rolando a lista).
+- Vazio → 'Sem compras no período com estes filtros.'.
+
+### T-186 · View pivot categoria × mês · `todo` · deps: T-176 · parallel: yes (com T-177)
+files: `lib/features/reports/presentation/pivot_view.dart` (novo), `test/features/reports/pivot_view_test.dart` (novo)
+contrato: SPEC §7.3 "Relatórios (Fase 12)", bloco **`PivotView`** (cabeçalho e rodapé fixos, rolagem horizontal única, `sortPivotRows`, fundo por `maxCellCents`) e a regra de ordenação por cabeçalho.
+aceite (pivot de §5.29):
+- Linhas `pivot-row-ali`, `pivot-row-tra`, `pivot-row-none` nessa ordem; rodapé 'Total' com 'R$ 2.780,00'; célula zero mostra '–'.
+- `pivot-sort-0` (ago, coluna nova → desc) → mesma ordem; `pivot-sort-total` 1× (coluna já ativa → inverte) → Transporte antes de Alimentação; `pivot-sort-label` → Alimentação, Transporte, Sem categoria.
+- `pivot-expand-ali` → linhas 'Mercado', 'Restaurante', '(sem subcategoria)' abaixo de Alimentação.
+- Janela de 800 px com 24 meses → existe rolagem horizontal e o cabeçalho continua visível depois de arrastar a lista na vertical (`find.text('Categoria')` na mesma posição).
+- Vazio → `EmptyState`.
+
+### T-187 · View evolução do patrimônio · `todo` · deps: T-153, T-158 · parallel: yes
+files: `lib/features/reports/presentation/net_worth_report_view.dart` (novo), `test/features/reports/net_worth_report_view_test.dart` (novo)
+contrato: SPEC §7.3 "Relatórios (Fase 12)", bloco **`NetWorthReportView`**; reusa `NetWorthChart` (Fase 11) sem alterá-lo.
+aceite (3 pontos de §5.26):
+- Um `NetWorthChart` com os 3 pontos; tabela com 'set/2026', 'out/2026', 'nov/2026'; 'R$ 46.700,00' no líquido de nov; variação de nov '-R$ 2.500,00'; set '–'.
+- Texto de apoio 'Histórico disponível: últimos 24 meses. …' presente.
+- Lista vazia → 'Sem histórico de patrimônio no período.'; `hideValues` → nenhum valor em claro.
+
+### T-188 · Página Relatórios · `todo` · deps: T-179, T-180, T-181, T-182, T-183, T-184, T-185, T-186, T-187 · parallel: no
+files: `lib/features/reports/presentation/reports_page.dart` (novo), `test/features/reports/reports_page_test.dart` (novo)
+contrato: SPEC §7.3 "Relatórios (Fase 12)": tabela Simples/Ultra, `reportKindIcon`, bloco **`ReportsPage`** (cabeçalho, filtros fixos, lista lateral, `report-ignored`, `AnimatedSwitcher`, export com `SaveReportCsv` injetável) e o mapeamento kind → view com os dados do controller (§6.4). Filtros: `onChanged: (f) => controller.filter = f`; contas/cartões de `services`, tags de `ledger.allTags`.
+aceite (app de teste, `ReportsController` criado no teste; dados de §5.28):
+- Ultra: 7 itens `report-tab-*` na ordem de `kUltraReports`; tocar `report-tab-pivot` mostra `PivotView`; `report-tab-netWorth` mostra `NetWorthReportView`.
+- Simples: 3 itens (Tendência, Top estabelecimentos, Comparativo por categoria) e a barra só com período; com `selected = pivot` a página abre em Tendência.
+- Ultra com `flow income` no relatório Tendência → `report-ignored` 'Filtros ignorados neste relatório: tipo'; sem filtros ignorados → ausente.
+- Mudar `report-period` para '3 meses' → `TrendView` com 3 meses (tabela 'set/2026'..'nov/2026').
+- `report-export` com `saveCsv` falso → recebe `controller.csvFileName(current)` e um texto que começa com '﻿' + o cabeçalho do relatório; SnackBar 'CSV exportado.'; `saveCsv` que lança → 'Não foi possível exportar o CSV.'; devolve `false` → sem SnackBar.
+- Sem transações → cada um dos 7 relatórios (Ultra) mostra seu `EmptyState` sem exceção.
+
+### T-189 · Shell e paleta: página Relatórios e comandos por relatório · `todo` · deps: T-188, T-164 (Fase 11 fechada) · parallel: no
+files: `lib/app/home_shell.dart`, `lib/app/app_commands.dart`, `test/app/smoke_test.dart`, `test/app/app_commands_test.dart`
+contrato: SPEC §7.3 "Páginas (índice)" (10 Relatórios) e "Relatórios (Fase 12)" (navegação: `Icons.insights_outlined`, `_sidebarOrder = [0, 1, 2, 3, 9, 4, 5, 6, 7, 10, 8]`, `number: null`, sem badge; parágrafo **Paleta**: `onOpenReport`, entradas por relatório no grupo 'Relatórios'), §6.4 (shell cria o `ReportsController` uma vez, preguiçoso, e o descarta no `dispose`). `_pageFor(10) => ReportsPage(controller: _reports)`. `GoToPageIntent`/`app_shortcuts.dart` não mudam.
+aceite:
+- Smoke test (larga e estreita, Simples e Ultra) navega as 11 páginas sem exceção; na larga, 'Relatórios' fica entre 'Categorias' e 'Ajustes' (`getTopLeft(...).dy`); as 9 primeiras páginas mantêm 'Atalho: {i+1}'; tecla '9' continua indo para Ajustes.
+- Filtro escolhido na página Relatórios ('3 meses') continua aplicado depois de ir para o Painel e voltar.
+- `buildAppCommands`: 'Ir para Relatórios' sem `shortcut`; Ultra com 7 entradas 'Relatório: …' no grupo 'Relatórios' logo depois de 'Nova dívida (devo / me devem)'; Simples com 3; `fuzzyRank` com 'heatmap' acha 'Relatório: Gasto por dia' e com 'onde gasto' acha 'Relatório: Top estabelecimentos'; `onRun` chama `onOpenReport` com o `ReportKind` certo.
+- Pela paleta, 'Relatório: Categoria × mês' abre a página Relatórios com o pivot selecionado.
+
+### T-190 · Documentação da Fase 12 e fechamento da v3 · `todo` · deps: T-170..T-189 · parallel: no
+files: `CONTEXT.md`, `ROADMAP.md`, `docs/BACKLOG.md`
+contrato: CONTEXT revisado para o estado final da v3 (cabeçalho com a data; título e §1 como "FinMe v3", sem "rewrite em andamento"), §4 (árvore com `features/reports/` e seus arquivos; `home_shell.dart` com 11 páginas), §5 (página Relatórios índice 10 entre Categorias e Ajustes, sem atalho; os 7 relatórios e a tabela Simples/Ultra; paleta com comandos por relatório), §6 (regras dos relatórios: só transações gravadas; estorno, transferência e pagamento de fatura fora; comparativo com mês de referência = fim do período; fixo = recorrência ou parcela; patrimônio com 24 meses), §7 (sem box nova; CSV de relatórios `;` + vírgula + BOM, valores reais mesmo com valores ocultos), §8 (testes novos, teste de desempenho, total), §10 (commits das Fases 7–12), §11 (status: v3 concluída, Fases 7–12), §12 (limites: filtro de relatório não persiste entre execuções; comparativo do mês atual é parcial ("até hoje") contra o mês anterior cheio; estornos não abatem gasto nos relatórios, igual ao Painel; categoria apagada aparece como 'Categoria removida'; relatórios não incluem recorrências projetadas; ordenação por clique não muda o CSV; heatmap começa a semana no domingo; `backup_service.dart` mantém cópias privadas de `formatCsvMoney`/`csvText`). ROADMAP: Fases 11 e 12 em "v3", v3 marcada como concluída, próximos passos pós-v3. BACKLOG: T-170..T-189 `done`.
 aceite: total de testes igual ao de `flutter test`; `bash tool/check.sh` → `CHECK OK`.

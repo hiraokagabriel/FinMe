@@ -105,6 +105,7 @@ class ForecastService {
 
   /// Previsão de [months] meses a partir de [today] (mês atual incluso). O horizonte
   /// vai até [horizonEnd]; `months` continua com exatamente [months] entradas.
+  /// [extraEvents] são eventos prontos de fora (ex.: dívidas "devo", SPEC §5.25).
   static Forecast compute({
     required List<Account> accounts,
     required List<PaymentCard> cards,
@@ -113,6 +114,7 @@ class ForecastService {
     required DateTime today,
     int months = 6,
     int minDays = 0,
+    Iterable<ForecastEvent> extraEvents = const [],
   }) {
     final day = dateOnly(today);
     final end = horizonEnd(today: day, months: months, minDays: minDays);
@@ -224,6 +226,25 @@ class ForecastService {
           ),
         );
       }
+    }
+
+    for (final e in extraEvents) {
+      final d = dateOnly(e.date);
+      if (d.isAfter(end)) {
+        continue;
+      }
+      events.add(
+        ForecastEvent(
+          date: d.isBefore(day) ? day : d,
+          amountCents: e.amountCents,
+          description: e.description,
+          kind: e.kind,
+          sourceId: e.sourceId,
+          accountId: e.accountId,
+          toAccountId: e.toAccountId,
+          isProjected: e.isProjected,
+        ),
+      );
     }
 
     events.sort((a, b) {
