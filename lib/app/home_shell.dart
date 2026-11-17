@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/models/app_settings.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/app_spacing.dart';
+import '../core/widgets/bank_avatar.dart';
 import '../features/accounts/presentation/accounts_page.dart';
 import '../features/cards/domain/invoice.dart';
 import '../features/cards/domain/payment_card.dart';
@@ -30,6 +31,7 @@ import 'app_commands.dart';
 import 'app_scope.dart';
 import 'app_shortcuts.dart';
 import 'command_palette.dart';
+import 'profile_registry.dart';
 
 const _collapseBreakpoint = 900.0;
 const _sidebarWidth = 220.0;
@@ -98,6 +100,23 @@ class _HomeShellState extends State<HomeShell> {
   void initState() {
     super.initState();
     FocusManager.instance.addListener(_reclaimFocus);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _announceRecovery());
+  }
+
+  /// Aviso único de import de backup restaurado no boot (SPEC §9.13): zera a flag para não repetir.
+  void _announceRecovery() {
+    final services = AppScope.of(context);
+    if (!mounted || !services.restoredFromJournal) {
+      return;
+    }
+    services.restoredFromJournal = false;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'A última importação de backup não terminou. Os dados anteriores foram restaurados.',
+        ),
+      ),
+    );
   }
 
   @override
@@ -375,12 +394,7 @@ class _Sidebar extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.all(AppSpace.lg),
-          child: collapsed
-              ? Center(child: Text('F', style: textTheme.titleLarge))
-              : Text('FinMe', style: textTheme.titleLarge),
-        ),
+        _ProfileHeader(collapsed: collapsed),
         _SearchEntry(collapsed: collapsed, onTap: onSearch),
         Expanded(
           child: ListView.builder(
@@ -420,6 +434,79 @@ class _Sidebar extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// Topo da sidebar: perfil aberto e "Trocar perfil" (SPEC §10.5). Sem `ProfileScope` (testes), só o nome do app.
+class _ProfileHeader extends StatelessWidget {
+  const _ProfileHeader({required this.collapsed});
+
+  final bool collapsed;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final scope = ProfileScope.maybeOf(context);
+    if (scope == null) {
+      return Padding(
+        padding: const EdgeInsets.all(AppSpace.lg),
+        child: collapsed
+            ? Center(child: Text('F', style: textTheme.titleLarge))
+            : Text('FinMe', style: textTheme.titleLarge),
+      );
+    }
+    return ListenableBuilder(
+      listenable: scope.registry,
+      builder: (context, _) {
+        final name = scope.registry.byId(scope.activeId)?.name ?? 'FinMe';
+        return Padding(
+          padding: const EdgeInsets.all(AppSpace.sm),
+          child: PopupMenuButton<void>(
+            key: const ValueKey('sidebar-profile'),
+            tooltip: collapsed ? 'Perfil: $name' : 'Perfil',
+            position: PopupMenuPosition.under,
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                onTap: scope.switchProfile,
+                child: const ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.swap_horiz),
+                  title: Text('Trocar perfil'),
+                ),
+              ),
+            ],
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpace.sm),
+              child: Row(
+                mainAxisAlignment: collapsed
+                    ? MainAxisAlignment.center
+                    : MainAxisAlignment.start,
+                children: [
+                  BankAvatar(bankName: name, size: 28),
+                  if (!collapsed) ...[
+                    const SizedBox(width: AppSpace.sm),
+                    Expanded(
+                      child: Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.titleSmall,
+                      ),
+                    ),
+                    Icon(
+                      Icons.unfold_more,
+                      size: 16,
+                      color: context.colors.textSecondary,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

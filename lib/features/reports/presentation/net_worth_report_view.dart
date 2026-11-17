@@ -9,7 +9,7 @@ import '../../net_worth/domain/net_worth.dart';
 import '../../net_worth/presentation/net_worth_chart.dart';
 
 const _apoio =
-    'Histórico disponível: últimos 24 meses. Filtros de conta, categoria, '
+    'Filtros de conta, categoria, '
     'tag, tipo e provisionados não se aplicam ao patrimônio. '
     'A pagar e dívida de cartão aparecem negativos aqui e positivos no CSV.';
 

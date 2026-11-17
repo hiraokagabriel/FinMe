@@ -220,11 +220,30 @@ void main() {
     expect(_dayCells(), findsNWidgets(365));
     expect(
       find.byWidgetPredicate(
-        (w) =>
-            w is SingleChildScrollView && w.scrollDirection == Axis.horizontal,
+        (w) => w is ListView && w.scrollDirection == Axis.horizontal,
       ),
       findsOneWidget,
     );
+  });
+
+  testWidgets('60 meses monta só as colunas visíveis e rola até o fim', (
+    tester,
+  ) async {
+    final heatmap = spendingHeatmap(
+      [_tx(1000, DateTime(2021, 12, 1)), _tx(2000, DateTime(2026, 11, 30))],
+      ReportFilter(),
+      from: DateTime(2021, 12, 1),
+      to: DateTime(2026, 11, 30),
+      tree: _tree,
+    );
+    await _pump(tester, heatmap, width: 800);
+    expect(tester.takeException(), isNull);
+    expect(_dayCells().evaluate().length, lessThan(400));
+
+    await tester.drag(find.byType(ListView), const Offset(-100000, 0));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const ValueKey('heatmap-day-20261130')), findsOneWidget);
   });
 
   testWidgets('sem gastos mostra EmptyState', (tester) async {

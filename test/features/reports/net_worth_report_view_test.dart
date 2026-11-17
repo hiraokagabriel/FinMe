@@ -91,7 +91,7 @@ void main() {
     expect(_cell('–'), findsOneWidget);
     expect(
       find.textContaining('Histórico disponível: últimos 24 meses.'),
-      findsOneWidget,
+      findsNothing,
     );
   });
 

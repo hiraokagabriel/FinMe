@@ -69,6 +69,10 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
   bool _tagsTouched = false;
   // Tags vieram da regra (helper 'Tags da regra').
   bool _tagsFromRule = false;
+  // renameTo da regra, só em lançamento novo e só se difere do texto digitado.
+  String? _rename;
+  // Usuário tocou 'Manter como digitado': a descrição não é trocada até mudar de novo.
+  bool _renameKept = false;
   String? _accountId;
   String? _cardId;
   late bool _planned;
@@ -172,7 +176,13 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
     );
     final id = r.categoryId;
     final valid = id != null && _categoriesFor(s).any((cat) => cat.id == id);
+    final rename = r.renamedDescription?.trim();
     setState(() {
+      _renameKept = false;
+      _rename =
+          _isNew && rename != null && rename.isNotEmpty && rename != text.trim()
+          ? rename
+          : null;
       if (!_categoryTouched) {
         if (valid) {
           _categoryId = id;
@@ -185,12 +195,31 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
           _suggestion = null;
         }
       }
-      if (_isNew && !_tagsTouched && _ultra) {
+      // No Simples o campo de tags some, mas a regra ainda vale ao salvar.
+      if (_isNew && !_tagsTouched) {
         _tags = r.tags;
         _tagsFromRule = r.tags.isNotEmpty;
       }
     });
   }
+
+  /// Aviso de rename da regra, com a saída 'Manter como digitado'.
+  Widget _renameHint(BuildContext context, String renamed) => Row(
+    children: [
+      Expanded(
+        child: Text(
+          'Será salvo como "$renamed" (regra)',
+          key: const ValueKey('form-rename-hint'),
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ),
+      TextButton(
+        key: const ValueKey('form-rename-keep'),
+        onPressed: () => setState(() => _renameKept = true),
+        child: const Text('Manter como digitado'),
+      ),
+    ],
+  );
 
   void _setOrigin(String? key) {
     setState(() {
@@ -239,12 +268,14 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
     final init = widget.initial;
     final notes = _notes.text.trim();
     final hasAccount = _accountId != null;
+    final typed = _description.text.trim();
+    final rename = _renameKept ? null : _rename;
     final tx = Transaction(
       id: _id,
       type: _type,
       amountCents: cents,
       date: _date,
-      description: _description.text.trim(),
+      description: rename ?? typed,
       categoryId: _categoryId,
       accountId: _accountId,
       cardId: _cardId,
@@ -260,7 +291,7 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
       recurringId: init?.recurringId,
       notes: notes.isEmpty ? null : notes,
       externalId: init?.externalId,
-      importedDescription: init?.importedDescription,
+      importedDescription: rename != null ? typed : init?.importedDescription,
       tags: _tags,
     );
     setState(() => _saving = true);
@@ -352,6 +383,8 @@ class _TransactionFormDialogState extends State<_TransactionFormDialog> {
                   validator: (v) =>
                       (v ?? '').trim().isEmpty ? 'Informe a descrição' : null,
                 ),
+                if (_rename != null && !_renameKept)
+                  _renameHint(context, _rename!),
                 const SizedBox(height: AppSpace.md),
                 AbsorbPointer(
                   absorbing: fixed,

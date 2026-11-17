@@ -90,15 +90,29 @@ _Closing _closingAfter(DateTime date, PaymentCard card, int k) {
   final from = _windowStart(month, card);
   var to = month.addMonths(k + 2);
   while (true) {
-    final after = [
-      for (final c in _closings(card, from, to))
-        if (day.isBefore(c.closing)) c,
-    ];
-    if (after.length > k) {
-      return after[k];
+    final line = _closings(card, from, to);
+    final first = _firstAfter(line, day);
+    if (first + k < line.length) {
+      return line[first + k];
     }
     to = to.addMonths(12);
   }
+}
+
+/// Índice do primeiro fechamento de [line] com data posterior a [day] (busca binária: a linha
+/// está em ordem crescente de data, então o predicado é monotônico).
+int _firstAfter(List<_Closing> line, DateTime day) {
+  var lo = 0;
+  var hi = line.length;
+  while (lo < hi) {
+    final mid = (lo + hi) ~/ 2;
+    if (day.isBefore(line[mid].closing)) {
+      hi = mid;
+    } else {
+      lo = mid + 1;
+    }
+  }
+  return lo;
 }
 
 /// Fechamento mantido cujo vencimento é [dueMonth], ou null se o mês não tem fechamento.
@@ -121,10 +135,20 @@ YearMonth _windowStart(YearMonth month, PaymentCard card) {
   return (month < firstBoundary ? month : firstBoundary).prev();
 }
 
+/// Linhas já calculadas por instância de cartão (SPEC §9.2), indexadas pela janela [from, to].
+/// `PaymentCard` é imutável: `copyWith` cria instância nova e linha nova.
+final _closingLines = Expando<Map<(YearMonth, YearMonth), List<_Closing>>>();
+
+/// Linha de fechamentos mantidos com mês entre [from] e [to], memoizada por cartão e janela.
+List<_Closing> _closings(PaymentCard card, YearMonth from, YearMonth to) {
+  final lines = _closingLines[card] ??= {};
+  return lines.putIfAbsent((from, to), () => _buildClosings(card, from, to));
+}
+
 /// Linha de fechamentos mantidos com mês entre [from] e [to] (SPEC §5.1, regras 1–3), em ordem de data.
 /// `cycleHistory[i]` vale até `until` (exclusivo); o ciclo atual vale a partir do último `until`.
 /// Descarta fechamento cujo vencimento não passa do último mantido: cada mês de vencimento tem um só.
-List<_Closing> _closings(PaymentCard card, YearMonth from, YearMonth to) {
+List<_Closing> _buildClosings(PaymentCard card, YearMonth from, YearMonth to) {
   final segments =
       <({DateTime? since, DateTime? until, int closingDay, int dueDay})>[];
   DateTime? since;

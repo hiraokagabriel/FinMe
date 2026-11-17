@@ -7,9 +7,11 @@ import 'package:finme/core/models/app_settings.dart';
 import 'package:finme/core/models/year_month.dart';
 import 'package:finme/core/services/backup_service.dart';
 import 'package:finme/core/services/record_store.dart';
+import 'package:finme/core/services/recovery_journal.dart';
 import 'package:finme/core/utils/date_utils.dart';
 import 'package:finme/features/debts/domain/debt.dart';
 import 'package:finme/features/goals/domain/goal.dart';
+import 'package:finme/features/importing/domain/import_batch.dart';
 import 'package:finme/features/importing/domain/import_profile.dart';
 import 'package:finme/features/importing/domain/merchant_dictionary.dart';
 import 'package:finme/features/net_worth/domain/asset.dart';
@@ -59,13 +61,28 @@ List<Object?> _state(AppServices s) => [
   [for (final d in s.debts.all) d.toMap()],
 ];
 
+/// Falha em toda gravação enquanto [broken] for true (o rollback também falha).
+class _BrokenStore extends MemoryRecordStore {
+  bool broken = false;
+
+  @override
+  Future<void> putAll(Map<String, Map<String, dynamic>> entries) async {
+    if (broken) {
+      throw StateError('disco quebrado');
+    }
+    return super.putAll(entries);
+  }
+}
+
 Future<AppServices> _bootstrap({
   bool demo = true,
   Map<String, RecordStore> stores = const {},
+  RecoveryJournal? journal,
 }) async {
   final s = await bootstrap(
     storeFactory: (box) => stores[box] ?? MemoryRecordStore(),
     clock: _now,
+    journal: journal,
   );
   if (demo) {
     await seedDemo(s);
@@ -774,4 +791,168 @@ void main() {
       expect(dst.settings.value.mode, AppMode.ultra);
     });
   }
+
+  group('import recuperável (SPEC §9.13)', () {
+    test('import ok apaga o retrato e os lotes de importação', () async {
+      final src = await _bootstrap();
+      final journal = MemoryRecoveryJournal();
+      final dst = await _bootstrap(demo: false, journal: journal);
+      await dst.importBatches.upsert(
+        ImportBatch(id: 'lote', createdAt: _now(), label: 'antigo.csv'),
+      );
+
+      await BackupService.importJson(dst, BackupService.exportJson(src));
+
+      expect(await journal.read(), isNull);
+      expect(dst.importBatches.all, isEmpty);
+    });
+
+    test(
+      'falha ao gravar o retrato: lança e nenhum repositório muda',
+      () async {
+        final src = await _bootstrap();
+        final journal = MemoryRecoveryJournal()..failWrites = true;
+        final dst = await _bootstrap(journal: journal);
+        final antes = _state(dst);
+
+        await expectLater(
+          BackupService.importJson(dst, BackupService.exportJson(src)),
+          throwsStateError,
+        );
+
+        expect(_state(dst), antes);
+        expect(await journal.read(), isNull);
+      },
+    );
+
+    test(
+      'falha no meio com rollback completo: estado anterior e sem retrato',
+      () async {
+        final src = await _bootstrap();
+        final journal = MemoryRecoveryJournal();
+        final flaky = _FlakyStore();
+        final dst = await _bootstrap(
+          stores: {'fm_transactions': flaky},
+          journal: journal,
+        );
+        final antes = _state(dst);
+        flaky.failNext = true;
+
+        await expectLater(
+          BackupService.importJson(dst, BackupService.exportJson(src)),
+          throwsA(isA<StateError>()),
+        );
+
+        expect(_state(dst), antes);
+        expect(await journal.read(), isNull);
+      },
+    );
+
+    test(
+      'rollback incompleto: o retrato do estado anterior fica no journal',
+      () async {
+        final src = await _bootstrap();
+        final journal = MemoryRecoveryJournal();
+        final broken = _BrokenStore();
+        final dst = await _bootstrap(
+          stores: {'fm_transactions': broken},
+          journal: journal,
+        );
+        final antes = BackupService.exportJson(dst);
+        broken.broken = true;
+
+        await expectLater(
+          BackupService.importJson(dst, BackupService.exportJson(src)),
+          throwsA(isA<StateError>()),
+        );
+
+        expect(await journal.read(), antes);
+      },
+    );
+
+    test(
+      'recoverPendingImport volta ao retrato, devolve true e apaga o retrato',
+      () async {
+        final journal = MemoryRecoveryJournal();
+        final s = await _bootstrap(journal: journal);
+        // O backup sempre marca onboarding como feito; o estado X precisa já estar assim.
+        await s.settings.update((st) => st.copyWith(onboardingDone: true));
+        final x = _state(s);
+        await journal.write(BackupService.exportJson(s));
+        await s.transactions.upsert(
+          Transaction(
+            id: 'depois',
+            type: TransactionType.expense,
+            amountCents: 500,
+            date: _now(),
+            description: 'Depois do retrato',
+            accountId: s.accounts.all.first.id,
+          ),
+        );
+
+        expect(await BackupService.recoverPendingImport(s), isTrue);
+
+        expect(_state(s), x);
+        expect(await journal.read(), isNull);
+      },
+    );
+
+    test('recoverPendingImport sem retrato devolve false', () async {
+      final s = await _bootstrap(journal: MemoryRecoveryJournal());
+
+      expect(await BackupService.recoverPendingImport(s), isFalse);
+    });
+
+    test(
+      'recoverPendingImport com retrato inválido devolve false e mantém o retrato',
+      () async {
+        final journal = MemoryRecoveryJournal();
+        final s = await _bootstrap(journal: journal);
+        await journal.write('não é json');
+
+        expect(await BackupService.recoverPendingImport(s), isFalse);
+        expect(await journal.read(), 'não é json');
+      },
+    );
+
+    test(
+      'pagamento de dívida ligado a transação que o backup não traz sobrevive ao import',
+      () async {
+        final src = await _bootstrap();
+        final dst = await _bootstrap();
+        final debt = Debt(
+          id: 'd1',
+          person: 'Ana',
+          direction: DebtDirection.owedToMe,
+          amountCents: 50000,
+          date: _now(),
+          payments: [
+            DebtPayment(
+              id: 'p1',
+              date: _now(),
+              amountCents: 20000,
+              transactionId: 'tx_quitacao',
+            ),
+          ],
+        );
+        await src.debts.upsert(debt);
+        await dst.debts.upsert(debt);
+        await dst.transactions.upsert(
+          Transaction(
+            id: 'tx_quitacao',
+            type: TransactionType.income,
+            amountCents: 20000,
+            date: _now(),
+            description: 'Ana pagou',
+            accountId: dst.accounts.all.first.id,
+          ),
+        );
+
+        await BackupService.importJson(dst, BackupService.exportJson(src));
+
+        expect(dst.transactions.byId('tx_quitacao'), isNull);
+        expect(dst.debts.byId('d1'), debt);
+      },
+    );
+  });
 }

@@ -1,9 +1,32 @@
 import '../../../core/utils/date_utils.dart';
 import '../../../core/utils/enum_utils.dart';
+import '../../transactions/domain/tags.dart';
 import '../../transactions/domain/transaction.dart';
 
 /// Sentinela de `copyWith`: parâmetro omitido mantém o campo; `null` limpa; valor troca.
 const Object _keep = Object();
+
+/// Tags normalizadas em lista imutável; vazia vira `const []`.
+List<String> _frozenTags(List<String> raw) {
+  final normalized = normalizeTags(raw);
+  return normalized.isEmpty ? const [] : List.unmodifiable(normalized);
+}
+
+/// Ausente, nulo ou não-lista → vazio; itens não `String` são ignorados.
+List<String> _tagsFrom(Object? raw) =>
+    raw is List ? raw.whereType<String>().toList() : const [];
+
+bool _sameTags(List<String> a, List<String> b) {
+  if (a.length != b.length) {
+    return false;
+  }
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) {
+      return false;
+    }
+  }
+  return true;
+}
 
 enum Frequency { weekly, monthly, yearly }
 
@@ -25,10 +48,12 @@ class RecurringRule {
     this.isBoleto = false,
     this.active = true,
     DateTime? materializedUntil,
+    List<String> tags = const [],
   }) : assert(
          type == TransactionType.expense || type == TransactionType.income,
          'RecurringRule aceita apenas expense ou income',
        ),
+       tags = _frozenTags(tags),
        startDate = dateOnly(startDate),
        endDate = endDate == null ? null : dateOnly(endDate),
        materializedUntil = materializedUntil == null
@@ -53,6 +78,7 @@ class RecurringRule {
       isBoleto: map['isBoleto'] == true,
       active: map['active'] != false,
       materializedUntil: until == null ? null : parseDateKey(until),
+      tags: _tagsFrom(map['tags']),
     );
   }
 
@@ -73,6 +99,9 @@ class RecurringRule {
   /// Última data já materializada no boot (SPEC §4.5); evita ressuscitar ocorrência apagada.
   final DateTime? materializedUntil;
 
+  /// Tags copiadas para cada ocorrência gerada (normalizadas; lista imutável).
+  final List<String> tags;
+
   RecurringRule copyWith({
     String? description,
     TransactionType? type,
@@ -87,6 +116,7 @@ class RecurringRule {
     bool? isBoleto,
     bool? active,
     Object? materializedUntil = _keep,
+    List<String>? tags,
   }) => RecurringRule(
     id: id,
     description: description ?? this.description,
@@ -108,6 +138,7 @@ class RecurringRule {
     materializedUntil: identical(materializedUntil, _keep)
         ? this.materializedUntil
         : materializedUntil as DateTime?,
+    tags: tags ?? this.tags,
   );
 
   Map<String, dynamic> toMap() => {
@@ -127,6 +158,7 @@ class RecurringRule {
     'materializedUntil': materializedUntil == null
         ? null
         : dateKey(materializedUntil!),
+    if (tags.isNotEmpty) 'tags': tags,
   };
 
   @override
@@ -146,7 +178,8 @@ class RecurringRule {
           other.isSubscription == isSubscription &&
           other.isBoleto == isBoleto &&
           other.active == active &&
-          other.materializedUntil == materializedUntil;
+          other.materializedUntil == materializedUntil &&
+          _sameTags(other.tags, tags);
 
   @override
   int get hashCode => Object.hash(
@@ -164,5 +197,6 @@ class RecurringRule {
     isBoleto,
     active,
     materializedUntil,
+    Object.hashAll(tags),
   );
 }

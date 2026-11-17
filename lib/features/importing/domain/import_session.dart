@@ -11,6 +11,7 @@ import 'import_installments.dart';
 import 'import_matcher.dart';
 import 'import_profile.dart';
 import 'imported_line.dart';
+import 'invoice_payment_match.dart';
 
 /// Sentinela de `copyWith`: parâmetro omitido mantém o campo; `null` limpa; valor troca.
 const Object _keep = Object();
@@ -35,7 +36,7 @@ class ImportTarget {
   final String? cardId;
 }
 
-/// Linha da prévia: linha lida + decisões (incluir, categoria, parcelas).
+/// Linha da prévia: linha lida + decisões (incluir, categoria, parcelas, fatura paga).
 class ImportRow {
   const ImportRow({
     required this.line,
@@ -48,6 +49,7 @@ class ImportRow {
     required this.match,
     required this.installment,
     required this.createInstallments,
+    this.invoicePayment,
   });
 
   final ImportedLine line;
@@ -67,6 +69,10 @@ class ImportRow {
   final InstallmentMark? installment;
   final bool createInstallments;
 
+  /// Fatura que este débito quita (SPEC §9.5); null = despesa comum.
+  final InvoiceCandidate? invoicePayment;
+
+  bool get isInvoicePayment => invoicePayment != null;
   bool get confirmsPlanned => match.plannedMatch != null;
   bool get hasWarning => match.flags.isNotEmpty;
 
@@ -86,6 +92,7 @@ class ImportRow {
     bool? createInstallments,
     String? finalDescription,
     CategorizationResult? suggestion,
+    Object? invoicePayment = _keep,
   }) => ImportRow(
     line: line,
     type: type,
@@ -99,8 +106,29 @@ class ImportRow {
     match: match,
     installment: installment,
     createInstallments: createInstallments ?? this.createInstallments,
+    invoicePayment: identical(invoicePayment, _keep)
+        ? this.invoicePayment
+        : invoicePayment as InvoiceCandidate?,
   );
 }
+
+/// Parcelas que a linha criaria por padrão (sem fatura, sem provisionado, sem parcela existente).
+bool _createInstallmentsByDefault(
+  InstallmentMark? installment,
+  String description,
+  ImportMatch match,
+) =>
+    installment != null &&
+    installment.index < installment.count &&
+    !isWeakInstallment(description) &&
+    !match.flags.contains(ImportFlag.existingInstallment) &&
+    match.plannedMatch == null;
+
+/// Flags de duplicata: as únicas que impedem a sugestão de pagamento de fatura de vir marcada.
+const Set<ImportFlag> _duplicateFlags = {
+  ImportFlag.fitidDuplicate,
+  ImportFlag.probableDuplicate,
+};
 
 CategorizationResult _suggest(
   ImportedLine line,
@@ -116,9 +144,15 @@ CategorizationResult _suggest(
 
 /// Sessão imutável: cada alteração devolve uma nova sessão.
 class ImportSession {
-  ImportSession._(List<ImportRow> rows) : rows = List.unmodifiable(rows);
+  ImportSession._(
+    List<ImportRow> rows, {
+    required this.target,
+    required List<InvoiceCandidate> invoiceCandidates,
+  }) : rows = List.unmodifiable(rows),
+       invoiceCandidates = List.unmodifiable(invoiceCandidates);
 
   /// Casa cada linha com o histórico (o `matcher` consome existentes na ordem das linhas).
+  /// [invoiceCandidates] só tem efeito em destino conta (cartão → sem pagamento de fatura).
   factory ImportSession.build({
     required List<ImportedLine> lines,
     required ImportTarget target,
@@ -126,6 +160,7 @@ class ImportSession {
     required Categorizer categorizer,
     required ImportMatcher matcher,
     Map<String, String> bankCategoryMap = const {},
+    List<InvoiceCandidate> invoiceCandidates = const [],
   }) {
     final rows = <ImportRow>[];
     for (final line in lines) {
@@ -140,48 +175,115 @@ class ImportSession {
         installment: installment,
       );
       final suggestion = _suggest(line, type, categorizer, bankCategoryMap);
+      final invoice =
+          target.accountId != null &&
+              type == TransactionType.expense &&
+              match.flags.contains(ImportFlag.invoicePaymentLike) &&
+              match.plannedMatch == null
+          ? suggestInvoicePayment(
+              amountCents: line.amountCents.abs(),
+              date: line.date,
+              candidates: invoiceCandidates,
+            )
+          : null;
       rows.add(
         ImportRow(
           line: line,
           type: type,
-          include: !match.flags.any(_excludeByDefault.contains),
+          include: invoice == null
+              ? !match.flags.any(_excludeByDefault.contains)
+              : !match.flags.any(_duplicateFlags.contains),
           finalDescription: suggestion.renamedDescription ?? line.description,
-          categoryId: match.plannedMatch?.categoryId ?? suggestion.categoryId,
+          categoryId: invoice != null
+              ? null
+              : match.plannedMatch?.categoryId ?? suggestion.categoryId,
           suggestion: suggestion,
           categoryEdited: false,
           match: match,
           installment: installment,
           createInstallments:
-              installment != null &&
-              installment.index < installment.count &&
-              !isWeakInstallment(line.description) &&
-              !match.flags.contains(ImportFlag.existingInstallment) &&
-              match.plannedMatch == null,
+              invoice == null &&
+              _createInstallmentsByDefault(
+                installment,
+                line.description,
+                match,
+              ),
+          invoicePayment: invoice,
         ),
       );
     }
-    return ImportSession._(rows);
+    return ImportSession._(
+      rows,
+      target: target,
+      invoiceCandidates: target.accountId != null
+          ? invoiceCandidates
+          : const [],
+    );
   }
 
   /// Ordem do arquivo; imutável.
   final List<ImportRow> rows;
 
+  /// Destino da importação; define se pagamento de fatura se aplica (só conta).
+  final ImportTarget target;
+
+  /// Faturas em aberto que a conta paga (vazio em importação de cartão).
+  final List<InvoiceCandidate> invoiceCandidates;
+
+  ImportSession _next(List<ImportRow> next) => ImportSession._(
+    next,
+    target: target,
+    invoiceCandidates: invoiceCandidates,
+  );
+
   ImportSession _replace(int i, ImportRow Function(ImportRow) change) =>
-      ImportSession._([
-        for (final (j, r) in rows.indexed) j == i ? change(r) : r,
-      ]);
+      _next([for (final (j, r) in rows.indexed) j == i ? change(r) : r]);
 
   ImportSession setInclude(int i, bool value) =>
       _replace(i, (r) => r.copyWith(include: value));
 
   ImportSession setAllIncluded(bool value) =>
-      ImportSession._([for (final r in rows) r.copyWith(include: value)]);
+      _next([for (final r in rows) r.copyWith(include: value)]);
 
-  /// Marca `categoryEdited`.
+  /// Marca `categoryEdited`. Linha de pagamento de fatura não tem categoria: ignora.
   ImportSession setCategory(int i, String? categoryId) => _replace(
     i,
-    (r) => r.copyWith(categoryId: categoryId, categoryEdited: true),
+    (r) => r.isInvoicePayment
+        ? r
+        : r.copyWith(categoryId: categoryId, categoryEdited: true),
   );
+
+  /// Marca a débito como pagamento da fatura [c] (inclui a linha, sem categoria/parcelas);
+  /// `null` desfaz e volta à despesa com a categoria sugerida. Ignorado em destino cartão e em receita.
+  ImportSession setInvoicePayment(int i, InvoiceCandidate? c) {
+    if (target.cardId != null) {
+      return this;
+    }
+    return _replace(i, (r) {
+      if (r.type != TransactionType.expense) {
+        return r;
+      }
+      if (c != null) {
+        return r.copyWith(
+          invoicePayment: c,
+          include: true,
+          categoryId: null,
+          createInstallments: false,
+        );
+      }
+      return r.copyWith(
+        invoicePayment: null,
+        categoryId: r.categoryEdited
+            ? r.categoryId
+            : (r.match.plannedMatch?.categoryId ?? r.suggestion.categoryId),
+        createInstallments: _createInstallmentsByDefault(
+          r.installment,
+          r.line.description,
+          r.match,
+        ),
+      );
+    });
+  }
 
   /// Sem parcela na linha, não faz nada.
   ImportSession setCreateInstallments(int i, bool value) => _replace(
@@ -193,9 +295,9 @@ class ImportSession {
   ImportSession recategorize(
     Categorizer categorizer, {
     Map<String, String> bankCategoryMap = const {},
-  }) => ImportSession._([
+  }) => _next([
     for (final r in rows)
-      if (r.categoryEdited)
+      if (r.categoryEdited || r.isInvoicePayment)
         r
       else
         _recategorized(r, categorizer, bankCategoryMap),
@@ -214,20 +316,32 @@ class ImportSession {
     );
   }
 
-  /// Índices (ordem do arquivo) das linhas sem categoria.
+  /// Índices (ordem do arquivo) das linhas sem categoria (pagamento de fatura não conta).
   List<int> uncategorizedIndices() => [
     for (final (i, r) in rows.indexed)
-      if (r.categoryId == null) i,
+      if (r.categoryId == null && !r.isInvoicePayment) i,
   ];
 
-  ({int create, int confirm, int skipped, int futureInstallments}) get summary {
+  ({
+    int create,
+    int confirm,
+    int skipped,
+    int futureInstallments,
+    int invoicePayments,
+  })
+  get summary {
     var create = 0;
     var confirm = 0;
     var skipped = 0;
     var future = 0;
+    var invoices = 0;
     for (final r in rows) {
       if (!r.include) {
         skipped++;
+        continue;
+      }
+      if (r.isInvoicePayment) {
+        invoices++;
         continue;
       }
       if (r.confirmsPlanned) {
@@ -244,6 +358,7 @@ class ImportSession {
       confirm: confirm,
       skipped: skipped,
       futureInstallments: future,
+      invoicePayments: invoices,
     );
   }
 }
@@ -273,6 +388,26 @@ ImportPlan buildImportPlan(
       continue;
     }
     final line = r.line;
+    final invoice = r.invoicePayment;
+    if (invoice != null) {
+      // Pagamento de fatura: sem categoria, tags ou parcelas; não confirma provisionado.
+      create.add(
+        Transaction(
+          id: idGenerator(),
+          type: TransactionType.invoicePayment,
+          amountCents: line.amountCents.abs(),
+          date: line.date,
+          description: r.finalDescription,
+          accountId: target.accountId,
+          cardId: invoice.cardId,
+          invoiceKey: invoice.invoiceKey,
+          status: TransactionStatus.paid,
+          externalId: line.fitid,
+          importedDescription: line.description,
+        ),
+      );
+      continue;
+    }
     final planned = r.match.plannedMatch;
     if (planned != null) {
       update.add(

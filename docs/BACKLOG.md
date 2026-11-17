@@ -1571,3 +1571,196 @@ aceite:
 files: `CONTEXT.md`, `ROADMAP.md`, `docs/BACKLOG.md`
 contrato: CONTEXT revisado para o estado final da v3 (cabeçalho com a data; título e §1 como "FinMe v3", sem "rewrite em andamento"), §4 (árvore com `features/reports/` e seus arquivos; `home_shell.dart` com 11 páginas), §5 (página Relatórios índice 10 entre Categorias e Ajustes, sem atalho; os 7 relatórios e a tabela Simples/Ultra; paleta com comandos por relatório), §6 (regras dos relatórios: só transações gravadas; estorno, transferência e pagamento de fatura fora; comparativo com mês de referência = fim do período; fixo = recorrência ou parcela; patrimônio com 24 meses), §7 (sem box nova; CSV de relatórios `;` + vírgula + BOM, valores reais mesmo com valores ocultos), §8 (testes novos, teste de desempenho, total), §10 (commits das Fases 7–12), §11 (status: v3 concluída, Fases 7–12), §12 (limites: filtro de relatório não persiste entre execuções; comparativo do mês atual é parcial ("até hoje") contra o mês anterior cheio; estornos não abatem gasto nos relatórios, igual ao Painel; categoria apagada aparece como 'Categoria removida'; relatórios não incluem recorrências projetadas; ordenação por clique não muda o CSV; heatmap começa a semana no domingo; `backup_service.dart` mantém cópias privadas de `formatCsvMoney`/`csvText`). ROADMAP: Fases 11 e 12 em "v3", v3 marcada como concluída, próximos passos pós-v3. BACKLOG: T-170..T-189 `done`.
 aceite: total de testes igual ao de `flutter test`; `bash tool/check.sh` → `CHECK OK`.
+
+## Fase 13 — Pendências da v3
+
+> Origem: CONTEXT §12 e "Pendências da revisão da Fase 10". Contratos: SPEC §9 (9.1–9.15), mais os ponteiros em §3.5, §4.5, §5.25 regra 4, §6.1 e §6.4.
+> Sem dependência nova. `ledger.dart` não muda. Boxes novas fora do backup: `fm_import_batches` (lotes de importação) e `fm_ui_state` (estado de tela).
+> Decisões fechadas (SPEC §9): desfazer só o lote mais recente (pilha), lote guarda ids criados + versões anteriores (sem campo novo em `Transaction`);
+> pagamento de fatura só em importação de conta, automático só com valor exato (±10 dias do vencimento), senão menu manual; regras no lançamento manual
+> só em lançamento novo, rename com aviso e "Manter como digitado"; recorrência ganha tags, materialização não aplica regras; filtro de relatório em
+> `fm_ui_state` (não em `settings`); patrimônio do relatório calculado sob demanda até 120 meses; transação de quitação editada/excluída ajusta a dívida
+> via `DebtTransactionSync` (suspenso durante import de backup e "Apagar todos"); import de backup com retrato em arquivo + recuperação no boot.
+> Item "regras sem tags" já resolvido na Fase 10 (`TransactionRule.tags`, SPEC §4.6/§5.14): só sai do CONTEXT §12 (T-219).
+> T-047 (Fase 6) entra na onda A desta fase sem mudar o texto.
+> Ondas (tarefas da mesma onda têm arquivos disjuntos): **A** T-200, T-047, T-201, T-202, T-203, T-204, T-205, T-206, T-207, T-214, T-217 ·
+> **B** T-208, T-210, T-215 · **C** T-211, T-212, T-213, T-216 · **D** T-218 · **E** T-219.
+
+### T-200 · `CollectionRepository`: delete/deleteWhere/replaceAll gravam antes · `todo` · deps: — · parallel: yes
+files: `lib/core/services/collection_repository.dart`, `test/core/collection_repository_test.dart`
+contrato: SPEC §9.1.
+aceite:
+- Com um `RecordStore` de teste que lança em `delete`/`deleteAll`/`putAll`: após a exceção, `all`, `version` e o número de notificações ficam iguais aos de antes, para os três métodos.
+- Caminho feliz: `deleteWhere` e `replaceAll` notificam uma vez; `replaceAll` remove do store os ids antigos fora da lista nova.
+- Testes existentes do repositório e de `backup_service_test.dart` passam sem mudança.
+
+### T-201 · Tags pré-dobradas (`tagKeysOf`) · `todo` · deps: — · parallel: yes
+files: `lib/features/transactions/domain/tags.dart`, `test/features/transactions/tags_test.dart`
+contrato: SPEC §9.3.
+aceite:
+- `tagKeysOf(t)` com tags `['Viagem', 'casa']` == `{'VIAGEM', 'CASA'}`; duas chamadas na mesma instância devolvem o mesmo objeto (`identical`); sem tags → vazio; o conjunto é imutável (add lança).
+- `hasAnyTag` mantém os resultados dos testes existentes; `keys` vazio → true.
+
+### T-202 · Lote de importação e plano de desfazer (domínio) · `todo` · deps: — · parallel: yes
+files: `lib/features/importing/domain/import_batch.dart` (novo), `test/features/importing/import_batch_test.dart` (novo)
+contrato: SPEC §9.4 bloco de código (`ImportBatch`, `kImportBatchesKept`, `importBatchFor`, `latestImportBatch`, `importBatchesToPrune`, `importUndoPlan`). Dart puro.
+aceite:
+- `importBatchFor` com plano `create: [a, b]`, `update: [p']` e `before` contendo `p` (planned) → `createdIds == ['a', 'b']`, `previous == [p]` (versão planned), contadores 2 e 1; `update` cujo id não está em `before` é ignorado.
+- `toMap`/`fromMap` ida e volta iguais (inclui `previous` com tags e `externalId`); `createdAt` inválido → `FormatException`; `createdIds` não-lista → `[]`.
+- `importUndoPlan`: `a` excluída depois → `deleteIds == ['b']`; `p` excluído depois → `restore` vazio; caso normal → `deleteIds ['a','b']`, `restore [p]`.
+- `latestImportBatch` escolhe maior `createdAt` (empate maior id); 12 lotes → `importBatchesToPrune` devolve os 2 mais antigos.
+
+### T-203 · Casamento de pagamento de fatura (domínio) · `todo` · deps: — · parallel: yes
+files: `lib/features/importing/domain/invoice_payment_match.dart` (novo), `test/features/importing/invoice_payment_match_test.dart` (novo)
+contrato: SPEC §9.5 bloco de código (`InvoiceCandidate`, `invoiceCandidatesFor`, `suggestInvoicePayment`, `invoiceChoicesFor`). Dart puro; faturas montadas com `InvoiceService.build` no teste.
+aceite:
+- `invoiceCandidatesFor`: só cartões crédito, não arquivados, com `paymentAccountId` da conta; fatura paga (`remainingCents == 0`) fica fora; ordem dueDate asc, cardId asc.
+- `suggestInvoicePayment`: valor igual e vencimento a 10 dias → sugere; 11 dias → null; valor diferente → null; dois cartões com o mesmo valor → o de vencimento mais próximo; empate → dueDate asc, cardId asc.
+- `invoiceChoicesFor`: uma candidata por cartão (a mais próxima da data; empate a anterior), ordem cardId.
+- `invoiceKey == dueMonth.key`.
+
+### T-204 · Tags em `RecurringRule` e nas ocorrências · `todo` · deps: — · parallel: yes
+files: `lib/features/recurring/domain/recurring_rule.dart`, `lib/features/recurring/domain/recurrence.dart`, `test/features/recurring/recurring_tags_test.dart` (novo)
+contrato: SPEC §9.7 (campo, normalização, `copyWith`, `toMap`/`fromMap`, `==`/`hashCode`; `occurrenceTransactions` copia `tags`).
+aceite:
+- `RecurringRule(tags: ['#Casa', 'casa', 'fixo'])` → `['Casa', 'fixo']`; `toMap` sem `'tags'` quando vazia; `fromMap` sem/`null`/não-lista → `[]`; `copyWith()` mantém; `==` difere com tags diferentes.
+- `occurrenceTransactions` (projeção e materialização) gera transações com as tags da regra.
+- `test/features/installments_recurrence_test.dart` e `test/features/entities_test.dart` passam sem mudança.
+
+### T-205 · `ReportFilter` serializável e tolerante a ids removidos · `todo` · deps: — · parallel: yes
+files: `lib/features/reports/domain/report_filter.dart`, `test/features/reports/report_filter_test.dart`
+contrato: SPEC §9.8 bloco de código (`toMap`, `fromMap`, `withKnownIds`).
+aceite:
+- Ida e volta `fromMap(f.toMap()) == f` para o padrão e para um filtro custom com todos os conjuntos, `flow income` e `includePlanned true`.
+- `fromMap({})` == `ReportFilter()`; preset/flow desconhecidos → padrão; custom com `customFrom` inválido → `last12`; `accountIds: 'x'` → vazio; itens não String ignorados.
+- `withKnownIds` remove contas, cartões, categorias e tags ausentes e mantém o resto (`preset`, meses, `flow`, `includePlanned`).
+
+### T-206 · Sincronização dívida ↔ transação de quitação · `todo` · deps: — · parallel: yes
+files: `lib/features/debts/domain/debt_math.dart`, `lib/features/debts/presentation/debt_transaction_sync.dart` (novo), `test/features/debts/debt_sync_test.dart` (novo), `test/features/debts/debt_transaction_sync_test.dart` (novo)
+contrato: SPEC §9.12 (`linkedTransactionIds`, `syncDebtsWithTransactions`, `DebtTransactionSync` com `suspendDuring`/`dispose`).
+aceite (d1 de §5.25 com p1 → t1):
+- Domínio: t1 ausente e `knownIds {t1}` → d1 sem p1; t1 com valor 15000 → p1 com 15000 (mesmo id); t1 com data 12/11 → p1 em 12/11; t1 ausente e `knownIds {}` → nada muda (órfão de backup); dívida sem mudança não volta na lista.
+- Sync com repositórios em memória: `transactions.delete('t1')` → `debts.byId('d1').remainingCents == 50000`; editar t1 para 25000 → restante 25000.
+- Quitar pelo fluxo de §6.3 (transação antes, dívida depois) e desfazer (dívida antes, transação depois) → nenhuma escrita extra em `debts` (contar `version`).
+- Dentro de `suspendDuring`, excluir t1 não muda a dívida; depois, `_known` recalculado (excluir outra transação ligada volta a sincronizar).
+
+### T-207 · `RecoveryJournal` (retrato em arquivo) · `todo` · deps: — · parallel: yes
+files: `lib/core/services/recovery_journal.dart` (novo), `test/core/recovery_journal_test.dart` (novo)
+contrato: SPEC §9.13 bloco de código.
+aceite:
+- `FileRecoveryJournal` em diretório temporário (`Directory.systemTemp.createTemp`): `read()` sem arquivo → null; `write('a')` → `read() == 'a'`; segundo `write('b')` → 'b' e nenhum `.tmp` sobra; `clear()` → null; `clear()` sem arquivo não lança.
+- `MemoryRecoveryJournal` com `failWrites = true` → `write` lança e `read()` continua o valor anterior.
+
+### T-047 · Memoizar a linha de fechamentos por cartão · (Fase 6, onda A) · parallel: yes
+files: `lib/features/cards/domain/invoice_cycle.dart`, `test/features/cards/invoice_cycle_memo_test.dart` (novo). Contrato e aceite no texto de T-047 (Fase 6); teste novo: cartão com 3 mudanças de ciclo e 5.000 compras → `InvoiceService.build` com resultado igual ao calculado sem cache (instância recriada por `copyWith`) e < 200 ms.
+
+### T-214 · Regras no lançamento manual (rename e tags no Simples) · `todo` · deps: — · parallel: yes
+files: `lib/features/transactions/presentation/transaction_form.dart`, `test/features/transactions/transaction_form_test.dart`
+contrato: SPEC §9.6. Usa `ledger.categorizer` (`CategorizationResult.renamedDescription`/`tags`); edição não muda.
+aceite:
+- Regra `contains 'UBER'` com `renameTo 'Uber'`: digitar 'UBER TRIP 123' em lançamento novo mostra `form-rename-hint` 'Será salvo como "Uber" (regra)'; salvar grava `description 'Uber'` e `importedDescription 'UBER TRIP 123'`.
+- Tocar `form-rename-keep` → aviso some; salvar grava 'UBER TRIP 123' e `importedDescription null`.
+- Edição de transação existente com a mesma descrição → sem aviso e sem rename.
+- Simples: regra com tags `['app']` → lançamento novo salvo com `tags ['app']`; parcelado 3× → as 3 parcelas com 'Uber' e as tags.
+
+### T-217 · Heatmap preguiçoso · `todo` · deps: — · parallel: yes
+files: `lib/features/reports/presentation/heatmap_view.dart`, `test/features/reports/heatmap_view_test.dart`
+contrato: SPEC §9.10.
+aceite:
+- Testes existentes do heatmap passam sem mudança (posições de `heatmap-day-20261101`/`-20261130`, tooltips, resumo, 12 meses).
+- 60 meses (01/12/2021..30/11/2026) numa janela de 800 px: número de widgets `heatmap-day-*` montados < 400; arrastar até o fim mostra `heatmap-day-20261130`.
+
+### T-208 · Sessão e plano: pagamento de fatura · `todo` · deps: T-203 · parallel: yes (onda B)
+files: `lib/features/importing/domain/import_session.dart`, `test/features/importing/import_session_test.dart`
+contrato: SPEC §9.5 parte "Sessão" (`ImportRow.invoicePayment`, `invoiceCandidates`, `setInvoicePayment`, `recategorize`/`setCategory`/`uncategorizedIndices`, `summary.invoicePayments`, plano `invoicePayment`).
+aceite:
+- Conta A com cartão K (fatura nov restante 120000, vence 05/11): linha 'PAGTO FATURA CARTAO' −120000 em 05/11 → `isInvoicePayment`, `include true`, `categoryId null`; plano cria `invoicePayment` de A para K com `invoiceKey '2026-11'`, `status paid`, sem tags.
+- Mesma linha −100000 → sem sugestão, `include false`; `setInvoicePayment(i, candidata)` → incluída e plano gera `invoicePayment`; `setInvoicePayment(i, null)` → volta a `expense` com a categoria sugerida.
+- Importação em cartão (target `cardId`) → nunca `invoicePayment`; `setInvoicePayment` ignorado.
+- `summary`: `invoicePayments == 1` e `create` sem ela. Teste de desempenho existente (2.000 linhas) passa.
+- Ajuste dos testes existentes só onde `summary` muda de forma.
+
+### T-210 · `AppServices`, bootstrap e "Apagar todos" (Fase 13) · `todo` · deps: T-202, T-206, T-207 · parallel: yes (onda B)
+files: `lib/app/app_scope.dart`, `lib/app/bootstrap.dart`, `lib/features/settings/presentation/settings_page.dart`, `test/app/bootstrap_phase13_test.dart` (novo)
+contrato: SPEC §9.14 (campos `importBatches`, `uiState`, `journal`, `debtSync`, `restoredFromJournal`; boxes `fm_import_batches` e `fm_ui_state` em `_boxes`; `bootstrap({..., RecoveryJournal? journal})` com `FileRecoveryJournal` no Hive e `MemoryRecoveryJournal` com `storeFactory`; `DebtTransactionSync` criado depois dos repositórios) e §9.12 ("Apagar todos" em `debtSync.suspendDuring` + `importBatches.replaceAll([])`). Não chama `recoverPendingImport` (T-218).
+aceite:
+- `bootstrap(storeFactory: memória)` expõe `importBatches` vazio, `uiState`, `journal` (`MemoryRecoveryJournal`) e `debtSync`; excluir a transação de uma quitação pelo repositório ajusta a dívida (sync ligado).
+- "Apagar todos os dados" pela `SettingsPage` deixa `importBatches` e `debts` vazios sem exceção.
+- Smoke test e demais testes passam sem mudança.
+
+### T-215 · Tags no formulário de recorrência · `todo` · deps: T-204 · parallel: yes (onda B)
+files: `lib/features/recurring/presentation/recurring_form.dart`, `test/features/recurring/recurring_form_test.dart`
+contrato: SPEC §9.7 parágrafo "Formulário" (`TagField` de `tag_widgets.dart` só no Ultra, sugestões `ledger.allTags`; Simples preserva).
+aceite:
+- Ultra: digitar 'casa, fixo' e salvar → `RecurringRule.tags == ['casa', 'fixo']`; editar mostra os chips.
+- Simples: sem campo de tags; editar regra com `['casa']` e salvar mantém `['casa']`.
+
+### T-211 · Backup: retrato em arquivo, lotes e formatadores comuns · `todo` · deps: T-200, T-210 · parallel: yes (onda C)
+files: `lib/core/services/backup_service.dart`, `test/core/backup_service_test.dart`
+contrato: SPEC §9.11 e §9.13 (`importJson` passos 1–4, `recoverPendingImport`), §9.4 regra 3 (`importBatches` no retrato, rollback e `replaceAll([])`), §9.12 (`suspendDuring`).
+aceite:
+- CSV de transações byte a byte igual ao atual (testes existentes de CSV sem mudança); `_csvMoney`/`_csvText` não existem mais.
+- Import ok → `journal.read() == null` e `importBatches` vazio. `journal.failWrites = true` → import lança e nenhum repositório muda.
+- Falha forçada no meio (store que lança) com rollback ok → estado anterior e `journal.read() == null`; com a restauração também falhando → `journal.read()` contém o JSON do estado anterior.
+- `recoverPendingImport` com retrato do estado X sobre estado Y → dados voltam a X, devolve true e limpa o retrato; sem retrato → false; retrato inválido → false e o retrato fica.
+- Dívida com pagamento ligado a transação que o backup não traz → importa sem perder o pagamento (sync suspenso).
+
+### T-212 · Importação: lote, desfazer e candidatas de fatura · `todo` · deps: T-202, T-208, T-210 · parallel: yes (onda C)
+files: `lib/features/importing/presentation/import_flow.dart`, `lib/features/importing/presentation/import_page.dart`, `test/features/importing/import_flow_test.dart`, `test/features/importing/import_page_test.dart`
+contrato: SPEC §9.4 regras 4–6 (`undoImportBatch`, SnackBar com 'Desfazer', seção 'Importações recentes') e §9.5 último bullet da sessão (`invoiceCandidatesFor` só em importação de conta).
+aceite:
+- Importar CSV de teste com 3 linhas, uma confirmando um provisionado → `importBatches` com 1 lote (`createdCount 2`, `confirmedCount 1`); SnackBar com ação 'Desfazer'; tocar → as 2 criadas somem, o provisionado volta a `planned` com a data antiga e o lote é apagado; SnackBar 'Importação desfeita: 2 lançamentos removidos, 1 provisionados reabertos'.
+- 11 importações seguidas → 10 lotes guardados.
+- Página Importar: seção 'Importações recentes' com o mais recente primeiro e `import-undo-{id}` só nele; confirmar o diálogo desfaz; sem lotes → seção ausente; funciona no Simples.
+- Importação em conta com cartão pago por ela → `ImportSession.invoiceCandidates` não vazio; em cartão → vazio.
+
+### T-213 · Prévia: menu de pagamento de fatura · `todo` · deps: T-208 · parallel: yes (onda C)
+files: `lib/features/importing/presentation/import_preview_row.dart`, `lib/features/importing/presentation/import_preview_page.dart`, `test/features/importing/import_preview_page_test.dart`
+contrato: SPEC §9.5 parágrafo "Prévia".
+aceite:
+- Linha sugerida mostra `import-invoice-{i}` com 'Fatura {cartão} · venc. 05/11' no lugar do seletor de categoria e sem o chip 'Parece pagamento de fatura'.
+- Linha não sugerida com a flag mostra 'Pagamento de fatura?'; escolher o cartão marca a linha; 'Não é pagamento de fatura' volta ao seletor de categoria.
+- Resumo com ' · 1 pagamentos de fatura'; importação em cartão não mostra o menu. Testes existentes da prévia passam (ajuste só no texto do resumo, se mudar).
+
+### T-216 · Relatórios: filtro persistente e patrimônio do período · `todo` · deps: T-205, T-210 · parallel: yes (onda C)
+files: `lib/features/reports/presentation/reports_controller.dart`, `lib/features/reports/presentation/net_worth_report_view.dart`, `test/features/reports/reports_controller_test.dart`, `test/features/reports/net_worth_report_view_test.dart`
+contrato: SPEC §9.8 (registro `reports` em `services.uiState`, leitura no construtor com `withKnownIds`, gravação nos setters) e §9.9 (`netWorth` além de 24 meses; texto de apoio).
+aceite:
+- Controller 1 com `filter` custom (conta A, tag 'viagem', 3 meses) e `selected pivot` → controller 2 sobre os mesmos serviços abre com o mesmo filtro e `pivot`.
+- Conta A excluída antes do controller 2 → filtro sem A, resto igual; registro corrompido (`'filter': 'x'`) → padrões sem exceção.
+- Mudar `filter` não muda `services.settings.value` nem dispara o `Ledger`.
+- Período custom de 36 meses terminando no mês atual → `netWorth.length == 36` e o último ponto igual a `ledger.netWorthHistory.last`; `last12` continua recorte do Ledger (12 pontos).
+- `NetWorthReportView` sem 'Histórico disponível: últimos 24 meses.'; teste existente ajustado só nesse texto.
+
+### T-218 · Recuperação do import no boot e aviso · `todo` · deps: T-211 · parallel: no
+files: `lib/app/bootstrap.dart`, `lib/app/home_shell.dart`, `test/app/boot_recovery_test.dart` (novo)
+contrato: SPEC §9.13 parágrafo `recoverPendingImport` (bootstrap chama antes de `materializeRecurring`; `restoredFromJournal`; SnackBar única no `HomeShell`).
+aceite:
+- `bootstrap(storeFactory: memória com estado Y, journal: MemoryRecoveryJournal com retrato de X)` → serviços com X, `restoredFromJournal true`, retrato limpo.
+- App de teste com essa flag mostra 'A última importação de backup não terminou. Os dados anteriores foram restaurados.' uma vez (trocar de página não repete) e a flag fica false.
+- Sem retrato → `restoredFromJournal false` e nenhuma SnackBar; smoke test passa.
+
+### T-219 · Documentação da Fase 13 · `todo` · deps: T-200..T-218, T-047 · parallel: no
+files: `CONTEXT.md`, `ROADMAP.md`, `docs/BACKLOG.md`
+contrato: CONTEXT §4 (arquivos novos: `import_batch.dart`, `invoice_payment_match.dart`, `debt_transaction_sync.dart`, `recovery_journal.dart`), §5 (Importar com 'Importações recentes' e desfazer; pagamento de fatura na prévia; rename no lançamento manual; tags na recorrência; relatórios lembram o filtro), §6 (regras de §9.4–9.12), §7 (boxes `fm_import_batches` e `fm_ui_state` fora do backup; retrato `finme_import_journal.json`), §8 (testes novos, total), §10 (commit), §11 (Fase 13 concluída; T-047 `done`), §12 zerado das pendências resolvidas e reescrito só com os limites que ficam: desfazer só o lote mais recente e perde edições posteriores em provisionados confirmados; pagamento de fatura só pelo extrato da conta e automático só com valor exato; materialização não aplica regras; tipo/conta da transação de quitação não sincronizam; falha ao limpar o retrato faz o próximo boot reverter o import (com aviso); patrimônio do relatório limitado a 120 meses; heatmap começa no domingo e demais limites antigos ainda válidos da Fase 12. ROADMAP: Fase 13 registrada. BACKLOG: T-200..T-218 e T-047 `done`; "Pendências da revisão da Fase 10" marcada `done`.
+aceite: total de testes igual ao de `flutter test`; `bash tool/check.sh` → `CHECK OK`.
+
+## Fase 14 — Perfis
+
+> Vários perfis com dados isolados e PIN opcional. Contrato: SPEC §10.
+
+### T-230 · Domínio `Profile` e hash do PIN · `done` · deps: — · parallel: yes
+files: `lib/features/profiles/domain/profile.dart`, `lib/features/profiles/domain/pin_hash.dart`, `test/features/profiles/profile_test.dart`, `test/features/profiles/pin_hash_test.dart`
+contrato: SPEC §10.1–10.2. aceite: vetores NIST de SHA-256 (`''`, `'abc'`, 448 bits); `verifyPin` certo/errado; `Profile` ida e volta.
+
+### T-231 · Bootstrap por perfil, `close` e registro · `done` · deps: T-230 · parallel: no
+files: `lib/app/bootstrap.dart`, `lib/app/app_scope.dart`, `lib/core/services/record_store.dart`, `lib/app/profile_registry.dart`, `test/app/profile_registry_test.dart`
+contrato: SPEC §10.3. aceite: `default` usa `fm_*`; outro id usa `p<id>_fm_*`; registro vazio cria "Principal"; não exclui o perfil aberto nem o último.
+
+### T-232 · Gate, seletor e troca de perfil · `done` · deps: T-231 · parallel: no
+files: `lib/main.dart`, `lib/app/profile_gate.dart`, `lib/features/profiles/presentation/profile_picker_page.dart`, `test/app/profile_gate_test.dart`
+contrato: SPEC §10.4. aceite: 1 perfil sem PIN abre direto; com PIN mostra seletor e pede PIN; PIN errado não abre.
+
+### T-233 · Sidebar e Ajustes · `done` · deps: T-232 · parallel: no
+files: `lib/app/home_shell.dart`, `lib/features/settings/presentation/settings_page.dart`, `lib/features/profiles/presentation/profile_section.dart`
+contrato: SPEC §10.5. aceite: nome do perfil no topo da sidebar; seção Perfil cria, renomeia, define/remove PIN, exclui outro perfil.

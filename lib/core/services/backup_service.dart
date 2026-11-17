@@ -11,6 +11,7 @@ import '../../features/categories/domain/category_tree.dart';
 import '../../features/categories/domain/transaction_category.dart';
 import '../../features/debts/domain/debt.dart';
 import '../../features/goals/domain/goal.dart';
+import '../../features/importing/domain/import_batch.dart';
 import '../../features/importing/domain/import_profile.dart';
 import '../../features/importing/domain/merchant_dictionary.dart';
 import '../../features/net_worth/domain/asset.dart';
@@ -20,6 +21,23 @@ import '../../features/transactions/domain/transaction.dart';
 import '../models/app_settings.dart';
 import '../models/year_month.dart';
 import '../utils/formatters.dart';
+
+/// Estado completo de um backup (ou retrato). Lotes de importação não vêm no JSON: `_parse` põe [].
+typedef _Backup = ({
+  List<Account> accounts,
+  List<PaymentCard> cards,
+  List<TransactionCategory> categories,
+  List<Transaction> transactions,
+  List<RecurringRule> recurring,
+  AppSettings settings,
+  List<TransactionRule> rules,
+  List<ImportProfile> importProfiles,
+  List<DictionaryEntry> dictionary,
+  List<Goal> goals,
+  List<Asset> assets,
+  List<Debt> debts,
+  List<ImportBatch> importBatches,
+});
 
 /// Backup JSON completo (ida e volta) e exportação CSV de lançamentos.
 class BackupService {
@@ -59,69 +77,130 @@ class BackupService {
     'debts': [for (final d in s.debts.all) d.toMap()],
   });
 
-  /// Lê tudo antes de gravar: JSON ou registro inválido lança [FormatException] e nada muda.
-  /// Depois de gravar, materializa as recorrências até ontem (como no boot).
-  /// Falha na gravação restaura o retrato anterior (Hive não tem transação entre boxes) e relança.
+  /// Import de backup (SPEC §9.13): 1) valida tudo antes (JSON inválido → [FormatException], nada muda);
+  /// 2) grava o retrato do estado atual no journal (falha → nada muda); 3) troca os dados dentro de
+  /// `debtSync.suspendDuring`, com rollback em memória se falhar; 4) sucesso → apaga o retrato.
   static Future<void> importJson(AppServices s, String json) async {
+    final b = _load(json);
+    await s.journal.write(exportJson(s));
+    await _replace(s, b, clearJournalIfRolledBack: true);
+    await _clearJournal(s);
+  }
+
+  /// Recupera import interrompido (SPEC §9.13): aplica o retrato do journal sobre os dados atuais.
+  /// Sucesso → apaga o retrato e devolve true; qualquer falha → mantém o retrato e devolve false.
+  static Future<bool> recoverPendingImport(AppServices s) async {
+    try {
+      final json = await s.journal.read();
+      if (json == null || json.isEmpty) {
+        return false;
+      }
+      await _replace(s, _load(json), clearJournalIfRolledBack: false);
+      await _clearJournal(s);
+      return true;
+    } catch (e) {
+      debugPrint('BackupService: falha ao recuperar o import: $e');
+      return false;
+    }
+  }
+
+  static _Backup _load(String json) {
     final data = jsonDecode(json);
     if (data is! Map<String, dynamic> ||
         data['app'] != 'finme' ||
         data['version'] != version) {
       throw const FormatException('Arquivo não é um backup do FinMe');
     }
-    final b = _parse(data);
-    final retrato = (
-      accounts: s.accounts.all,
-      cards: s.cards.all,
-      categories: s.categories.all,
-      transactions: s.transactions.all,
-      recurring: s.recurring.all,
-      settings: s.settings.value,
-      rules: s.rules.all,
-      importProfiles: s.importProfiles.all,
-      dictionary: s.dictionary.all,
-      goals: s.goals.all,
-      assets: s.assets.all,
-      debts: s.debts.all,
-    );
+    return _parse(data);
+  }
+
+  /// Troca tudo por [b] dentro de `debtSync.suspendDuring`. Falha: restaura o estado anterior e relança o erro.
+  /// Só limpa o retrato no rollback completo quando [clearJournalIfRolledBack]; com restauração incompleta ele fica.
+  static Future<void> _replace(
+    AppServices s,
+    _Backup b, {
+    required bool clearJournalIfRolledBack,
+  }) => s.debtSync.suspendDuring(() async {
+    final retrato = _snapshot(s);
     try {
-      await s.accounts.replaceAll(b.accounts);
-      await s.cards.replaceAll(b.cards);
-      await s.categories.replaceAll(b.categories);
-      await s.transactions.replaceAll(b.transactions);
-      await s.recurring.replaceAll(b.recurring);
-      await s.settings.update((_) => b.settings);
-      await s.rules.replaceAll(b.rules);
-      await s.importProfiles.replaceAll(b.importProfiles);
-      await s.dictionary.replaceAll(b.dictionary);
-      await s.goals.replaceAll(b.goals);
-      await s.assets.replaceAll(b.assets);
-      await s.debts.replaceAll(b.debts);
-      await materializeRecurring(s);
+      await _write(s, b);
     } catch (e, st) {
-      // Cada restauração tem try próprio: uma falha não impede as demais.
-      final restores = <Future<void> Function()>[
-        () => s.accounts.replaceAll(retrato.accounts),
-        () => s.cards.replaceAll(retrato.cards),
-        () => s.categories.replaceAll(retrato.categories),
-        () => s.transactions.replaceAll(retrato.transactions),
-        () => s.recurring.replaceAll(retrato.recurring),
-        () => s.settings.update((_) => retrato.settings),
-        () => s.rules.replaceAll(retrato.rules),
-        () => s.importProfiles.replaceAll(retrato.importProfiles),
-        () => s.dictionary.replaceAll(retrato.dictionary),
-        () => s.goals.replaceAll(retrato.goals),
-        () => s.assets.replaceAll(retrato.assets),
-        () => s.debts.replaceAll(retrato.debts),
-      ];
-      for (final restore in restores) {
-        try {
-          await restore();
-        } catch (restoreError) {
-          debugPrint('BackupService: falha ao restaurar: $restoreError');
-        }
+      final restoredAll = await _restore(s, retrato);
+      if (restoredAll && clearJournalIfRolledBack) {
+        await _clearJournal(s);
       }
       Error.throwWithStackTrace(e, st);
+    }
+  });
+
+  static Future<void> _write(AppServices s, _Backup b) async {
+    await s.accounts.replaceAll(b.accounts);
+    await s.cards.replaceAll(b.cards);
+    await s.categories.replaceAll(b.categories);
+    await s.transactions.replaceAll(b.transactions);
+    await s.recurring.replaceAll(b.recurring);
+    await s.settings.update((_) => b.settings);
+    await s.rules.replaceAll(b.rules);
+    await s.importProfiles.replaceAll(b.importProfiles);
+    await s.dictionary.replaceAll(b.dictionary);
+    await s.goals.replaceAll(b.goals);
+    await s.assets.replaceAll(b.assets);
+    await s.debts.replaceAll(b.debts);
+    await s.importBatches.replaceAll(b.importBatches);
+    await materializeRecurring(s);
+  }
+
+  static _Backup _snapshot(AppServices s) => (
+    accounts: s.accounts.all,
+    cards: s.cards.all,
+    categories: s.categories.all,
+    transactions: s.transactions.all,
+    recurring: s.recurring.all,
+    settings: s.settings.value,
+    rules: s.rules.all,
+    importProfiles: s.importProfiles.all,
+    dictionary: s.dictionary.all,
+    goals: s.goals.all,
+    assets: s.assets.all,
+    debts: s.debts.all,
+    importBatches: s.importBatches.all,
+  );
+
+  /// Cada restauração tem try próprio: uma falha não impede as demais. Devolve true se todas deram certo.
+  static Future<bool> _restore(AppServices s, _Backup r) async {
+    final restores = <Future<void> Function()>[
+      () => s.accounts.replaceAll(r.accounts),
+      () => s.cards.replaceAll(r.cards),
+      () => s.categories.replaceAll(r.categories),
+      () => s.transactions.replaceAll(r.transactions),
+      () => s.recurring.replaceAll(r.recurring),
+      () => s.settings.update((_) => r.settings),
+      () => s.rules.replaceAll(r.rules),
+      () => s.importProfiles.replaceAll(r.importProfiles),
+      () => s.dictionary.replaceAll(r.dictionary),
+      () => s.goals.replaceAll(r.goals),
+      () => s.assets.replaceAll(r.assets),
+      () => s.debts.replaceAll(r.debts),
+      () => s.importBatches.replaceAll(r.importBatches),
+    ];
+    var restoredAll = true;
+    for (final restore in restores) {
+      try {
+        await restore();
+      } catch (restoreError) {
+        restoredAll = false;
+        debugPrint('BackupService: falha ao restaurar: $restoreError');
+      }
+    }
+    return restoredAll;
+  }
+
+  /// Falha ao apagar o retrato só é registrada: os dados já estão certos.
+  static Future<void> _clearJournal(AppServices s) async {
+    try {
+      await s.journal.clear();
+    } catch (error) {
+      debugPrint('BackupService: falha ao apagar o retrato: $error');
     }
   }
 
@@ -137,22 +216,22 @@ class BackupService {
       for (final t in list)
         [
           formatDate(t.date),
-          _csvText(t.description),
+          csvText(t.description),
           _typeLabel(t.type),
           t.isPlanned ? 'Provisionado' : 'Efetivado',
-          _csvMoney(_signed(t)),
-          _csvText(_nameOf(t.accountId, s.accounts.byId, (a) => a.name)),
-          _csvText(_nameOf(t.cardId, s.cards.byId, (c) => c.name)),
-          _csvText(_destinationOf(t, s)),
+          formatCsvMoney(_signed(t)),
+          csvText(_nameOf(t.accountId, s.accounts.byId, (a) => a.name)),
+          csvText(_nameOf(t.cardId, s.cards.byId, (c) => c.name)),
+          csvText(_destinationOf(t, s)),
           // Transferência e pagamento de fatura não entram no total: o dinheiro só muda de lugar.
           _countsInTotal(t, s) ? 'sim' : 'não',
           // "Pai › Filha" (SPEC §5.20); id desconhecido ou nulo sai vazio.
-          _csvText(tree.label(t.categoryId ?? '')),
+          csvText(tree.label(t.categoryId ?? '')),
           t.installmentIndex == null
               ? ''
               : '${t.installmentIndex}/${t.installmentCount}',
-          _csvText(t.notes ?? ''),
-          _csvText(t.tags.join(', ')),
+          csvText(t.notes ?? ''),
+          csvText(t.tags.join(', ')),
         ],
     ]);
   }
@@ -183,21 +262,7 @@ class BackupService {
     return card?.kind != CardKind.credit;
   }
 
-  static ({
-    List<Account> accounts,
-    List<PaymentCard> cards,
-    List<TransactionCategory> categories,
-    List<Transaction> transactions,
-    List<RecurringRule> recurring,
-    AppSettings settings,
-    List<TransactionRule> rules,
-    List<ImportProfile> importProfiles,
-    List<DictionaryEntry> dictionary,
-    List<Goal> goals,
-    List<Asset> assets,
-    List<Debt> debts,
-  })
-  _parse(Map<String, dynamic> data) {
+  static _Backup _parse(Map<String, dynamic> data) {
     try {
       final accountIds = _idsOf(data, 'accounts');
       final cardIds = _idsOf(data, 'cards');
@@ -249,6 +314,7 @@ class BackupService {
         // Fase 11: chave ausente → []. Sem validação de vínculo (DebtPayment.transactionId órfão fica como está).
         assets: _rows(_optMaps(data, 'assets'), Asset.fromMap),
         debts: _rows(_optMaps(data, 'debts'), Debt.fromMap),
+        importBatches: const [],
       );
     } on TypeError catch (e) {
       throw FormatException('Backup com campos inválidos: $e');
@@ -319,22 +385,10 @@ class BackupService {
     return item == null ? '' : name(item);
   }
 
-  /// Planilha trata texto iniciado em = + - @ como fórmula: prefixa uma aspa simples.
-  static String _csvText(String value) =>
-      value.isNotEmpty && '=+-@'.contains(value[0]) ? "'$value" : value;
-
   static int _signed(Transaction t) => switch (t.type) {
     TransactionType.income => t.amountCents,
     _ => -t.amountCents,
   };
-
-  // Sem "R$" nem separador de milhar: "-1234,56" (formatMoney só remove o que não serve ao CSV).
-  static String _csvMoney(int cents) {
-    final digits = formatMoney(
-      cents.abs(),
-    ).replaceFirst('R\$ ', '').replaceAll('.', '');
-    return cents < 0 ? '-$digits' : digits;
-  }
 
   static String _typeLabel(TransactionType type) => switch (type) {
     TransactionType.expense => 'Despesa',

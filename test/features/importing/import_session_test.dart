@@ -7,6 +7,7 @@ import 'package:finme/features/importing/domain/categorizer.dart';
 import 'package:finme/features/importing/domain/import_matcher.dart';
 import 'package:finme/features/importing/domain/import_session.dart';
 import 'package:finme/features/importing/domain/imported_line.dart';
+import 'package:finme/features/importing/domain/invoice_payment_match.dart';
 import 'package:finme/features/importing/domain/merchant_dictionary.dart';
 import 'package:finme/features/rules/domain/transaction_rule.dart';
 import 'package:finme/features/transactions/domain/transaction.dart';
@@ -70,11 +71,21 @@ ImportSession _session(
   ImportTarget target = const ImportTarget(accountId: 'acc_a'),
   List<Transaction> existing = const [],
   Categorizer? categorizer,
+  List<InvoiceCandidate> invoiceCandidates = const [],
 }) => ImportSession.build(
   lines: lines,
   target: target,
   categorizer: categorizer ?? _categorizer(),
   matcher: ImportMatcher(existing),
+  invoiceCandidates: invoiceCandidates,
+);
+
+/// Fatura de nov/2026 do cartão [cardId] que vence em 05/11.
+InvoiceCandidate _nov(String cardId, int cents) => InvoiceCandidate(
+  cardId: cardId,
+  dueMonth: const YearMonth(2026, 11),
+  dueDate: DateTime(2026, 11, 5),
+  remainingCents: cents,
 );
 
 Transaction _tx(
@@ -106,6 +117,7 @@ void main() {
         confirm: 0,
         skipped: 1,
         futureInstallments: 7,
+        invoicePayments: 0,
       ));
       expect(s.rows[3].include, isFalse);
       expect(
@@ -418,6 +430,151 @@ void main() {
     expect(s.rows.single.suggestion.tags, isEmpty);
     final re = s.recategorize(_categorizer(rules: const [rule]));
     expect(re.rows.single.suggestion.tags, ['app']);
+  });
+
+  group('pagamento de fatura', () {
+    final pay = _line(5, DateTime(2026, 11, 5), 'PAGTO FATURA CARTAO', -120000);
+
+    test(
+      'débito igual à fatura e na janela: sugerido, incluído, sem categoria',
+      () {
+        final s = _session([pay], invoiceCandidates: [_nov('card_k', 120000)]);
+        final row = s.rows.single;
+        expect(row.isInvoicePayment, isTrue);
+        expect(row.include, isTrue);
+        expect(row.categoryId, isNull);
+        expect(s.summary.invoicePayments, 1);
+        expect(s.summary.create, 0);
+        expect(s.uncategorizedIndices(), isEmpty);
+      },
+    );
+
+    test(
+      'plano: cria invoicePayment da conta para o cartão, paga, sem tags',
+      () {
+        final s = _session([pay], invoiceCandidates: [_nov('card_k', 120000)]);
+        final plan = buildImportPlan(
+          s,
+          target: const ImportTarget(accountId: 'acc_a'),
+          today: _today,
+          idGenerator: _seqIds(),
+        );
+        expect(plan.update, isEmpty);
+        final t = plan.create.single;
+        expect(t.type, TransactionType.invoicePayment);
+        expect(t.accountId, 'acc_a');
+        expect(t.cardId, 'card_k');
+        expect(t.invoiceKey, '2026-11');
+        expect(t.status, TransactionStatus.paid);
+        expect(t.amountCents, 120000);
+        expect(t.tags, isEmpty);
+        expect(t.categoryId, isNull);
+        expect(t.installmentGroupId, isNull);
+      },
+    );
+
+    test(
+      'valor diferente: sem sugestão e desmarcada; escolha manual inclui; null desfaz',
+      () {
+        final s = _session(
+          [_line(5, DateTime(2026, 11, 5), 'PAGTO FATURA CARTAO', -100000)],
+          invoiceCandidates: [_nov('card_k', 120000)],
+        );
+        expect(s.rows.single.isInvoicePayment, isFalse);
+        expect(s.rows.single.include, isFalse);
+
+        final chosen = s.setInvoicePayment(0, _nov('card_k', 120000));
+        expect(chosen.rows.single.include, isTrue);
+        expect(chosen.rows.single.categoryId, isNull);
+        final plan = buildImportPlan(
+          chosen,
+          target: const ImportTarget(accountId: 'acc_a'),
+          today: _today,
+          idGenerator: _seqIds(),
+        );
+        expect(plan.create.single.type, TransactionType.invoicePayment);
+
+        final back = chosen.setInvoicePayment(0, null);
+        expect(back.rows.single.isInvoicePayment, isFalse);
+        expect(back.rows.single.type, TransactionType.expense);
+        expect(
+          back.rows.single.categoryId,
+          s.rows.single.suggestion.categoryId,
+        );
+      },
+    );
+
+    test('importação em cartão: nunca vira pagamento de fatura', () {
+      final s = _session(
+        [pay],
+        target: const ImportTarget(cardId: 'card_c'),
+        invoiceCandidates: [_nov('card_k', 120000)],
+      );
+      expect(s.rows.single.isInvoicePayment, isFalse);
+      expect(s.invoiceCandidates, isEmpty);
+      final same = s.setInvoicePayment(0, _nov('card_k', 120000));
+      expect(same.rows.single.isInvoicePayment, isFalse);
+    });
+
+    test(
+      'receita nunca vira pagamento; duplicata por FITID fica desmarcada',
+      () {
+        final income = _session(
+          [_line(1, DateTime(2026, 11, 5), 'PAGAMENTO RECEBIDO', 120000)],
+          invoiceCandidates: [_nov('card_k', 120000)],
+        ).setInvoicePayment(0, _nov('card_k', 120000));
+        expect(income.rows.single.isInvoicePayment, isFalse);
+
+        final dup = _session(
+          [
+            _line(
+              5,
+              DateTime(2026, 11, 5),
+              'PAGTO FATURA CARTAO',
+              -120000,
+              fitid: 'F1',
+            ),
+          ],
+          existing: [
+            Transaction(
+              id: 'e1',
+              type: TransactionType.expense,
+              amountCents: 120000,
+              date: DateTime(2026, 11, 5),
+              description: 'PAGTO FATURA CARTAO',
+              accountId: 'acc_a',
+              externalId: 'F1',
+            ),
+          ],
+          invoiceCandidates: [_nov('card_k', 120000)],
+        );
+        expect(
+          dup.rows.single.match.flags,
+          contains(ImportFlag.fitidDuplicate),
+        );
+        // Sugestão existe, mas duplicata por FITID deixa a linha desmarcada.
+        expect(dup.rows.single.isInvoicePayment, isTrue);
+        expect(dup.rows.single.include, isFalse);
+      },
+    );
+
+    test('setCategory e recategorize ignoram a linha de fatura', () {
+      final s = _session([pay], invoiceCandidates: [_nov('card_k', 120000)]);
+      expect(s.setCategory(0, 'cat_lazer').rows.single.categoryId, isNull);
+      final re = s.recategorize(
+        _categorizer(
+          rules: const [
+            TransactionRule(
+              id: 'r',
+              pattern: 'PAGTO',
+              categoryId: 'cat_transporte',
+            ),
+          ],
+        ),
+      );
+      expect(re.rows.single.isInvoicePayment, isTrue);
+      expect(re.rows.single.categoryId, isNull);
+    });
   });
 
   test('desempenho: 2.000 linhas contra 10.000 transações < 2 s', () {

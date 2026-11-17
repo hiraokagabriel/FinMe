@@ -1,9 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../../../app/app_scope.dart';
+import '../../../app/ledger.dart';
 import '../../../core/models/app_settings.dart';
+import '../../../core/models/year_month.dart';
 import '../../categories/domain/category_tree.dart';
 import '../../net_worth/domain/net_worth.dart';
+import '../../transactions/domain/tags.dart';
 import '../domain/category_pivot.dart';
 import '../domain/category_reports.dart';
 import '../domain/merchant_report.dart';
@@ -12,12 +17,19 @@ import '../domain/report_csv.dart';
 import '../domain/report_filter.dart';
 import '../domain/spending_heatmap.dart';
 
+/// Teto do histórico de patrimônio do relatório (SPEC §9.9); o Ledger guarda só 24.
+const int _netWorthReportMaxMonths = 120;
+
 /// Cache dos relatórios por filtro (SPEC §6.4). Fica fora do Ledger: o filtro é estado de tela.
 /// Zera o cache quando o Ledger notifica ou quando o filtro muda.
+/// Filtro, relatório e média ficam no registro `reports` de `services.uiState` (SPEC §9.8).
 class ReportsController extends ChangeNotifier {
   ReportsController(this.services) {
     services.ledger.addListener(_onLedgerChanged);
+    _restore();
   }
+
+  static const _id = 'reports';
 
   final AppServices services;
 
@@ -38,6 +50,41 @@ class ReportsController extends ChangeNotifier {
   List<FixedVariableMonth>? _fixedVariable;
   List<NetWorthPoint>? _netWorth;
 
+  /// Lê o registro de tela. Ausente ou corrompido → padrões; ids removidos saem do filtro.
+  void _restore() {
+    final rows = services.uiState.loadAll().where((m) => m['id'] == _id);
+    final saved = rows.isEmpty ? const <String, dynamic>{} : rows.first;
+    final rawFilter = saved['filter'];
+    _filter =
+        ReportFilter.fromMap(
+          rawFilter is Map<String, dynamic> ? rawFilter : const {},
+        ).withKnownIds(
+          accountIds: {for (final a in services.accounts.all) a.id},
+          cardIds: {for (final c in services.cards.all) c.id},
+          categoryIds: {for (final c in services.categories.all) c.id},
+          tagKeys: {for (final t in services.ledger.allTags) tagKey(t)},
+        );
+    _selected =
+        ReportKind.values.asNameMap()[saved['selected']] ?? ReportKind.trend;
+    _averageMonths = saved['averageMonths'] == 6 ? 6 : 3;
+  }
+
+  /// Sem await: perder o estado de tela não é erro. Não toca `settings` nem o Ledger.
+  void _save() {
+    unawaited(
+      services.uiState
+          .put(_id, {
+            'id': _id,
+            'filter': _filter.toMap(),
+            'selected': _selected.name,
+            'averageMonths': _averageMonths,
+          })
+          .catchError(
+            (Object e) => debugPrint('Relatórios: falha ao gravar estado: $e'),
+          ),
+    );
+  }
+
   ReportFilter get filter => _filter;
 
   set filter(ReportFilter value) {
@@ -46,6 +93,7 @@ class ReportsController extends ChangeNotifier {
     }
     _filter = value;
     _clearCache();
+    _save();
     notifyListeners();
   }
 
@@ -56,6 +104,7 @@ class ReportsController extends ChangeNotifier {
       return;
     }
     _selected = value;
+    _save();
     notifyListeners();
   }
 
@@ -68,6 +117,7 @@ class ReportsController extends ChangeNotifier {
     }
     _averageMonths = value;
     _comparison = null;
+    _save();
     notifyListeners();
   }
 
@@ -161,10 +211,31 @@ class ReportsController extends ChangeNotifier {
         today: services.ledger.today,
       );
 
-  List<NetWorthPoint> get netWorth => _netWorth ??= [
-    for (final p in services.ledger.netWorthHistory)
-      if (p.month >= range.from && p.month <= range.to) p,
-  ];
+  /// Até 24 meses desde o início do período: recorte do Ledger. Mais longo: histórico próprio (SPEC §9.9).
+  List<NetWorthPoint> get netWorth => _netWorth ??= _netWorthOf(range);
+
+  List<NetWorthPoint> _netWorthOf(ReportRange r) {
+    final today = services.ledger.today;
+    final cur = YearMonth.fromDate(today);
+    final span = (cur.year - r.from.year) * 12 + cur.month - r.from.month + 1;
+    final history = span <= Ledger.netWorthMonths
+        ? services.ledger.netWorthHistory
+        : netWorthHistory(
+            accounts: services.accounts.all,
+            cards: services.cards.all,
+            transactions: services.transactions.all,
+            assets: services.assets.all,
+            debts: services.debts.all,
+            today: today,
+            months: span < _netWorthReportMaxMonths
+                ? span
+                : _netWorthReportMaxMonths,
+          );
+    return [
+      for (final p in history)
+        if (p.month >= r.from && p.month <= r.to) p,
+    ];
+  }
 
   List<String> ignoredFor(ReportKind k) => ignoredFilters(k, effectiveFilter);
 

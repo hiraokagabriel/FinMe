@@ -114,6 +114,7 @@ List<Transaction> occurrenceTransactions(
           status: _occurrenceStatus(r, d, to, forProjection: forProjection),
           isBoleto: r.isBoleto,
           recurringId: r.id,
+          tags: r.tags,
         ),
   ];
 }

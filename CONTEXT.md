@@ -118,6 +118,7 @@ Detalhes completos em `docs/SPEC.md` §5. Resumo:
 - Backup JSON: exportar e importar. O import é tudo-ou-nada (SPEC §3.5): valida tudo antes de gravar, tira um retrato de todas as coleções e das configurações, e em qualquer falha (gravação ou `materializeRecurring`) restaura o retrato com `replaceAll`/`settings.update` e relança o erro. Limite: se o disco falhar também na restauração, o estado pode ficar parcial. CSV: transações do mês.
 - Entidades: `copyWith` limpa campos anuláveis com sentinela privada `_keep` (SPEC §4): omitido mantém, `null` limpa, valor substitui. Vale para `Transaction`, `RecurringRule`, `PaymentCard` e `TransactionCategory`.
 - Excluir conta ou cartão com transações: só arquivar.
+- Perfis (Fase 14, SPEC §10): box global `fm_profiles`; perfil "Principal" (`default`) usa os boxes `fm_*`, os demais `p<id>_fm_*` e `finme_import_journal_<id>.json`. Backup, CSV e "Apagar todos" valem só para o perfil aberto.
 
 ## 8. Testes
 
@@ -165,10 +166,12 @@ Detalhes completos em `docs/SPEC.md` §5. Resumo:
 - Fase 11 concluída: página Patrimônio (índice 9, depois de Contas, sem atalho numérico) com patrimônio líquido = contas + ativos (snapshots datados, `fm_assets`) + a receber − a pagar − dívida de cartão (compras lançadas inclusive parcelas futuras − estornos − pagamentos), gráfico de 24 meses e breakdown; devo/me devem (`fm_debts`) com pagamentos parciais que geram transação e desfazer; "devo" com vencimento entra na Previsão e no "posso gastar" via `extraEvents`; KPI de patrimônio no Painel Ultra; badge de dívidas vencidas; comandos na paleta.
 - Fase 12 concluída: página Relatórios (índice 10, entre Categorias e Ajustes, sem atalho numérico) com filtros globais (período, contas/cartões, categorias com filhas, tags, tipo, provisionados) e 7 relatórios no Ultra (comparativo por categoria com média 3/6 meses e drill-down, tendência 12 meses com média móvel, heatmap diário por quantil, top estabelecimentos, fixo × variável, patrimônio, pivot categoria × mês) e 3 no Simples (tendência, estabelecimentos, comparativo); export CSV (`;`, vírgula decimal, BOM, valores reais); `ReportsController` com cache por filtro, fora do Ledger; mês corrente cortado em hoje; 20k transações × 24 meses < 300 ms por relatório (pior ≈ 22 ms em debug). Comandos de relatório na paleta. 1194 testes.
 - Fase 6: import de backup tudo-ou-nada (restaura o estado anterior em falha), previsão cobre os 60 dias da linha do tempo (`Ledger.invoiceTimelineDays`, `ForecastService.horizonEnd`), `copyWith` limpa anuláveis (sentinela `_keep`), fatura de transição sem fusão na mudança de ciclo (`installmentDueMonth`, `invoiceMonthForKey`; SPEC §5.1).
+- Fase 14 (perfis, T-230..T-233): `ProfileGate` na raiz (`main.dart`) abre direto com um perfil sem PIN, senão `ProfilePickerPage`; sidebar mostra o perfil e "Trocar perfil"; Ajustes → Perfil (renomear, PIN, criar, excluir outro). Não commitada; feita por cima da Fase 13 em aberto.
 - Próximos passos sugeridos: ver ROADMAP.md.
 
 ## 12. Pendências conhecidas
 
+- Perfis: o PIN só bloqueia a interface (boxes Hive legíveis em disco, sem criptografia) e não tem limite de tentativas; o seletor não lembra o último perfil aberto.
 - Relatórios: filtro não persiste entre execuções; heatmap com 60 meses monta todas as células de uma vez; `backup_service` mantém cópias privadas de `formatCsvMoney`/`csvText`; patrimônio limitado aos 24 meses do Ledger.
 - Patrimônio/dívidas: editar ou excluir pela tela de Transações a transação gerada por uma quitação não altera a dívida.
 - Recorrências sem tags; `hasAnyTag` dobra tags a cada build de Transações.

@@ -24,6 +24,7 @@ Direção do produto e próximos passos. Tarefas detalhadas e status: `docs/BACK
 - **Fase 10 — Subcategorias, tags, metas e "posso gastar hoje"** (T-120..T-142).
 - **Fase 11 — Patrimônio e devo/me devem** (T-150..T-164).
 - **Fase 12 — Relatórios**: 7 relatórios curados com filtros globais e CSV (T-170..T-190). **v3 concluída.**
+- **Fase 14 — Perfis**: vários perfis com dados isolados e PIN opcional (T-230..T-233).
 
 ## Próximos passos sugeridos
 

@@ -4,8 +4,10 @@ import '../../../app/app_scope.dart';
 import '../../../core/models/app_settings.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
+import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/widgets.dart';
 import '../../rules/presentation/rules_section.dart';
+import '../domain/import_batch.dart';
 import '../domain/import_profile.dart';
 import 'dictionary_section.dart';
 import 'import_flow.dart';
@@ -23,11 +25,17 @@ class ImportPage extends StatelessWidget {
     final s = AppScope.of(context);
     return ListenableBuilder(
       // Ledger entra no merge: nomes de conta e cartão do destino vêm dele.
-      listenable: Listenable.merge([s.importProfiles, s.settings, s.ledger]),
+      listenable: Listenable.merge([
+        s.importProfiles,
+        s.importBatches,
+        s.settings,
+        s.ledger,
+      ]),
       builder: (context, _) {
         final ultra = s.settings.value.mode == AppMode.ultra;
         final profiles = [...s.importProfiles.all]
           ..sort((a, b) => a.name.compareTo(b.name));
+        final batches = _newestFirst(s.importBatches.all);
         return ListView(
           padding: const EdgeInsets.only(bottom: AppSpace.xl),
           children: [
@@ -51,6 +59,10 @@ class ImportPage extends StatelessWidget {
                     ultra: ultra,
                     pickFile: pickFile,
                   ),
+                  if (batches.isNotEmpty) ...[
+                    const SizedBox(height: AppSpace.lg),
+                    _RecentBatchesCard(batches: batches),
+                  ],
                   if (ultra) ...[
                     const SizedBox(height: AppSpace.lg),
                     const RulesSection(),
@@ -64,6 +76,94 @@ class ImportPage extends StatelessWidget {
         );
       },
     );
+  }
+}
+
+/// Lotes mais recentes primeiro (mesma ordem de `latestImportBatch`: empate, id maior).
+List<ImportBatch> _newestFirst(Iterable<ImportBatch> batches) =>
+    [...batches]..sort((a, b) {
+      final byDate = b.createdAt.compareTo(a.createdAt);
+      return byDate != 0 ? byDate : b.id.compareTo(a.id);
+    });
+
+/// "Importações recentes" (SPEC §9.4 regra 6): só o lote mais recente tem 'Desfazer'.
+class _RecentBatchesCard extends StatelessWidget {
+  const _RecentBatchesCard({required this.batches});
+
+  final List<ImportBatch> batches;
+
+  @override
+  Widget build(BuildContext context) {
+    final latest = latestImportBatch(batches)?.id;
+    return SectionCard(
+      title: 'Importações recentes',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final b in batches.take(kImportBatchesKept))
+            _BatchRow(batch: b, undoable: b.id == latest),
+        ],
+      ),
+    );
+  }
+}
+
+class _BatchRow extends StatelessWidget {
+  const _BatchRow({required this.batch, required this.undoable});
+
+  final ImportBatch batch;
+  final bool undoable;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final confirmed = batch.confirmedCount > 0
+        ? ' · ${batch.confirmedCount} confirmados'
+        : '';
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: c.border)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                '${batch.label} · ${formatDate(batch.createdAt)} · '
+                '${batch.createdCount} lançamentos$confirmed',
+                style: Theme.of(context).textTheme.bodyMedium,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (undoable)
+              TextButton(
+                key: Key('import-undo-${batch.id}'),
+                onPressed: () => _undo(context),
+                child: const Text('Desfazer'),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _undo(BuildContext context) async {
+    final s = AppScope.of(context);
+    final ok = await confirmDialog(
+      context,
+      title: 'Desfazer importação?',
+      message:
+          '${batch.createdCount} lançamentos criados por este arquivo serão '
+          'excluídos e ${batch.confirmedCount} provisionados voltam a ficar '
+          'pendentes. Edições feitas depois neles são perdidas.',
+      confirmLabel: 'Desfazer',
+      destructive: true,
+    );
+    if (!ok || !context.mounted) {
+      return;
+    }
+    await undoAndNotify(ScaffoldMessenger.of(context), s, batch);
   }
 }
 

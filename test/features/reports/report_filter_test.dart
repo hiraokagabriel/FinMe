@@ -412,4 +412,100 @@ void main() {
       expect(isFutureUnplanned(planejada, hoje), isFalse);
     });
   });
+
+  group('serialização (toMap / fromMap / withKnownIds)', () {
+    test(
+      'ida e volta: padrão, custom completo, flow income e provisionados',
+      () {
+        final padrao = ReportFilter();
+        final custom = ReportFilter(
+          preset: ReportPeriodPreset.custom,
+          customFrom: const YearMonth(2026, 3),
+          customTo: const YearMonth(2026, 9),
+          accountIds: {'b', 'a'},
+          cardIds: {'K'},
+          categoryIds: {'mer'},
+          tagKeys: {'VIAGEM'},
+          flow: ReportFlow.income,
+          includePlanned: true,
+        );
+        expect(ReportFilter.fromMap(padrao.toMap()), padrao);
+        expect(ReportFilter.fromMap(custom.toMap()), custom);
+        expect(custom.toMap()['accountIds'], ['a', 'b']);
+        expect(custom.toMap()['customFrom'], '2026-03');
+      },
+    );
+
+    test(
+      'fromMap vazio é o padrão; preset/flow desconhecidos caem no padrão',
+      () {
+        expect(ReportFilter.fromMap({}), ReportFilter());
+        final f = ReportFilter.fromMap({'preset': 'x', 'flow': 'y'});
+        expect(f.preset, ReportPeriodPreset.last12);
+        expect(f.flow, ReportFlow.expense);
+      },
+    );
+
+    test('custom com mês inválido ou faltando → last12', () {
+      final f = ReportFilter.fromMap({
+        'preset': 'custom',
+        'customFrom': '2026-13',
+        'customTo': '2026-09',
+      });
+      expect(f.preset, ReportPeriodPreset.last12);
+      expect(f.customFrom, isNull);
+      expect(f.customTo, isNull);
+      expect(
+        ReportFilter.fromMap({
+          'preset': 'custom',
+          'customFrom': '2026-01',
+        }).preset,
+        ReportPeriodPreset.last12,
+      );
+    });
+
+    test('listas: não-lista → vazia; itens não String ignorados', () {
+      final f = ReportFilter.fromMap({
+        'accountIds': 'x',
+        'cardIds': ['K', 1, null],
+      });
+      expect(f.accountIds, isEmpty);
+      expect(f.cardIds, {'K'});
+      expect(f.includePlanned, isFalse);
+      expect(
+        ReportFilter.fromMap({'includePlanned': 'true'}).includePlanned,
+        isFalse,
+      );
+    });
+
+    test('withKnownIds remove ids ausentes e mantém o resto', () {
+      final f = ReportFilter(
+        preset: ReportPeriodPreset.last6,
+        accountIds: {'a', 'gone'},
+        cardIds: {'K', 'gone'},
+        categoryIds: {'mer', 'gone'},
+        tagKeys: {'VIAGEM', 'gone'},
+        flow: ReportFlow.income,
+        includePlanned: true,
+      );
+      final k = f.withKnownIds(
+        accountIds: {'a'},
+        cardIds: {'K'},
+        categoryIds: {'mer'},
+        tagKeys: {'VIAGEM'},
+      );
+      expect(
+        k,
+        ReportFilter(
+          preset: ReportPeriodPreset.last6,
+          accountIds: {'a'},
+          cardIds: {'K'},
+          categoryIds: {'mer'},
+          tagKeys: {'VIAGEM'},
+          flow: ReportFlow.income,
+          includePlanned: true,
+        ),
+      );
+    });
+  });
 }

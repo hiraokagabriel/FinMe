@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../../../app/app_scope.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/formatters.dart';
@@ -9,9 +10,11 @@ import '../../../core/widgets/indicators.dart';
 import '../../../core/widgets/money.dart';
 import '../../../core/widgets/sortable_header.dart';
 import '../../categories/domain/transaction_category.dart';
+import '../../transactions/domain/transaction.dart';
 import '../domain/categorizer.dart';
 import '../domain/import_matcher.dart';
 import '../domain/import_session.dart';
+import '../domain/invoice_payment_match.dart';
 
 // Larguras das colunas: cabeçalho e linha usam as mesmas.
 const double _wCheck = 40;
@@ -131,6 +134,7 @@ class ImportPreviewRow extends StatelessWidget {
   const ImportPreviewRow({
     super.key,
     required this.row,
+    required this.index,
     required this.ultra,
     required this.categoryOptions,
     required this.onInclude,
@@ -138,9 +142,14 @@ class ImportPreviewRow extends StatelessWidget {
     this.labelOf,
     this.onCreateInstallments,
     this.onCreateRule,
+    this.invoiceCandidates = const [],
+    this.onInvoice,
   });
 
   final ImportRow row;
+
+  /// Posição da linha na sessão (chave `import-invoice-{index}` do menu de fatura).
+  final int index;
   final bool ultra;
 
   /// Já filtradas pelo tipo da linha.
@@ -152,6 +161,12 @@ class ImportPreviewRow extends StatelessWidget {
   final ValueChanged<String?> onCategory;
   final ValueChanged<bool>? onCreateInstallments;
   final VoidCallback? onCreateRule;
+
+  /// Faturas em aberto da conta (vazio em importação de cartão); sem elas não há menu de fatura.
+  final List<InvoiceCandidate> invoiceCandidates;
+
+  /// Marca (`InvoiceCandidate`) ou desfaz (`null`) o pagamento de fatura da linha.
+  final ValueChanged<InvoiceCandidate?>? onInvoice;
 
   @override
   Widget build(BuildContext context) {
@@ -171,6 +186,32 @@ class ImportPreviewRow extends StatelessWidget {
     final onRule = ultra ? onCreateRule : null;
     final onSeries = ultra ? onCreateInstallments : null;
     final planned = row.match.plannedMatch;
+    final invoiceOn =
+        onInvoice != null &&
+        invoiceCandidates.isNotEmpty &&
+        row.type == TransactionType.expense &&
+        (row.isInvoicePayment ||
+            row.match.flags.contains(ImportFlag.invoicePaymentLike));
+    final invoiceMenu = invoiceOn
+        ? _InvoiceMenu(
+            index: index,
+            selected: row.invoicePayment,
+            choices: invoiceChoicesFor(line.date, invoiceCandidates),
+            labelOf: (f) => _invoiceLabel(
+              AppScope.of(context).cards.byId(f.cardId)?.name,
+              f,
+            ),
+            onPick: onInvoice!,
+            style: body,
+          )
+        : null;
+    // Marcado: o menu ocupa o seletor de categoria. Não marcado: fica na coluna de alertas.
+    final invoiceInCategory = row.isInvoicePayment ? invoiceMenu : null;
+    final invoiceInFlags = row.isInvoicePayment ? null : invoiceMenu;
+    final shownFlags = [
+      for (final f in row.match.flags)
+        if (!(invoiceOn && f == ImportFlag.invoicePaymentLike)) f,
+    ];
 
     final text = ultra && row.finalDescription != line.description
         ? Column(
@@ -253,30 +294,26 @@ class ImportPreviewRow extends StatelessWidget {
             ],
           );
 
-    final flags = ultra
-        ? Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (final f in row.match.flags) _flagIcon(c, f),
-              if (planned != null)
-                Tooltip(
-                  message:
-                      'Confirma provisionado ${planned.description} de '
-                      '${formatShortDate(planned.date)}',
-                  child: Icon(
-                    Icons.event_available,
-                    size: 16,
-                    color: c.primary,
-                  ),
-                ),
-            ],
-          )
-        : row.hasWarning
-        ? Tooltip(
-            message: _flagLabel(row.match.flags.first),
+    final flags = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (ultra)
+          for (final f in shownFlags) _flagIcon(c, f)
+        else if (shownFlags.isNotEmpty)
+          Tooltip(
+            message: _flagLabel(shownFlags.first),
             child: Icon(Icons.error_outline, size: 16, color: c.warning),
-          )
-        : const SizedBox.shrink();
+          ),
+        if (ultra && planned != null)
+          Tooltip(
+            message:
+                'Confirma provisionado ${planned.description} de '
+                '${formatShortDate(planned.date)}',
+            child: Icon(Icons.event_available, size: 16, color: c.primary),
+          ),
+        if (invoiceInFlags != null) Flexible(child: invoiceInFlags),
+      ],
+    );
 
     final menu = onRule == null
         ? null
@@ -320,10 +357,60 @@ class ImportPreviewRow extends StatelessWidget {
           colorBySign: ultra && row.include,
           style: body,
         ),
-        category: category,
+        category: invoiceInCategory ?? category,
         installment: installment,
         flags: flags,
         menu: menu,
+      ),
+    );
+  }
+}
+
+/// Rótulo de fatura: "Fatura {cartão} · venc. dd/mm".
+String _invoiceLabel(String? cardName, InvoiceCandidate f) =>
+    'Fatura ${cardName ?? 'Cartão'} · venc. ${formatShortDate(f.dueDate)}';
+
+/// Menu de pagamento de fatura: rótulo da fatura marcada ou 'Pagamento de fatura?'.
+/// Opções: uma fatura por cartão; 'Não é pagamento de fatura' só quando marcado.
+class _InvoiceMenu extends StatelessWidget {
+  const _InvoiceMenu({
+    required this.index,
+    required this.selected,
+    required this.choices,
+    required this.labelOf,
+    required this.onPick,
+    required this.style,
+  });
+
+  final int index;
+  final InvoiceCandidate? selected;
+  final List<InvoiceCandidate> choices;
+  final String Function(InvoiceCandidate f) labelOf;
+  final ValueChanged<InvoiceCandidate?> onPick;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    final current = selected;
+    return PopupMenuButton<int>(
+      key: Key('import-invoice-$index'),
+      tooltip: 'Pagamento de fatura',
+      // Índice negativo = "Não é pagamento de fatura" (null não serve: o menu trata como cancelado).
+      onSelected: (k) => onPick(k < 0 ? null : choices[k]),
+      itemBuilder: (_) => [
+        for (final (k, f) in choices.indexed)
+          PopupMenuItem<int>(value: k, child: Text(labelOf(f))),
+        if (current != null)
+          const PopupMenuItem<int>(
+            value: -1,
+            child: Text('Não é pagamento de fatura'),
+          ),
+      ],
+      child: Text(
+        current == null ? 'Pagamento de fatura?' : labelOf(current),
+        style: style,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
       ),
     );
   }

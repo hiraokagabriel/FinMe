@@ -90,6 +90,68 @@ bool isDebtOverdue(Debt debt, DateTime today) {
   return due != null && dateOnly(today).isAfter(due) && !debt.settled;
 }
 
+/// transactionId dos pagamentos cuja transação existe agora (`exists`).
+Set<String> linkedTransactionIds(
+  Iterable<Debt> debts,
+  bool Function(String id) exists,
+) {
+  final ids = <String>{};
+  for (final debt in debts) {
+    for (final payment in debt.payments) {
+      final id = payment.transactionId;
+      if (id != null && exists(id)) {
+        ids.add(id);
+      }
+    }
+  }
+  return ids;
+}
+
+/// Ajusta pagamentos ligados a transações de [knownIds]: transação ausente (ou com valor ≤ 0) remove o pagamento;
+/// valor ou data diferentes trocam o pagamento (mesmo id). Devolve só as dívidas que mudaram.
+/// Ids fora de [knownIds] (órfãos de backup) não são tocados.
+List<Debt> syncDebtsWithTransactions(
+  Iterable<Debt> debts, {
+  required Set<String> knownIds,
+  required Transaction? Function(String id) lookup,
+}) {
+  final changed = <Debt>[];
+  for (final debt in debts) {
+    var current = debt;
+    for (final payment in debt.payments) {
+      final id = payment.transactionId;
+      if (id == null || !knownIds.contains(id)) {
+        continue;
+      }
+      final transaction = lookup(id);
+      if (transaction == null || transaction.amountCents <= 0) {
+        // shortcut: transação com valor ≤ 0 some do pagamento porque DebtPayment exige valor > 0.
+        current = current.withoutPayment(payment.id);
+      } else if (transaction.amountCents != payment.amountCents ||
+          transaction.date != payment.date) {
+        current = current.copyWith(
+          payments: [
+            for (final p in current.payments)
+              if (p.id == payment.id)
+                DebtPayment(
+                  id: p.id,
+                  date: transaction.date,
+                  amountCents: transaction.amountCents,
+                  transactionId: id,
+                )
+              else
+                p,
+          ],
+        );
+      }
+    }
+    if (current != debt) {
+      changed.add(current);
+    }
+  }
+  return changed;
+}
+
 /// Soma do restante em [date] por direção.
 ({int receivableCents, int payableCents}) debtTotalsAt(
   Iterable<Debt> debts,

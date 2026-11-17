@@ -33,12 +33,25 @@ List<String> normalizeTags(Iterable<String> raw) {
 List<String> parseTagInput(String input) =>
     normalizeTags(input.split(RegExp('[,;]')));
 
+/// Chaves de [t] já dobradas. Memoizado por instância: `Transaction` é imutável.
+final _tagKeysCache = Expando<Set<String>>();
+
+/// Conjunto imutável de [tagKey] das tags de [t]; sem tags → vazio.
+Set<String> tagKeysOf(Transaction t) {
+  if (t.tags.isEmpty) {
+    return const {};
+  }
+  return _tagKeysCache[t] ??= Set.unmodifiable({
+    for (final tag in t.tags) tagKey(tag),
+  });
+}
+
 /// Alguma tag de [t] tem uma das [keys] (já em [tagKey]). [keys] vazio → true.
 bool hasAnyTag(Transaction t, Set<String> keys) {
   if (keys.isEmpty) {
     return true;
   }
-  return t.tags.any((tag) => keys.contains(tagKey(tag)));
+  return tagKeysOf(t).any(keys.contains);
 }
 
 /// Adiciona [tags] só nas transações que ganham alguma tag nova.

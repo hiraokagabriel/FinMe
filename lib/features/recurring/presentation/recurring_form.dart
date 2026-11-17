@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/app_scope.dart';
 import '../../../app/bootstrap.dart';
+import '../../../core/models/app_settings.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/date_utils.dart';
@@ -10,6 +11,7 @@ import '../../../core/utils/id.dart';
 import '../../../core/widgets/widgets.dart';
 import '../../categories/domain/transaction_category.dart';
 import '../../transactions/domain/transaction.dart';
+import '../../transactions/presentation/tag_widgets.dart';
 import '../domain/recurring_rule.dart';
 
 const _accountPrefix = 'acc:';
@@ -55,11 +57,13 @@ class _RecurringDialogState extends State<_RecurringDialog> {
   // Origem como 'acc:<id>' ou 'card:<id>'; null até o usuário escolher.
   String? _originKey;
   String? _categoryId;
+  late List<String> _tags;
   String? _endError;
   late final String _id;
   bool _saving = false;
 
   bool get _isExpense => _type == TransactionType.expense;
+  bool get _ultra => widget.services.settings.value.mode == AppMode.ultra;
   bool get _isAccount => _originKey?.startsWith(_accountPrefix) ?? false;
   String get _originId => _originKey!.split(':').last;
   CategoryKind get _kind =>
@@ -85,6 +89,7 @@ class _RecurringDialogState extends State<_RecurringDialog> {
     _boleto = r?.isBoleto ?? false;
     _originKey = r == null ? null : _keyOf(r);
     _categoryId = _validCategory(r?.categoryId);
+    _tags = r?.tags ?? const [];
   }
 
   @override
@@ -159,6 +164,8 @@ class _RecurringDialogState extends State<_RecurringDialog> {
       type: _type,
       amountCents: parseMoney(_amount.text)!,
       categoryId: _categoryId,
+      // No Simples o campo some, mas as tags da regra seguem para o save.
+      tags: _tags,
       accountId: _isAccount ? _originId : null,
       cardId: _isAccount ? null : _originId,
       frequency: _frequency,
@@ -270,6 +277,12 @@ class _RecurringDialogState extends State<_RecurringDialog> {
                 ],
                 onChanged: (v) => setState(() => _categoryId = v),
               ),
+              if (_ultra)
+                TagField(
+                  tags: _tags,
+                  suggestions: widget.services.ledger.allTags,
+                  onChanged: (v) => setState(() => _tags = v),
+                ),
               DropdownButtonFormField<Frequency>(
                 initialValue: _frequency,
                 decoration: const InputDecoration(labelText: 'Frequência'),

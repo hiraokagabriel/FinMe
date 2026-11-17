@@ -138,26 +138,9 @@ class _Grid extends StatelessWidget {
         1;
     final offset = from.weekday % 7;
     final weeks = (offset + count - 1) ~/ 7 + 1;
-    final slots = List.generate(
-      weeks,
-      (_) => List<Widget>.filled(7, const SizedBox.square(dimension: _stride)),
-    );
-    final monthLabels = List<String?>.filled(weeks, null);
-    for (var i = 0; i < count; i++) {
-      final day = DateTime(from.year, from.month, from.day + i);
-      final pos = i + offset;
-      final col = pos ~/ 7;
-      final s = heatmap.days[day];
-      final level = heatmap.levelOf(s?.cents ?? 0);
-      slots[col][pos % 7] = _cell(c, day, s, level);
-      if (i == 0 || day.day == 1) {
-        monthLabels[col] = formatMonth(
-          YearMonth.fromDate(day),
-        ).split('/').first;
-      }
-    }
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
+    // Colunas montadas sob demanda: 60 meses não geram ~1.800 células de uma vez.
+    return SizedBox(
+      height: 8 * _stride,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -171,15 +154,46 @@ class _Grid extends StatelessWidget {
               ],
             ),
           ),
-          for (var w = 0; w < weeks; w++)
-            Column(
-              children: [
-                _label(monthLabels[w] ?? '', labelStyle, _stride),
-                ...slots[w],
-              ],
+          Expanded(
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemExtent: _stride,
+              itemCount: weeks,
+              itemBuilder: (_, w) =>
+                  _column(c, labelStyle, w, count: count, offset: offset),
             ),
+          ),
         ],
       ),
+    );
+  }
+
+  /// Coluna [w]: rótulo do mês + 7 células. O dia de cada célula é `from + (w × 7 + r − offset)`.
+  Widget _column(
+    AppColors c,
+    TextStyle labelStyle,
+    int w, {
+    required int count,
+    required int offset,
+  }) {
+    final from = heatmap.from;
+    final cells = <Widget>[];
+    var monthLabel = '';
+    for (var r = 0; r < 7; r++) {
+      final i = w * 7 + r - offset;
+      if (i < 0 || i >= count) {
+        cells.add(const SizedBox.square(dimension: _stride));
+        continue;
+      }
+      final day = DateTime(from.year, from.month, from.day + i);
+      final s = heatmap.days[day];
+      cells.add(_cell(c, day, s, heatmap.levelOf(s?.cents ?? 0)));
+      if (i == 0 || day.day == 1) {
+        monthLabel = formatMonth(YearMonth.fromDate(day)).split('/').first;
+      }
+    }
+    return Column(
+      children: [_label(monthLabel, labelStyle, _stride), ...cells],
     );
   }
 

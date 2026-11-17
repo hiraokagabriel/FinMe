@@ -1,15 +1,23 @@
-import 'package:hive_flutter/hive_flutter.dart';
+import 'dart:io';
 
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:path_provider/path_provider.dart';
+
+import '../core/services/backup_service.dart';
 import '../core/services/collection_repository.dart';
 import '../core/services/record_store.dart';
+import '../core/services/recovery_journal.dart';
 import '../core/services/settings_controller.dart';
 import '../core/utils/date_utils.dart';
 import '../features/accounts/domain/account.dart';
 import '../features/cards/domain/payment_card.dart';
 import '../features/categories/domain/transaction_category.dart';
 import '../features/debts/domain/debt.dart';
+import '../features/debts/presentation/debt_transaction_sync.dart';
 import '../features/goals/domain/goal.dart';
 import '../features/net_worth/domain/asset.dart';
+import '../features/profiles/domain/profile.dart';
+import '../features/importing/domain/import_batch.dart';
 import '../features/importing/domain/import_profile.dart';
 import '../features/importing/domain/merchant_dictionary.dart';
 import '../features/recurring/domain/recurrence.dart';
@@ -33,21 +41,55 @@ const _boxes = [
   'fm_goals',
   'fm_assets',
   'fm_debts',
+  'fm_import_batches',
+  'fm_ui_state',
 ];
 
-/// Monta os serviços do app. Sem [storeFactory] usa Hive; testes passam `MemoryRecordStore`.
+/// SPEC §10.3: o perfil `default` mantém os nomes de antes dos perfis; os outros ganham prefixo.
+String boxNameFor(String profileId, String box) =>
+    profileId == defaultProfileId ? box : 'p${profileId}_$box';
+
+List<String> boxNamesFor(String profileId) => [
+  for (final box in _boxes) boxNameFor(profileId, box),
+];
+
+Future<File> _journalFile(String profileId) async {
+  final support = await getApplicationSupportDirectory();
+  final suffix = profileId == defaultProfileId ? '' : '_$profileId';
+  return File('${support.path}/finme_import_journal$suffix.json');
+}
+
+/// Apaga do disco os boxes e o retrato do perfil. Nunca chamar para o perfil aberto.
+Future<void> deleteProfileData(String profileId) async {
+  for (final name in boxNamesFor(profileId)) {
+    await Hive.deleteBoxFromDisk(name);
+  }
+  final journal = await _journalFile(profileId);
+  if (await journal.exists()) {
+    await journal.delete();
+  }
+}
+
+/// Monta os serviços do perfil [profileId]. Sem [storeFactory] usa Hive; testes passam `MemoryRecordStore`.
+/// [storeFactory] recebe o nome do box já com o prefixo do perfil.
+/// Sem [journal]: arquivo de retrato no Hive, memória com [storeFactory].
 Future<AppServices> bootstrap({
+  String profileId = defaultProfileId,
   RecordStore Function(String box)? storeFactory,
   DateTime Function()? clock,
+  RecoveryJournal? journal,
 }) async {
+  RecoveryJournal? recovery = journal;
   if (storeFactory == null) {
     await Hive.initFlutter('finme');
+    recovery ??= FileRecoveryJournal(await _journalFile(profileId));
   }
   final stores = <String, RecordStore>{};
   for (final box in _boxes) {
+    final name = boxNameFor(profileId, box);
     stores[box] = storeFactory != null
-        ? storeFactory(box)
-        : await HiveRecordStore.open(box);
+        ? storeFactory(name)
+        : await HiveRecordStore.open(name);
   }
   final now = clock ?? DateTime.now;
 
@@ -119,6 +161,17 @@ Future<AppServices> bootstrap({
     toMap: (d) => d.toMap(),
     idOf: (d) => d.id,
   );
+  final importBatches = CollectionRepository<ImportBatch>(
+    store: stores['fm_import_batches']!,
+    fromMap: ImportBatch.fromMap,
+    toMap: (b) => b.toMap(),
+    idOf: (b) => b.id,
+  );
+  final debtSync = DebtTransactionSync(
+    transactions: transactions,
+    debts: debts,
+  );
+  recovery ??= MemoryRecoveryJournal();
 
   if (categories.isEmpty) {
     await categories.upsertAll(defaultCategories());
@@ -156,9 +209,18 @@ Future<AppServices> bootstrap({
     goals: goals,
     assets: assets,
     debts: debts,
+    importBatches: importBatches,
+    uiState: stores['fm_ui_state']!,
+    journal: recovery,
+    debtSync: debtSync,
     ledger: ledger,
     clock: now,
+    stores: stores.values.toList(),
   );
+  // Antes de materializar: o retrato restaurado é o estado a que as recorrências se aplicam.
+  if (await BackupService.recoverPendingImport(services)) {
+    services.restoredFromJournal = true;
+  }
   await materializeRecurring(services);
   return services;
 }

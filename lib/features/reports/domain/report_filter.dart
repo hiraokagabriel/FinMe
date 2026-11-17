@@ -1,4 +1,5 @@
 import '../../../core/models/year_month.dart';
+import '../../../core/utils/enum_utils.dart';
 import '../../categories/domain/category_tree.dart';
 import '../../transactions/domain/tags.dart';
 import '../../transactions/domain/transaction.dart';
@@ -136,6 +137,75 @@ class ReportFilter {
       tagKeys.isNotEmpty ||
       flow != ReportFlow.expense ||
       includePlanned;
+
+  /// Forma persistível (listas ordenadas). Par de [ReportFilter.fromMap].
+  Map<String, dynamic> toMap() => {
+    'preset': preset.name,
+    'customFrom': customFrom?.key,
+    'customTo': customTo?.key,
+    'accountIds': _sorted(accountIds),
+    'cardIds': _sorted(cardIds),
+    'categoryIds': _sorted(categoryIds),
+    'tagKeys': _sorted(tagKeys),
+    'flow': flow.name,
+    'includePlanned': includePlanned,
+  };
+
+  /// Tolerante: preset/flow desconhecidos → padrão; mês inválido → null;
+  /// custom sem os dois meses válidos → last12; listas inválidas → vazias.
+  factory ReportFilter.fromMap(Map<String, dynamic> map) {
+    final from = _monthOf(map['customFrom']);
+    final to = _monthOf(map['customTo']);
+    final preset =
+        ReportPeriodPreset.values.asNameMap()[map['preset']] ??
+        ReportPeriodPreset.last12;
+    final incomplete =
+        preset == ReportPeriodPreset.custom && (from == null || to == null);
+    return ReportFilter(
+      preset: incomplete ? ReportPeriodPreset.last12 : preset,
+      customFrom: incomplete ? null : from,
+      customTo: incomplete ? null : to,
+      accountIds: _stringSet(map['accountIds']),
+      cardIds: _stringSet(map['cardIds']),
+      categoryIds: _stringSet(map['categoryIds']),
+      tagKeys: _stringSet(map['tagKeys']),
+      flow: enumByName(ReportFlow.values, map['flow']),
+      includePlanned: map['includePlanned'] == true,
+    );
+  }
+
+  /// Remove ids de contas, cartões, categorias e tags que não existem mais.
+  ReportFilter withKnownIds({
+    required Set<String> accountIds,
+    required Set<String> cardIds,
+    required Set<String> categoryIds,
+    required Set<String> tagKeys,
+  }) => copyWith(
+    accountIds: this.accountIds.intersection(accountIds),
+    cardIds: this.cardIds.intersection(cardIds),
+    categoryIds: this.categoryIds.intersection(categoryIds),
+    tagKeys: this.tagKeys.intersection(tagKeys),
+  );
+
+  static List<String> _sorted(Set<String> s) => s.toList()..sort();
+
+  static Set<String> _stringSet(Object? v) => v is List
+      ? <String>{
+          for (final e in v)
+            if (e is String) e,
+        }
+      : <String>{};
+
+  static YearMonth? _monthOf(Object? v) {
+    if (v is! String) {
+      return null;
+    }
+    try {
+      return YearMonth.fromKey(v);
+    } on FormatException {
+      return null;
+    }
+  }
 
   @override
   bool operator ==(Object other) =>

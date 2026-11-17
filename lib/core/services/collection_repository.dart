@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'record_store.dart';
 
 /// Coleção de entidades em memória, persistida em um [RecordStore].
-/// upsertAll grava antes de mudar a memória; delete/deleteWhere mudam a memória e depois gravam.
+/// Todas as escritas gravam antes de mudar a memória: falha no store deixa a memória igual ao disco.
 class CollectionRepository<T> extends ChangeNotifier {
   CollectionRepository({
     required RecordStore store,
@@ -52,7 +52,6 @@ class CollectionRepository<T> extends ChangeNotifier {
     if (entries.isEmpty) {
       return;
     }
-    // Grava antes: falha no store deixa a memória igual ao disco.
     await _store.putAll(entries);
     _items.addAll(byId);
     _changed();
@@ -62,9 +61,9 @@ class CollectionRepository<T> extends ChangeNotifier {
     if (!_items.containsKey(id)) {
       return;
     }
+    await _store.delete(id);
     _items.remove(id);
     _changed();
-    await _store.delete(id);
   }
 
   Future<void> deleteWhere(bool Function(T) test) async {
@@ -75,11 +74,11 @@ class CollectionRepository<T> extends ChangeNotifier {
     if (ids.isEmpty) {
       return;
     }
+    await _store.deleteAll(ids);
     for (final id in ids) {
       _items.remove(id);
     }
     _changed();
-    await _store.deleteAll(ids);
   }
 
   /// Substitui tudo (ex.: import de backup).
@@ -93,12 +92,12 @@ class CollectionRepository<T> extends ChangeNotifier {
       byId[id] = item;
       entries[id] = _toMap(item);
     }
+    await _store.putAll(entries);
+    await _store.deleteAll(previousIds.where((id) => !entries.containsKey(id)));
     _items
       ..clear()
       ..addAll(byId);
     _changed();
-    await _store.putAll(entries);
-    await _store.deleteAll(previousIds.where((id) => !entries.containsKey(id)));
   }
 
   void _changed() {

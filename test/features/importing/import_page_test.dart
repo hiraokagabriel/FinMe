@@ -5,8 +5,10 @@ import 'package:finme/core/services/record_store.dart';
 import 'package:finme/core/theme/app_theme.dart';
 import 'package:finme/core/widgets/widgets.dart';
 import 'package:finme/features/accounts/domain/account.dart';
+import 'package:finme/features/importing/domain/import_batch.dart';
 import 'package:finme/features/importing/domain/import_profile.dart';
 import 'package:finme/features/importing/presentation/import_flow.dart';
+import 'package:finme/features/transactions/domain/transaction.dart';
 import 'package:finme/features/importing/presentation/import_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -148,4 +150,100 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(s.transactions.all, isEmpty);
   });
+
+  testWidgets('sem lotes não mostra "Importações recentes"', (tester) async {
+    final s = await _setup(tester);
+    await _pump(tester, s);
+
+    expect(find.text('Importações recentes'), findsNothing);
+  });
+
+  testWidgets(
+    'Importações recentes: só o mais recente tem Desfazer; confirmar desfaz',
+    (tester) async {
+      final s = await _setup(tester);
+      await tester.runAsync(() async {
+        for (final id in ['t_old', 't_new1', 't_new2']) {
+          await s.transactions.upsert(
+            Transaction(
+              id: id,
+              type: TransactionType.expense,
+              amountCents: 1000,
+              date: DateTime(2026, 11, 10),
+              description: id,
+              accountId: 'acc_alfa',
+            ),
+          );
+        }
+        // Provisionado confirmado pelo lote novo: a versão anterior volta.
+        await s.transactions.upsert(
+          Transaction(
+            id: 'boleto',
+            type: TransactionType.expense,
+            amountCents: 3000,
+            date: DateTime(2026, 11, 8),
+            description: 'Boleto C',
+            accountId: 'acc_alfa',
+            status: TransactionStatus.paid,
+          ),
+        );
+        await s.importBatches.upsertAll([
+          ImportBatch(
+            id: 'b_old',
+            createdAt: DateTime(2026, 11, 10, 9),
+            label: 'extrato_out.csv',
+            createdIds: const ['t_old'],
+          ),
+          ImportBatch(
+            id: 'b_new',
+            createdAt: DateTime(2026, 11, 12, 9),
+            label: 'extrato_nov.csv',
+            createdIds: const ['t_new1', 't_new2'],
+            previous: [
+              Transaction(
+                id: 'boleto',
+                type: TransactionType.expense,
+                amountCents: 3000,
+                date: DateTime(2026, 11, 8),
+                description: 'Boleto C',
+                accountId: 'acc_alfa',
+                status: TransactionStatus.planned,
+              ),
+            ],
+          ),
+        ]);
+      });
+      await _pump(tester, s);
+
+      const newLine =
+          'extrato_nov.csv · 12/11/2026 · 2 lançamentos · 1 confirmados';
+      const oldLine = 'extrato_out.csv · 10/11/2026 · 1 lançamentos';
+      expect(find.text(newLine), findsOneWidget);
+      expect(find.text(oldLine), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.text(newLine)).dy,
+        lessThan(tester.getTopLeft(find.text(oldLine)).dy),
+      );
+      expect(find.byKey(const Key('import-undo-b_new')), findsOneWidget);
+      expect(find.byKey(const Key('import-undo-b_old')), findsNothing);
+
+      await tester.tap(find.byKey(const Key('import-undo-b_new')));
+      await tester.pumpAndSettle();
+      expect(find.text('Desfazer importação?'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, 'Desfazer'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text(
+          'Importação desfeita: 2 lançamentos removidos, 1 provisionados reabertos',
+        ),
+        findsOneWidget,
+      );
+      expect(s.importBatches.byId('b_new'), isNull);
+      expect(s.transactions.byId('t_new1'), isNull);
+      expect(s.transactions.byId('boleto')!.status, TransactionStatus.planned);
+      expect(find.byKey(const Key('import-undo-b_old')), findsOneWidget);
+      expect(find.text(newLine), findsNothing);
+    },
+  );
 }

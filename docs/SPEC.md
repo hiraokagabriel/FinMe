@@ -154,7 +154,8 @@ class CollectionRepository<T> extends ChangeNotifier {
 4. Qualquer exceção → restaura cada repositório com `replaceAll(retrato)` e `settings.update((_) => retrato)`,
    cada restauração no seu próprio `try` (uma falha não impede as outras), e relança o erro original (`Error.throwWithStackTrace`).
 Memória e disco voltam ao estado anterior. Limite: se o próprio disco falhar também na restauração, o estado pode ficar
-parcial; o erro original sobe para a UI ("Erro ao importar").
+parcial; o erro original sobe para a UI ("Erro ao importar"). **Fase 13:** retrato em arquivo antes de gravar e recuperação no boot (§9.13);
+`delete`/`deleteWhere`/`replaceAll` gravam antes de mudar a memória (§9.1).
 
 Boxes Hive (nomes novos, ignoram dados antigos): `fm_accounts`, `fm_cards`, `fm_categories`, `fm_transactions`, `fm_recurring`, `fm_settings`.
 Fase 8: `fm_rules` (`TransactionRule`, §4.6), `fm_import_profiles` (`ImportProfile`, §4.7), `fm_dictionary` (`DictionaryEntry`, §4.8).
@@ -379,6 +380,7 @@ class RecurringRule {
   Frequency frequency, DateTime startDate, DateTime? endDate,
   bool isSubscription, bool isBoleto, bool active,
   DateTime? materializedUntil   // última data já materializada no boot (evita ressuscitar ocorrência apagada)
+  List<String> tags             // Fase 13 (§9.7): copiadas para as ocorrências; padrão const []
 }
 ```
 
@@ -1465,6 +1467,7 @@ Regras:
    `expense` quando devo (sai) — com categoria opcional, e grava o id dela no pagamento. Patrimônio neutro: conta ± valor, a receber/a pagar ∓ valor.
 4. **Desfazer** = remover o pagamento (grava a dívida **primeiro**) e depois excluir a transação ligada (se ainda existir); se a exclusão falhar, a transação fica órfã e visível, com aviso (revisão da Fase 11). Editar ou excluir essa transação pela tela de Transações
    **não** altera a dívida (limite conhecido): o histórico de pagamentos no Ultra mostra 'Transação excluída' quando o id não existe mais.
+   **Fase 13:** substituído por §9.12 — excluir a transação remove o pagamento e editar valor/data atualiza o pagamento ('Transação excluída' fica só para ids órfãos de backup).
 5. Editar dívida: valor >= pago; direção travada se há pagamentos. Excluir dívida com pagamentos é bloqueado ('Desfaça os pagamentos antes de excluir').
 6. **Previsão e "posso gastar"** (decisão): "devo" com vencimento e restante > 0 vira evento `expense` **sem conta** no vencimento (vencida → hoje,
    pelo `extraEvents` de §5.7). Entra no saldo consolidado previsto, nos meses, em "A pagar em 30 dias" e no "posso gastar" (§5.23 regra 6) quando vence
@@ -1852,6 +1855,7 @@ class AppServices {
   // Fase 11 (obrigatórios no construtor):
   final CollectionRepository<Asset> assets;   // box fm_assets
   final CollectionRepository<Debt> debts;     // box fm_debts
+  // Fase 13 (§9.14): importBatches (fm_import_batches), uiState (fm_ui_state), journal, debtSync, restoredFromJournal
 }
 class AppScope extends InheritedWidget {
   static AppServices of(BuildContext context); // dependOn não é necessário (serviços são estáveis)
@@ -1961,7 +1965,7 @@ Cada getter é preguiçoso e memoizado; o cache inteiro é invalidado quando qua
 ### 6.4 Relatórios: `features/reports/presentation/reports_controller.dart` (Fase 12)
 Cache dos relatórios por filtro. Fica fora do `Ledger` (os relatórios dependem de um filtro que é estado de tela, não do app) e não muda `ledger.dart`.
 O `HomeShell` cria **um** controller (preguiçoso, no primeiro acesso à página ou comando de relatório) e o descarta no `dispose`: filtro e relatório
-selecionado sobrevivem à troca de página; não são persistidos entre execuções.
+selecionado sobrevivem à troca de página; **Fase 13:** persistidos entre execuções em `fm_ui_state` (§9.8) e patrimônio cobre o período do relatório (§9.9).
 ```dart
 class ReportsController extends ChangeNotifier {
   ReportsController(this.services);           // services.ledger.addListener(_onLedgerChanged)
@@ -2635,3 +2639,275 @@ Uma tela: escolher modo (Simples/Ultra) + checkbox "Criar dados de exemplo" (fic
 - `cardDebtAt`: `invoicePayment` provisionado não abate a dívida do cartão.
 - Ativo encerrado que recebe valor > 0 é reativado (`archived = false`).
 - Diálogos de dívida mascaram valores com `hideValues` (inclusive o valor pré-preenchido).
+
+## 9. Fase 13 — Pendências da v3
+
+Fecha as pendências de CONTEXT §12. Sem dependência nova, sem box nova no backup, `ledger.dart` não muda. Decisões fechadas abaixo;
+cada subseção é o contrato da tarefa indicada em `docs/BACKLOG.md` (Fase 13).
+
+### 9.1 `CollectionRepository` grava antes de mudar a memória (T-200)
+`delete`, `deleteWhere` e `replaceAll` passam a seguir `upsertAll`: **disco primeiro, memória e notify depois**.
+- `delete(id)`: ausente → nada; `await _store.delete(id)`; só então remove e `_changed()`.
+- `deleteWhere(test)`: calcula os ids; vazio → nada; `await _store.deleteAll(ids)`; só então remove e `_changed()` (um notify).
+- `replaceAll(items)`: monta mapas; `await _store.putAll(entries)`; `await _store.deleteAll(antigos fora de entries)`; só então troca a memória e `_changed()` (um notify).
+- Falha do store → a exceção sobe; `all`, `version` e listeners ficam como antes. Limite: em `replaceAll`, falha entre `putAll` e `deleteAll`
+  deixa no disco os novos além dos antigos (memória continua a anterior); a compensação do backup (`replaceAll(retrato)`) apaga os extras.
+Comentário de classe atualizado ("todas as escritas gravam antes de mudar a memória").
+
+### 9.2 Linha de fechamentos memoizada (T-047)
+Contrato já descrito em T-047 (BACKLOG, Fase 6). Assinaturas públicas de `invoice_cycle.dart` não mudam.
+
+### 9.3 Tags pré-dobradas (T-201) — `features/transactions/domain/tags.dart`
+```dart
+Set<String> tagKeysOf(Transaction t);
+  // conjunto imutável de tagKey(tag) das tags de t; t.tags vazio → const {}.
+  // Memoizado por instância (Expando<Set<String>>): Transaction é imutável, copyWith gera instância nova.
+bool hasAnyTag(Transaction t, Set<String> keys); // keys vazio → true; senão tagKeysOf(t).any(keys.contains)
+```
+Resultado de `hasAnyTag` idêntico ao atual; o filtro de Transações e os relatórios deixam de dobrar texto a cada build.
+
+### 9.4 Desfazer importação (T-202, T-212) — `features/importing/domain/import_batch.dart`
+Decisão: o lote guarda **ids criados** e **versões anteriores** das transações alteradas. `Transaction` não ganha campo novo.
+```dart
+class ImportBatch {
+  ImportBatch({required this.id, required DateTime createdAt, required this.label, this.accountId, this.cardId,
+    List<String> createdIds = const [], List<Transaction> previous = const []}); // listas imutáveis
+  final String id;
+  final DateTime createdAt;          // com horário; ordena o histórico
+  final String label;                // nome do arquivo importado
+  final String? accountId, cardId;   // destino (ImportTarget)
+  final List<String> createdIds;     // plan.create (inclui parcelas futuras e pagamentos de fatura), na ordem do plano
+  final List<Transaction> previous;  // versão anterior de cada transação de plan.update (provisionados confirmados)
+  int get createdCount => createdIds.length;
+  int get confirmedCount => previous.length;
+  // toMap {'id','createdAt' (ISO 8601),'label','accountId'?,'cardId'?,'createdIds','previous' (lista de Transaction.toMap)}
+  // fromMap: id/createdAt inválidos → FormatException (registro pulado no boot); createdIds não-lista → [], itens não String ignorados;
+  //   item de previous inválido ignorado.
+}
+const int kImportBatchesKept = 10;
+ImportBatch importBatchFor(ImportPlan plan, {required String id, required DateTime createdAt, required String label,
+  required ImportTarget target, required Iterable<Transaction> before});
+  // createdIds = ids de plan.create; previous = para cada t de plan.update, a transação de `before` com o mesmo id (ausente → ignorada)
+ImportBatch? latestImportBatch(Iterable<ImportBatch> batches);       // maior createdAt; empate: maior id; vazio → null
+List<String> importBatchesToPrune(Iterable<ImportBatch> batches, {int keep = kImportBatchesKept});
+  // ids dos lotes além dos `keep` mais recentes (mesma ordem de latestImportBatch)
+({List<String> deleteIds, List<Transaction> restore}) importUndoPlan(ImportBatch batch, Iterable<Transaction> current);
+  // deleteIds = createdIds que ainda existem em current (ordem de createdIds)
+  // restore = previous cujo id ainda existe em current (transação excluída depois da importação não volta)
+```
+Regras:
+1. Só o lote **mais recente** pode ser desfeito (pilha): desfazer um lote antigo poderia sobrescrever confirmações de lotes posteriores.
+   Desfeito o último, o anterior vira o mais recente e pode ser desfeito também.
+2. O que é revertido: transações criadas pelo lote são excluídas (mesmo se editadas depois); provisionados confirmados voltam à versão
+   anterior (status, data, `externalId`, `importedDescription`, categoria e tags de antes). Edição manual feita depois num provisionado
+   confirmado é perdida (o diálogo avisa). Perfil de importação e aprendizado de categorias do banco **não** são revertidos.
+3. Persistência: box `fm_import_batches` (`AppServices.importBatches`). Não entra no `exportJson`; import de backup e "Apagar todos os dados"
+   fazem `importBatches.replaceAll([])` (o lote não faria sentido sobre outros dados). Entra no retrato/rollback do import de backup.
+4. Gravar importação (`import_flow.dart`): `before = transactions.all` (antes do upsert) → `transactions.upsertAll(rows)` (como hoje) →
+   `importBatches.upsert(importBatchFor(plan, id: newId(), createdAt: services.clock(), label: file.name, target: target, before: before))` →
+   `importBatches.deleteWhere` dos ids de `importBatchesToPrune` → perfil (como hoje). Falha ao gravar o lote → SnackBar
+   'Lançamentos importados, mas sem opção de desfazer.' (segue para o perfil). Sucesso → SnackBar com o texto atual e
+   `SnackBarAction(label: 'Desfazer')` que chama `undoImportBatch` sem confirmação.
+5. `Future<({int deleted, int restored})> undoImportBatch(AppServices s, ImportBatch batch)` (em `import_flow.dart`):
+   `p = importUndoPlan(batch, s.transactions.all)`; `await transactions.upsertAll(p.restore)`; `await transactions.deleteWhere((t) => ids.contains(t.id))`;
+   `await importBatches.delete(batch.id)` (lote apagado por último: falha no meio permite repetir; repetir é idempotente).
+   SnackBar 'Importação desfeita: {deleted} lançamentos removidos' + (restored > 0 ? ', {restored} provisionados reabertos' : '');
+   erro → 'Não foi possível desfazer a importação.'.
+6. Página Importar (Simples e Ultra): seção **'Importações recentes'** (oculta sem lotes) com até 10 linhas, mais recente primeiro:
+   `label` · `formatDate(createdAt)` · '{createdCount} lançamentos' (+ ' · {confirmedCount} confirmados' se > 0). Só a linha do mais recente tem
+   o botão 'Desfazer' (key `import-undo-{id}`) → `confirmDialog('Desfazer importação?', '{createdCount} lançamentos criados por este arquivo serão
+   excluídos e {confirmedCount} provisionados voltam a ficar pendentes. Edições feitas depois neles são perdidas.')` → `undoImportBatch`.
+
+### 9.5 Pagamento de fatura no extrato (T-203, T-208, T-212, T-213) — `features/importing/domain/invoice_payment_match.dart`
+Decisão: só importação **em conta** converte; em importação de **cartão** a linha de pagamento continua desmarcada (o pagamento entra pelo
+extrato da conta; importar os dois lados duplicaria). Sugestão automática só com valor exato; senão o usuário escolhe a fatura num menu.
+```dart
+class InvoiceCandidate {
+  const InvoiceCandidate({required this.cardId, required this.dueMonth, required this.dueDate, required this.remainingCents});
+  final String cardId; final YearMonth dueMonth; final DateTime dueDate; final int remainingCents;
+  String get invoiceKey => dueMonth.key;   // o mesmo que pay_invoice_dialog grava
+}
+List<InvoiceCandidate> invoiceCandidatesFor({required String accountId, required Iterable<PaymentCard> cards,
+  required List<Invoice> Function(String cardId) invoicesFor});
+  // cartões kind == credit, !archived, paymentAccountId == accountId; faturas com remainingCents > 0; ordem dueDate asc, cardId asc
+InvoiceCandidate? suggestInvoicePayment({required int amountCents, required DateTime date, required List<InvoiceCandidate> candidates});
+  // remainingCents == amountCents e |dueDate − date| <= 10 dias (diferença via DateTime.utc); menor distância;
+  // empate dueDate asc, cardId asc; nenhuma → null
+List<InvoiceCandidate> invoiceChoicesFor(DateTime date, List<InvoiceCandidate> candidates);
+  // menu manual: por cartão, a candidata de dueDate mais próxima de date (empate: a de dueDate anterior); ordem cardId asc
+```
+Sessão (`import_session.dart`):
+- `ImportRow.invoicePayment` (`InvoiceCandidate?`, `copyWith` com `_keep`), `bool get isInvoicePayment`.
+- `ImportSession.build(..., List<InvoiceCandidate> invoiceCandidates = const [])`; `ImportSession.invoiceCandidates` guarda a lista.
+  Linha com `target.accountId != null`, tipo `expense`, flag `invoicePaymentLike` e `plannedMatch == null` →
+  `invoicePayment = suggestInvoicePayment(abs, line.date, …)`. Com sugestão: `include = true` salvo se a linha também tem
+  `fitidDuplicate`/`probableDuplicate`; `categoryId = null`; `createInstallments = false`.
+- `ImportSession setInvoicePayment(int i, InvoiceCandidate? c)`: ignorado se o destino é cartão ou a linha é `income`. `c != null` →
+  `invoicePayment = c`, `include = true`, `categoryId = null`, `createInstallments = false`. `null` → `invoicePayment = null` e a categoria volta a
+  `plannedMatch?.categoryId ?? suggestion.categoryId` (se `!categoryEdited`); `include` não muda.
+- `recategorize` e `setCategory` ignoram linhas de pagamento de fatura; `uncategorizedIndices` as exclui.
+- `summary` ganha `invoicePayments` (incluídas com `invoicePayment`); `create` passa a excluí-las.
+- Plano: linha incluída com `invoicePayment` → `create` de `Transaction(id: idGenerator(), type: invoicePayment, amountCents: abs, date: line.date,
+  description: finalDescription, accountId: target.accountId, cardId: c.cardId, invoiceKey: c.invoiceKey, status: paid, externalId: line.fitid,
+  importedDescription: line.description)` — sem categoria, sem tags, sem parcelas; `plannedMatch` (escolha manual sobre linha que casou) **não** é confirmado.
+- `import_flow.dart` monta `invoiceCandidatesFor(accountId: target.accountId!, cards: services.cards.all, invoicesFor: services.ledger.invoicesFor)`
+  só quando o destino é conta (cartão → `const []`).
+Prévia (`import_preview_row.dart`/`import_preview_page.dart`): em linha `expense` de importação em conta com `invoiceCandidates` não vazio e
+(`isInvoicePayment` ou flag `invoicePaymentLike`), um menu compacto (key `import-invoice-{i}`) — no lugar do seletor de categoria quando marcado:
+rótulo 'Fatura {nome do cartão} · venc. dd/mm' (marcado) ou 'Pagamento de fatura?' (não marcado); opções = `invoiceChoicesFor` com o mesmo
+rótulo + 'Não é pagamento de fatura'. Nome do cartão via `AppScope.of(context).cards.byId`. O chip 'Parece pagamento de fatura' só aparece sem
+`invoicePayment`. Resumo da prévia acrescenta ' · {n} pagamentos de fatura' quando `invoicePayments > 0`.
+
+### 9.6 Regras no lançamento manual (T-214) — `transaction_form.dart`
+Decisão mínima: categoria e tags já eram sugeridas (Fase 8/10). Passa a valer também o `renameTo`, **só em lançamento novo** de `expense`/`income`,
+com aviso visível e opção de recusar. Edição não aplica regras (igual a hoje).
+- `_suggestCategory` guarda `r.renamedDescription`. Se não vazio e diferente do texto digitado (trim), mostra abaixo da descrição
+  (key `form-rename-hint`, 12 px, `textSecondary`): 'Será salvo como "{renamed}" (regra)' + `TextButton` 'Manter como digitado'
+  (key `form-rename-keep`); tocado, o aviso some até a descrição mudar de novo.
+- Ao salvar (novo, sem recusa): `description = renamed`, `importedDescription = texto digitado` (a regra continua casando, §5.14).
+- Tags no Simples (campo oculto): lançamento novo grava `tags = r.tags` da última sugestão (Ultra continua pelo campo).
+- Parcelado: vale para a base, logo para todas as parcelas (`buildInstallments` copia).
+
+### 9.7 Tags em recorrências (T-204, T-215)
+`RecurringRule` ganha `final List<String> tags` (construtor `this.tags = const []`, normaliza com `normalizeTags` e guarda imutável;
+`copyWith({List<String>? tags})` com `??`; `toMap` só quando não vazia; `fromMap` tolerante como `Transaction`; `==`/`hashCode` elemento a elemento).
+`occurrenceTransactions` copia `tags: r.tags` (materialização e projeção). Decisão: a materialização **não** aplica regras — a recorrência já é
+configuração explícita (categoria, descrição e tags escolhidas no formulário) e projeção e ocorrência gravada precisam ser iguais. Mudar as tags da
+recorrência afeta só ocorrências futuras (como a categoria). Formulário: `TagField` só no Ultra (sugestões `ledger.allTags`); no Simples as tags
+existentes são preservadas ao salvar. Backup: viajam no mapa (backup antigo sem `tags` importa normalmente).
+
+### 9.8 Filtro de relatório persistente (T-205, T-216)
+`report_filter.dart`:
+```dart
+Map<String, dynamic> ReportFilter.toMap();
+  // {'preset': name, 'customFrom': key?, 'customTo': key?, 'accountIds', 'cardIds', 'categoryIds', 'tagKeys' (listas ordenadas),
+  //  'flow': name, 'includePlanned'}
+factory ReportFilter.fromMap(Map<String, dynamic> map);
+  // tolerante: enum desconhecido → padrão (last12, expense); chave de mês inválida → null; custom sem os dois meses → last12;
+  // não-lista → {}; itens não String ignorados; includePlanned só true se == true
+ReportFilter withKnownIds({required Set<String> accountIds, required Set<String> cardIds, required Set<String> categoryIds,
+  required Set<String> tagKeys}); // intersecta cada conjunto do filtro com o conhecido; resto igual
+```
+Persistência: `AppServices.uiState` (`RecordStore` da box `fm_ui_state`; estado de tela, fora do backup e do "Apagar todos"), registro único
+`{'id': 'reports', 'filter': filter.toMap(), 'selected': kind.name, 'averageMonths': 3|6}` (mesmo padrão de `SettingsController`).
+`ReportsController`: o construtor lê o registro; `filter = ReportFilter.fromMap(...).withKnownIds(ids de services.accounts.all, services.cards.all,
+services.categories.all (arquivados inclusive), tagKey de ledger.allTags)`; `selected` por `enumByName` (inválido → trend); `averageMonths` 3 ou 6
+(outro → 3). Registro ausente/inválido → padrões. Os setters de `filter`, `selected` e `averageMonths` (quando mudam) gravam o registro sem
+`await` (`unawaited` + `catchError` com `debugPrint`: perder estado de tela não é erro). Não grava em `settings` (mudar settings invalidaria o
+`Ledger` inteiro). §6.4 deixa de dizer "não são persistidos entre execuções".
+
+### 9.9 Patrimônio no período do relatório (T-216)
+`ReportsController.netWorth`: `m` = meses de `range.from` até o mês de `today` (inclusivos). `m <= Ledger.netWorthMonths` → recorte de
+`ledger.netWorthHistory` (como hoje). Senão → `netWorthHistory(accounts, cards, transactions, assets, debts, today: ledger.today, months: min(m, 120))`
+(§5.26) recortado em `range.from <= month <= range.to`; memoizado no cache do controller (zera com o `Ledger` ou o filtro). Painel e página
+Patrimônio continuam com 24 meses. `NetWorthReportView`: o texto de apoio perde a frase 'Histórico disponível: últimos 24 meses.' (o resto fica).
+
+### 9.10 Heatmap preguiçoso (T-217)
+A grade de `HeatmapView` vira `ListView.builder` horizontal (`itemExtent: _stride`, `itemCount: weeks`, altura 8 × `_stride`); cada coluna
+(rótulo do mês + 7 células) é montada sob demanda a partir de `from + (w × 7 + r − offset)` dias. A coluna de rótulos dos dias da semana fica
+fora da lista. Keys (`heatmap-day-yyyymmdd`), tooltip, cores e posições continuam iguais. Com 60 meses só as colunas visíveis (+ cache da
+lista) são montadas.
+
+### 9.11 Backup usa os formatadores comuns (T-211)
+`backup_service.dart` remove `_csvMoney`/`_csvText` e usa `formatCsvMoney`/`csvText` (§3.3, Fase 12). Saída do CSV byte a byte igual.
+
+### 9.12 Transação de quitação sincroniza a dívida (T-206, T-210)
+Decisão: editar/excluir a transação em qualquer tela **ajusta o pagamento** (consistência sem bloquear o usuário). `debt_math.dart`:
+```dart
+Set<String> linkedTransactionIds(Iterable<Debt> debts, bool Function(String id) exists);
+  // transactionId dos pagamentos cuja transação existe agora
+List<Debt> syncDebtsWithTransactions(Iterable<Debt> debts, {required Set<String> knownIds,
+  required Transaction? Function(String id) lookup});
+  // só pagamentos com transactionId ∈ knownIds: lookup == null → pagamento removido (withoutPayment);
+  // amountCents ou dateOnly(date) diferentes → pagamento substituído (mesmo id e transactionId, valor/data da transação).
+  // Devolve só as dívidas que mudaram (ordem de entrada).
+```
+`knownIds` (ids que existiam na última sincronização) impede que `transactionId` órfão vindo de backup (§3.5 Fase 11) apague pagamentos.
+Tipo, conta, status e categoria da transação são ignorados. Valor editado acima do restante deixa a dívida quitada (`remainingCents` é `max(0, …)`).
+`features/debts/presentation/debt_transaction_sync.dart`:
+```dart
+class DebtTransactionSync {
+  DebtTransactionSync({required CollectionRepository<Transaction> transactions, required CollectionRepository<Debt> debts});
+    // calcula _known e escuta os dois repositórios
+  Future<T> suspendDuring<T>(Future<T> Function() action); // não sincroniza durante action; depois recalcula _known
+  void dispose();
+}
+```
+Mudança em `transactions` (fora de `suspendDuring`, sem sincronização em curso) → `changed = syncDebtsWithTransactions(debts.all, knownIds: _known,
+lookup: transactions.byId)`; não vazio → `await debts.upsertAll(changed)` (erro → `debugPrint`, `_known` mantido para tentar de novo); depois
+recalcula `_known`. Mudança em `debts` → recalcula `_known`. Fluxos de §6.3 continuam válidos: quitar (transação antes da dívida) e desfazer
+(dívida antes da transação) não disparam ajuste. Import de backup e "Apagar todos os dados" rodam dentro de `services.debtSync.suspendDuring`
+(senão a gravação assíncrona da sincronização poderia ressuscitar dívidas antigas depois do `replaceAll`). O bootstrap cria o sync (vive com o app).
+§5.25 regra 4 passa a valer este contrato.
+
+### 9.13 Import de backup recuperável (T-207, T-211, T-212)
+`core/services/recovery_journal.dart`:
+```dart
+abstract interface class RecoveryJournal {
+  Future<String?> read();          // null = sem retrato pendente
+  Future<void> write(String json); // grava em '<arquivo>.tmp' e renomeia por cima (troca atômica no mesmo volume)
+  Future<void> clear();            // apaga; ausente → ok
+}
+class MemoryRecoveryJournal implements RecoveryJournal { bool failWrites = false; ... }   // testes
+class FileRecoveryJournal implements RecoveryJournal { FileRecoveryJournal(File file); }  // dart:io
+```
+Arquivo: `{getApplicationSupportDirectory()}/finme_import_journal.json` (bootstrap com Hive); `bootstrap(storeFactory: …)` sem `journal:` →
+`MemoryRecoveryJournal()`. `BackupService.importJson(s, json)`:
+1. Valida e converte (`_parse`) como hoje: erro → `FormatException`, nada muda.
+2. `await s.journal.write(exportJson(s))` (retrato do estado atual em disco). Falha → a exceção sobe e nada muda.
+3. Aplica dentro de `s.debtSync.suspendDuring` (coleções, `importBatches.replaceAll([])`, settings, `materializeRecurring`); rollback em memória
+   como hoje (§3.5), agora incluindo `importBatches`.
+4. Sucesso → `journal.clear()` (falha só `debugPrint`; limite: o próximo boot restauraria o estado anterior e avisaria).
+   Falha com rollback completo → `journal.clear()`; falha com alguma restauração falhando → o retrato **fica**; relança o erro original.
+`static Future<bool> BackupService.recoverPendingImport(AppServices s)`: `read()`; null/vazio → false. Senão aplica o retrato com os passos 1 e 3
+(sem escrever novo retrato); sucesso → `clear()` e true; falha → `debugPrint`, retrato mantido (tenta no próximo boot), false. O bootstrap chama
+antes de `materializeRecurring` e grava `services.restoredFromJournal = true` quando devolve true; o `HomeShell` mostra uma vez a SnackBar
+'A última importação de backup não terminou. Os dados anteriores foram restaurados.' e zera a flag.
+Queda de energia no meio do import também cai aqui (o boot volta ao estado anterior). §3.5: o limite "rollback não atômico" passa a apontar
+para este contrato.
+
+### 9.14 `AppServices` e bootstrap (T-210)
+`AppServices` ganha (obrigatórios no construtor, salvo indicado): `CollectionRepository<ImportBatch> importBatches` (box `fm_import_batches`),
+`RecordStore uiState` (box `fm_ui_state`), `RecoveryJournal journal`, `DebtTransactionSync debtSync`, `bool restoredFromJournal = false` (mutável).
+`bootstrap({storeFactory, clock, RecoveryJournal? journal})`. "Apagar todos os dados" (Ajustes): roda em `debtSync.suspendDuring` e faz também
+`importBatches.replaceAll([])`.
+
+### 9.15 Testes (Fase 13)
+Domínio com os exemplos das tarefas; `FailingRecordStore` de teste para §9.1; `DebtTransactionSync` e `ReportsController` com `bootstrap` em
+memória; `recoverPendingImport` com `MemoryRecoveryJournal`. Testes existentes só mudam onde o contrato muda (texto de apoio do patrimônio,
+`summary` da sessão).
+
+## 10. Fase 14 — Perfis
+
+Vários perfis com dados isolados (ex.: pessoal, empresa, outra pessoa) e PIN opcional por perfil.
+
+### 10.1 Modelo — `features/profiles/domain/profile.dart`
+`Profile {String id, String name, String? pinSalt, String? pinHash, DateTime createdAt}`; `hasPin = pinHash != null`.
+`verifyPin(pin)` (sem PIN, sempre true), `withPin(pin?)` (null remove; sal novo a cada troca), `toMap/fromMap` (datas ISO), `copyWith` com `_keep` para `pinSalt`/`pinHash` (SPEC §4). `defaultProfileId = 'default'`.
+
+### 10.2 PIN — `features/profiles/domain/pin_hash.dart`
+SHA-256 em Dart puro (`sha256Hex`, sem dependência nova). `isValidPin`: 4 a 8 dígitos. `hashPin(pin, salt)` = SHA-256 iterado
+10 000 vezes sobre `salt:pin`; `newPinSalt()` com `Random.secure()` (16 bytes, hex).
+Limite: o PIN só bloqueia a interface; os boxes Hive continuam legíveis em disco. Sem limite de tentativas.
+
+### 10.3 Isolamento e registro
+- `bootstrap({String profileId = defaultProfileId, ...})`. `boxNamesFor(id)`: perfil `default` usa os nomes atuais `fm_*`
+  (sem migração; os dados existentes ficam no perfil "Principal"); outros usam `p<id>_fm_*`. Retrato do import:
+  `finme_import_journal.json` (default) ou `finme_import_journal_<id>.json`. `storeFactory` recebe o nome já prefixado.
+- `RecordStore.close()` (Hive fecha o box; memória no-op). `AppServices.close()` descarta o `Ledger` e fecha os stores do perfil.
+- `deleteProfileData(id)`: apaga do disco os boxes de `boxNamesFor(id)` e o retrato. Nunca para o perfil aberto.
+- `ProfileRegistry` (`app/profile_registry.dart`, `ChangeNotifier`) sobre o box global `fm_profiles` (fora de perfil e de backup).
+  Vazio → cria "Principal" (`default`). `create(name)`, `rename`, `setPin(id, pin?)` (null remove), `delete(id)` (chama
+  `deleteProfileData`; o perfil `default` também pode ser excluído desde que não esteja aberto e reste ao menos um perfil).
+- Backup, CSV e "Apagar todos os dados" valem só para o perfil aberto.
+
+### 10.4 Abertura e troca — `app/profile_gate.dart`
+`ProfileGate` é a raiz (`main.dart`). Um perfil sem PIN → abre direto. Senão → `ProfilePickerPage` (avatar com iniciais,
+nome, cadeado se tem PIN, "Novo perfil"). Abrir: tela de carregamento → `bootstrap(profileId)` → `FinMeApp`; erro →
+`BootErrorScreen`. `ProfileScope` (InheritedWidget) expõe `registry`, `activeId` e `switchProfile()`; ausente em testes
+(sidebar mostra "FinMe" e Ajustes não mostra a seção Perfil). Trocar: `AppServices.close()` e volta ao picker.
+
+### 10.5 UI
+- Sidebar: topo vira avatar + nome do perfil; clique → menu "Trocar perfil". Colapsada: só avatar com tooltip.
+- Ajustes, seção "Perfil": renomear, definir/alterar/remover PIN (alterar e remover pedem o PIN atual), criar perfil,
+  excluir outro perfil (confirmação destrutiva).

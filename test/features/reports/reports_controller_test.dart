@@ -7,6 +7,7 @@ import 'package:finme/features/accounts/domain/account.dart';
 import 'package:finme/features/categories/domain/transaction_category.dart';
 import 'package:finme/features/reports/domain/report_filter.dart';
 import 'package:finme/features/reports/presentation/reports_controller.dart';
+import 'package:finme/features/transactions/domain/tags.dart';
 import 'package:finme/features/transactions/domain/transaction.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -280,5 +281,75 @@ void main() {
     await _ultra(s);
     c.filter = ReportFilter(cardIds: {'K'});
     expect(c.ignoredFor(ReportKind.netWorth), ['contas e cartões']);
+  });
+
+  test('filtro, relatório e média persistem entre controllers', () async {
+    await s.transactions.upsert(
+      _exp('v1', DateTime(2026, 10, 5), 'tra', 1000).copyWith(tags: ['viagem']),
+    );
+    c.filter = ReportFilter(
+      preset: ReportPeriodPreset.custom,
+      customFrom: const YearMonth(2026, 9),
+      customTo: const YearMonth(2026, 11),
+      accountIds: {'A'},
+      tagKeys: {tagKey('viagem')},
+    );
+    c.selected = ReportKind.pivot;
+    c.averageMonths = 6;
+
+    final c2 = ReportsController(s);
+    addTearDown(c2.dispose);
+    expect(c2.filter, c.filter);
+    expect(c2.selected, ReportKind.pivot);
+    expect(c2.averageMonths, 6);
+  });
+
+  test('conta excluída sai do filtro salvo e o resto fica', () async {
+    c.filter = ReportFilter(accountIds: {'A'}, categoryIds: {'mer'});
+    await s.accounts.delete('A');
+
+    final c2 = ReportsController(s);
+    addTearDown(c2.dispose);
+    expect(c2.filter.accountIds, isEmpty);
+    expect(c2.filter.categoryIds, {'mer'});
+  });
+
+  test('registro corrompido cai nos padrões sem exceção', () async {
+    await s.uiState.put('reports', {
+      'id': 'reports',
+      'filter': 'x',
+      'selected': 'nada',
+      'averageMonths': 5,
+    });
+
+    final c2 = ReportsController(s);
+    addTearDown(c2.dispose);
+    expect(c2.filter, ReportFilter());
+    expect(c2.selected, ReportKind.trend);
+    expect(c2.averageMonths, 3);
+  });
+
+  test('mudar filtro não toca settings nem notifica o Ledger', () {
+    final settings = s.settings.value;
+    var ledgerNotified = 0;
+    s.ledger.addListener(() => ledgerNotified++);
+
+    c.filter = ReportFilter(accountIds: {'A'});
+
+    expect(identical(s.settings.value, settings), isTrue);
+    expect(ledgerNotified, 0);
+  });
+
+  test('período de 36 meses tem patrimônio próprio até o mês atual', () {
+    c.filter = ReportFilter(
+      preset: ReportPeriodPreset.custom,
+      customFrom: const YearMonth(2023, 12),
+      customTo: const YearMonth(2026, 11),
+    );
+    expect(c.netWorth.length, 36);
+    expect(c.netWorth.last.netCents, s.ledger.netWorthHistory.last.netCents);
+
+    c.filter = ReportFilter(preset: ReportPeriodPreset.last12);
+    expect(c.netWorth.length, 12);
   });
 }

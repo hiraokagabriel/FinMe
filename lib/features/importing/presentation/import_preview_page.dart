@@ -116,7 +116,7 @@ class _ImportPreviewPageState extends State<_ImportPreviewPage> {
     final ultra = services.settings.value.mode == AppMode.ultra;
     final session = _session;
     final summary = session.summary;
-    final ready = summary.create + summary.confirm;
+    final ready = summary.create + summary.confirm + summary.invoicePayments;
     final visible = _onlyUncategorized ? session.uncategorizedIndices() : null;
     final count = visible?.length ?? session.rows.length;
 
@@ -136,7 +136,8 @@ class _ImportPreviewPageState extends State<_ImportPreviewPage> {
     final summaryText =
         '${session.rows.length} linhas · ${summary.create} a criar · '
         '${summary.confirm} a confirmar · ${summary.skipped} ignoradas'
-        '${ultra ? ' · ${summary.futureInstallments} parcelas futuras' : ''}';
+        '${ultra ? ' · ${summary.futureInstallments} parcelas futuras' : ''}'
+        '${summary.invoicePayments > 0 ? ' · ${summary.invoicePayments} pagamentos de fatura' : ''}';
 
     return Scaffold(
       body: SafeArea(
@@ -220,7 +221,11 @@ class _ImportPreviewPageState extends State<_ImportPreviewPage> {
                                 return ImportPreviewRow(
                                   key: ValueKey(i),
                                   row: row,
+                                  index: i,
                                   ultra: ultra,
+                                  invoiceCandidates: session.invoiceCandidates,
+                                  onInvoice: (c) =>
+                                      _set(_session.setInvoicePayment(i, c)),
                                   categoryOptions:
                                       row.type == TransactionType.income
                                       ? incomeOptions

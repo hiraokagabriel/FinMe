@@ -129,6 +129,32 @@ void main() {
     });
   });
 
+  group('tagKeysOf', () {
+    test(
+      'dobra as tags; sem tags → vazio; mesma instância devolve o mesmo objeto',
+      () {
+        final t = tx('1', tags: ['Viagem', 'casa']);
+        expect(tagKeysOf(t), {'VIAGEM', 'CASA'});
+        expect(identical(tagKeysOf(t), tagKeysOf(t)), isTrue);
+        expect(tagKeysOf(tx('2')), isEmpty);
+      },
+    );
+
+    test('conjunto é imutável', () {
+      expect(
+        () => tagKeysOf(tx('1', tags: ['a'])).add('X'),
+        throwsUnsupportedError,
+      );
+      expect(() => tagKeysOf(tx('2')).add('X'), throwsUnsupportedError);
+    });
+
+    test('hasAnyTag usa o conjunto pré-dobrado', () {
+      final t = tx('1', tags: ['Viagem']);
+      expect(hasAnyTag(t, tagKeysOf(t)), isTrue);
+      expect(hasAnyTag(tx('2'), {'VIAGEM'}), isFalse);
+    });
+  });
+
   test('buildInstallments propaga tags para todas as parcelas', () {
     final parcelas = buildInstallments(
       base: tx('base', tags: ['x'], cents: 9000),

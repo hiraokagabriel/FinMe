@@ -13,6 +13,7 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/date_utils.dart';
 import '../../../core/widgets/widgets.dart';
 import '../../importing/domain/merchant_dictionary.dart';
+import '../../profiles/presentation/profile_section.dart';
 
 const _jsonGroup = XTypeGroup(label: 'JSON', extensions: ['json']);
 const _csvGroup = XTypeGroup(label: 'CSV', extensions: ['csv']);
@@ -43,6 +44,7 @@ class SettingsPage extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        const ProfileSection(),
                         _AppearanceCard(services: s, settings: settings),
                         if (ultra) ...[
                           const SizedBox(height: AppSpace.lg),
@@ -280,17 +282,21 @@ class _DataCardState extends State<_DataCard> {
     }
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await _s.accounts.replaceAll(const []);
-      await _s.cards.replaceAll(const []);
-      await _s.transactions.replaceAll(const []);
-      await _s.recurring.replaceAll(const []);
-      await _s.goals.replaceAll(const []);
-      await _s.assets.replaceAll(const []);
-      await _s.debts.replaceAll(const []);
-      await _s.categories.replaceAll(defaultCategories());
-      await _s.rules.replaceAll(const []);
-      await _s.importProfiles.replaceAll(const []);
-      await _s.dictionary.replaceAll(defaultDictionary());
+      // Sem sync: a gravação assíncrona da dívida poderia ressuscitar pagamentos apagados (SPEC §9.12).
+      await _s.debtSync.suspendDuring(() async {
+        await _s.accounts.replaceAll(const []);
+        await _s.cards.replaceAll(const []);
+        await _s.transactions.replaceAll(const []);
+        await _s.recurring.replaceAll(const []);
+        await _s.goals.replaceAll(const []);
+        await _s.assets.replaceAll(const []);
+        await _s.debts.replaceAll(const []);
+        await _s.importBatches.replaceAll(const []);
+        await _s.categories.replaceAll(defaultCategories());
+        await _s.rules.replaceAll(const []);
+        await _s.importProfiles.replaceAll(const []);
+        await _s.dictionary.replaceAll(defaultDictionary());
+      });
       // Volta ao onboarding: o shell some quando onboardingDone for false.
       await _s.settings.update((c) => c.copyWith(onboardingDone: false));
     } catch (_) {

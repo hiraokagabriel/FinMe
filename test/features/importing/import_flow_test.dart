@@ -8,6 +8,7 @@ import 'package:finme/core/theme/app_theme.dart';
 import 'package:finme/features/accounts/domain/account.dart';
 import 'package:finme/features/cards/domain/payment_card.dart';
 import 'package:finme/features/importing/domain/import_profile.dart';
+import 'package:finme/features/importing/domain/import_session.dart';
 import 'package:finme/features/importing/presentation/import_flow.dart';
 import 'package:finme/features/transactions/domain/transaction.dart';
 import 'package:flutter/material.dart';
@@ -94,6 +95,32 @@ ImportProfile _faturaProfile({required bool invert}) => ImportProfile(
   cardId: 'card_beta',
   invertSign: invert,
 );
+
+/// Perfil OFX de conta: lançamentos sem cartão.
+const _contaOfxProfile = ImportProfile(
+  id: 'p_conta_ofx',
+  name: 'Extrato OFX Alfa',
+  format: ImportFormat.ofx,
+  accountId: 'acc_alfa',
+);
+
+/// OFX de conta com um lançamento por [i] (valor e fitid distintos a cada chamada).
+String _ofxUmLancamento(int i) =>
+    '<OFX><BANKMSGSRSV1><STMTRS><BANKTRANLIST>'
+    '<STMTTRN><DTPOSTED>20261102</DTPOSTED><TRNAMT>-${i + 1}.00</TRNAMT>'
+    '<FITID>U$i</FITID><NAME>LOJA $i</NAME></STMTTRN>'
+    '</BANKTRANLIST></STMTRS></BANKMSGSRSV1></OFX>';
+
+/// Três débitos: duas linhas novas e a de 04/11 de R$ 30,00, que confirma o provisionado de 05/11.
+const _contaComProvisionado =
+    '<OFX><BANKMSGSRSV1><STMTRS><BANKTRANLIST>'
+    '<STMTTRN><DTPOSTED>20261102</DTPOSTED><TRNAMT>-10.00</TRNAMT>'
+    '<FITID>L1</FITID><NAME>MERCADO A</NAME></STMTTRN>'
+    '<STMTTRN><DTPOSTED>20261103</DTPOSTED><TRNAMT>-20.00</TRNAMT>'
+    '<FITID>L2</FITID><NAME>LOJA B</NAME></STMTTRN>'
+    '<STMTTRN><DTPOSTED>20261104</DTPOSTED><TRNAMT>-30.00</TRNAMT>'
+    '<FITID>L3</FITID><NAME>BOLETO C</NAME></STMTTRN>'
+    '</BANKTRANLIST></STMTRS></BANKMSGSRSV1></OFX>';
 
 Future<PickedImportFile?> Function() _fixture(String name) =>
     () async => (
@@ -313,4 +340,139 @@ void main() {
     );
     expect(s.transactions.all, isEmpty);
   });
+
+  testWidgets(
+    'lote com provisionado: Desfazer exclui os criados e reabre o provisionado',
+    (tester) async {
+      final s = await _boot(tester, profile: _contaOfxProfile);
+      await tester.runAsync(
+        () => s.transactions.upsert(
+          Transaction(
+            id: 'boleto',
+            type: TransactionType.expense,
+            amountCents: 3000,
+            date: DateTime(2026, 11, 5),
+            description: 'Boleto C',
+            accountId: 'acc_alfa',
+            status: TransactionStatus.planned,
+          ),
+        ),
+      );
+      await _app(
+        tester,
+        s,
+        (c) => startImport(
+          c,
+          profile: _contaOfxProfile,
+          pickFile: () async =>
+              (name: 'conta.ofx', bytes: _contaComProvisionado.codeUnits),
+        ),
+      );
+
+      await tester.tap(find.text('Importar 3'));
+      await tester.pumpAndSettle();
+
+      final batches = s.importBatches.all;
+      expect(batches, hasLength(1));
+      expect(batches.single.createdCount, 2);
+      expect(batches.single.confirmedCount, 1);
+      expect(
+        find.text('2 lançamentos importados, 1 provisionados confirmados'),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.text('Desfazer'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text(
+          'Importação desfeita: 2 lançamentos removidos, 1 provisionados reabertos',
+        ),
+        findsOneWidget,
+      );
+      final boleto = s.transactions.byId('boleto')!;
+      expect(boleto.status, TransactionStatus.planned);
+      expect(boleto.date, DateTime(2026, 11, 5));
+      expect(s.transactions.all, hasLength(1));
+      expect(s.importBatches.all, isEmpty);
+    },
+  );
+
+  testWidgets('11 importações seguidas guardam só 10 lotes', (tester) async {
+    final s = await _boot(tester, profile: _contaOfxProfile);
+    var n = 0;
+    Future<PickedImportFile?> pick() async {
+      n++;
+      return (name: 'extrato$n.ofx', bytes: _ofxUmLancamento(n).codeUnits);
+    }
+
+    await _app(
+      tester,
+      s,
+      (c) => startImport(c, profile: _contaOfxProfile, pickFile: pick),
+    );
+    Future<void> confirmar() async {
+      await tester.tap(find.text('Importar 1'));
+      await tester.pumpAndSettle();
+    }
+
+    await confirmar();
+    for (var i = 1; i < 11; i++) {
+      // A SnackBar do lote anterior cobriria o botão da prévia seguinte: some antes.
+      ScaffoldMessenger.of(
+        tester.element(find.text('importar')),
+      ).removeCurrentSnackBar();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('importar'));
+      await tester.pumpAndSettle();
+      await confirmar();
+    }
+
+    expect(n, 11);
+    expect(s.importBatches.all, hasLength(10));
+    expect(s.transactions.all, hasLength(11));
+  });
+
+  testWidgets(
+    'faturas que a conta paga só entram no destino conta, não no cartão',
+    (tester) async {
+      final s = await _boot(tester);
+      await tester.runAsync(() async {
+        await s.cards.upsert(
+          const PaymentCard(
+            id: 'card_gama',
+            name: 'Cartão Gama',
+            bankName: 'Banco Alfa',
+            brand: CardBrand.visa,
+            kind: CardKind.credit,
+            last4: '9876',
+            closingDay: 5,
+            dueDay: 12,
+            colorValue: 0xFF42A5F5,
+            paymentAccountId: 'acc_alfa',
+          ),
+        );
+        await s.transactions.upsert(
+          Transaction(
+            id: 'compra_gama',
+            type: TransactionType.expense,
+            amountCents: 5000,
+            date: DateTime(2026, 10, 20),
+            description: 'Compra',
+            cardId: 'card_gama',
+          ),
+        );
+      });
+
+      final conta = importInvoiceCandidates(
+        s,
+        const ImportTarget(accountId: 'acc_alfa'),
+      );
+      expect(conta.map((c) => c.cardId), ['card_gama']);
+      expect(
+        importInvoiceCandidates(s, const ImportTarget(cardId: 'card_beta')),
+        isEmpty,
+      );
+    },
+  );
 }

@@ -1,11 +1,14 @@
 import 'package:finme/app/app_scope.dart';
 import 'package:finme/app/bootstrap.dart';
 import 'package:finme/core/models/app_settings.dart';
+import 'package:finme/core/models/year_month.dart';
 import 'package:finme/core/services/record_store.dart';
 import 'package:finme/core/theme/app_theme.dart';
+import 'package:finme/features/cards/domain/payment_card.dart';
 import 'package:finme/features/importing/domain/import_matcher.dart';
 import 'package:finme/features/importing/domain/import_session.dart';
 import 'package:finme/features/importing/domain/imported_line.dart';
+import 'package:finme/features/importing/domain/invoice_payment_match.dart';
 import 'package:finme/features/importing/presentation/import_preview_page.dart';
 import 'package:finme/features/rules/domain/transaction_rule.dart';
 import 'package:finme/features/transactions/domain/transaction.dart';
@@ -328,5 +331,120 @@ void main() {
           .include,
       isFalse,
     );
+  });
+
+  group('pagamento de fatura', () {
+    const card = PaymentCard(
+      id: 'card_alfa',
+      name: 'Cartão Alfa',
+      bankName: 'Banco Alfa',
+      brand: CardBrand.visa,
+      kind: CardKind.credit,
+      last4: '1234',
+      closingDay: 5,
+      dueDay: 12,
+      colorValue: 0xFF42A5F5,
+      paymentAccountId: 'conta_alfa',
+    );
+    // Vence em 05/11 e tem 150,00 em aberto.
+    final invoice = InvoiceCandidate(
+      cardId: 'card_alfa',
+      dueMonth: const YearMonth(2026, 11),
+      dueDate: DateTime(2026, 11, 5),
+      remainingCents: 15000,
+    );
+    // Valor igual ao saldo e a 2 dias do vencimento: sugerida.
+    final suggested = ImportedLine(
+      row: 2,
+      date: DateTime(2026, 11, 7),
+      description: 'PAGAMENTO FATURA CARTAO ALFA',
+      amountCents: -15000,
+    );
+    // Valor diferente: flag sem sugestão.
+    final unsuggested = ImportedLine(
+      row: 3,
+      date: DateTime(2026, 11, 20),
+      description: 'PGTO CARTAO OUTRO',
+      amountCents: -9999,
+    );
+
+    Future<AppServices> bootWithCard(WidgetTester tester) async {
+      final s = await _boot(tester, AppMode.simple);
+      await tester.runAsync(() => s.cards.upsert(card));
+      return s;
+    }
+
+    ImportSession sessionOf(
+      AppServices s,
+      List<ImportedLine> lines, {
+      ImportTarget target = _target,
+    }) => ImportSession.build(
+      lines: lines,
+      target: target,
+      categorizer: s.ledger.categorizer,
+      matcher: ImportMatcher(const []),
+      invoiceCandidates: [invoice],
+    );
+
+    testWidgets('sugerida: menu com a fatura no lugar da categoria', (
+      tester,
+    ) async {
+      final s = await bootWithCard(tester);
+      await _open(tester, s, sessionOf(s, [suggested, unsuggested]));
+
+      expect(find.byKey(const Key('import-invoice-0')), findsOneWidget);
+      expect(find.text('Fatura Cartão Alfa · venc. 05/11'), findsOneWidget);
+      // Sem o chip de alerta: a linha já é pagamento de fatura.
+      expect(find.byIcon(Icons.credit_score), findsNothing);
+      expect(
+        find.text(
+          '2 linhas · 0 a criar · 0 a confirmar · 1 ignoradas · '
+          '1 pagamentos de fatura',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Importar 1'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('não sugerida: escolher a fatura marca a linha; "Não é" desfaz', (
+      tester,
+    ) async {
+      final s = await bootWithCard(tester);
+      await _open(tester, s, sessionOf(s, [unsuggested]));
+
+      expect(find.text('Pagamento de fatura?'), findsOneWidget);
+      expect(find.byType(DropdownButton<String?>), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('import-invoice-0')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Fatura Cartão Alfa · venc. 05/11'));
+      await tester.pumpAndSettle();
+      expect(find.text('Importar 1'), findsOneWidget);
+      expect(find.byType(DropdownButton<String?>), findsNothing);
+
+      await tester.tap(find.byKey(const Key('import-invoice-0')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Não é pagamento de fatura'));
+      await tester.pumpAndSettle();
+      // Desfazer não muda a inclusão: a linha segue marcada como despesa comum.
+      expect(find.text('Importar 1'), findsOneWidget);
+      expect(find.byType(DropdownButton<String?>), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('importação em cartão não mostra o menu', (tester) async {
+      final s = await bootWithCard(tester);
+      await _open(
+        tester,
+        s,
+        sessionOf(s, [
+          suggested,
+        ], target: const ImportTarget(cardId: 'card_alfa')),
+      );
+
+      expect(find.byKey(const Key('import-invoice-0')), findsNothing);
+      expect(find.text('Pagamento de fatura?'), findsNothing);
+    });
   });
 }

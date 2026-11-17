@@ -60,6 +60,35 @@ class _FailingPutStore extends _LogStore {
   }
 }
 
+/// Todas as escritas falham quando [fail] é true (disco cheio).
+class _FlakyStore extends _LogStore {
+  bool fail = false;
+
+  void _check() {
+    if (fail) {
+      throw StateError('disco cheio');
+    }
+  }
+
+  @override
+  Future<void> putAll(Map<String, Map<String, dynamic>> entries) async {
+    _check();
+    return super.putAll(entries);
+  }
+
+  @override
+  Future<void> delete(String id) async {
+    _check();
+    return super.delete(id);
+  }
+
+  @override
+  Future<void> deleteAll(Iterable<String> ids) async {
+    _check();
+    return super.deleteAll(ids);
+  }
+}
+
 CollectionRepository<_Item> _repo(RecordStore store) =>
     CollectionRepository<_Item>(
       store: store,
@@ -185,6 +214,54 @@ void main() {
       await repo.replaceAll(const [_Item('old', 'Keep'), _Item('n1', 'N1')]);
       expect(store.log, ['putAll', 'deleteAll']);
       expect(store.loadAll().map((m) => m['id']), ['old', 'n1']);
+    });
+
+    test(
+      'delete, deleteWhere e replaceAll com store que falha não mudam memória, version nem notificam',
+      () async {
+        final store = _FlakyStore();
+        final repo = _repo(store);
+        await repo.upsertAll(const [_Item('a', 'A'), _Item('b', 'B')]);
+        store.fail = true;
+        final version = repo.version;
+        var notifications = 0;
+        repo.addListener(() => notifications++);
+
+        await expectLater(repo.delete('a'), throwsStateError);
+        await expectLater(
+          repo.deleteWhere((i) => i.id == 'b'),
+          throwsStateError,
+        );
+        await expectLater(
+          repo.replaceAll(const [_Item('z', 'Z')]),
+          throwsStateError,
+        );
+
+        expect(repo.all.map((i) => i.id), ['a', 'b']);
+        expect(repo.version, version);
+        expect(notifications, 0);
+      },
+    );
+
+    test('deleteWhere e replaceAll notificam uma vez cada', () async {
+      final store = MemoryRecordStore();
+      final repo = _repo(store);
+      await repo.upsertAll(const [
+        _Item('a', 'A'),
+        _Item('b', 'B'),
+        _Item('c', 'C'),
+      ]);
+      var notifications = 0;
+      repo.addListener(() => notifications++);
+
+      await repo.deleteWhere((i) => i.id != 'a');
+      expect(notifications, 1);
+      expect(store.loadAll().map((m) => m['id']), ['a']);
+
+      await repo.replaceAll(const [_Item('n', 'N')]);
+      expect(notifications, 2);
+      expect(repo.all.map((i) => i.id), ['n']);
+      expect(store.loadAll().map((m) => m['id']), ['n']);
     });
 
     test('registro inválido é pulado no construtor', () async {

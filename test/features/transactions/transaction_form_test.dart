@@ -409,7 +409,7 @@ void main() {
     },
   );
 
-  testWidgets('Simples: regra com tags não aplica tags ao novo lançamento', (
+  testWidgets('Simples: regra com tags aplica as tags ao novo lançamento', (
     tester,
   ) async {
     final s = await _boot(tester);
@@ -433,8 +433,152 @@ void main() {
     await tester.pumpAndSettle();
 
     final saved = s.transactions.all.where((t) => t.description == 'UBER TRIP');
-    expect(saved.single.tags, isEmpty);
+    expect(saved.single.tags, ['app']);
+    expect(find.byType(TagField), findsNothing);
   });
+
+  testWidgets('regra com renameTo avisa e salva a descrição renomeada', (
+    tester,
+  ) async {
+    final s = await _boot(tester);
+    await tester.runAsync(
+      () => s.rules.upsert(
+        const TransactionRule(id: 'r_uber', pattern: 'UBER', renameTo: 'Uber'),
+      ),
+    );
+    await _openForm(tester, s);
+
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Valor'),
+      '18,00',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Descrição'),
+      'UBER TRIP 123',
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Será salvo como "Uber" (regra)'), findsOneWidget);
+
+    await _pickCartao(tester);
+    await tester.tap(find.text('Salvar'));
+    await tester.pumpAndSettle();
+
+    final saved = s.transactions.all.where((t) => t.description == 'Uber');
+    expect(saved.single.importedDescription, 'UBER TRIP 123');
+  });
+
+  testWidgets(
+    'Manter como digitado some o aviso e salva a descrição digitada',
+    (tester) async {
+      final s = await _boot(tester);
+      await tester.runAsync(
+        () => s.rules.upsert(
+          const TransactionRule(
+            id: 'r_uber',
+            pattern: 'UBER',
+            renameTo: 'Uber',
+          ),
+        ),
+      );
+      await _openForm(tester, s);
+
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Valor'),
+        '18,00',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Descrição'),
+        'UBER TRIP 123',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('form-rename-keep')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('form-rename-hint')), findsNothing);
+
+      await _pickCartao(tester);
+      await tester.tap(find.text('Salvar'));
+      await tester.pumpAndSettle();
+
+      final saved = s.transactions.all.where(
+        (t) => t.description == 'UBER TRIP 123',
+      );
+      expect(saved.single.importedDescription, isNull);
+    },
+  );
+
+  testWidgets('edição não aplica renameTo nem mostra aviso', (tester) async {
+    final s = await _boot(tester);
+    await tester.runAsync(
+      () => s.rules.upsert(
+        const TransactionRule(id: 'r_uber', pattern: 'UBER', renameTo: 'Uber'),
+      ),
+    );
+    final tx = Transaction(
+      id: 'tx_uber_edit',
+      type: TransactionType.expense,
+      amountCents: 1800,
+      date: DateTime(2026, 11, 10),
+      description: 'UBER TRIP 123',
+      accountId: 'acc_alfa',
+    );
+    await tester.runAsync(() => s.transactions.upsert(tx));
+    await _openForm(tester, s, initial: tx);
+
+    // Digita e volta ao mesmo texto: a regra casa, mas não vale em edição.
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Descrição'),
+      'UBER TRIP 123x',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Descrição'),
+      'UBER TRIP 123',
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('form-rename-hint')), findsNothing);
+
+    await tester.tap(find.text('Salvar'));
+    await tester.pumpAndSettle();
+
+    final saved = s.transactions.byId('tx_uber_edit')!;
+    expect(saved.description, 'UBER TRIP 123');
+    expect(saved.importedDescription, isNull);
+  });
+
+  testWidgets(
+    'parcelado com renameTo grava as parcelas com a descrição renomeada',
+    (tester) async {
+      final s = await _boot(tester);
+      await tester.runAsync(
+        () => s.rules.upsert(
+          const TransactionRule(
+            id: 'r_uber',
+            pattern: 'UBER',
+            renameTo: 'Uber',
+          ),
+        ),
+      );
+      await _openForm(tester, s);
+
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Valor'),
+        '100,00',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Descrição'),
+        'UBER TRIP 123',
+      );
+      await _pickCartao(tester);
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Parcelas'),
+        '3',
+      );
+      await tester.tap(find.text('Salvar'));
+      await tester.pumpAndSettle();
+
+      final parcels = s.transactions.all.where((t) => t.description == 'Uber');
+      expect(parcels, hasLength(3));
+    },
+  );
 
   testWidgets(
     'categoria: subcategoria aparece logo depois da principal, com Pai › Filha',

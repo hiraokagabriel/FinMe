@@ -58,6 +58,8 @@ class HiveRecordStore implements RecordStore {
     return HiveRecordStore(await Hive.openBox<Map>(boxName));
   }
 
+  Future<void> close() => _box.close();
+
   @override
   Iterable<Map<String, dynamic>> loadAll() =>
       _box.values.map(normalizeMap).toList();
