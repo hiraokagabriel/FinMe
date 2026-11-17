@@ -1,30 +1,18 @@
 import 'package:flutter/material.dart';
-import 'package:fl_chart/fl_chart.dart';
 
-import '../data/cards_repository.dart';
-import '../domain/card_entity.dart';
-import '../domain/card_type.dart';
-import '../domain/statement_service.dart';
-import '../../../core/models/app_mode.dart';
-import '../../../core/services/app_mode_controller.dart';
-import '../../../core/services/repository_locator.dart';
-import '../../../core/services/route_observer.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../core/widgets/app_empty_state.dart';
-import '../../../features/transactions/domain/transaction_entity.dart';
-import '../../../features/transactions/domain/transaction_type.dart';
-import 'card_statements_page.dart';
-import 'new_card_page.dart';
+import '../../../app/app_scope.dart';
+import '../../../core/models/app_settings.dart';
+import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_spacing.dart';
+import '../../../core/widgets/widgets.dart';
+import '../../recurring/domain/recurring_rule.dart';
+import '../domain/payment_card.dart';
+import 'best_card_panel.dart';
+import 'card_form.dart';
+import 'card_tile.dart';
 
-class _CardSummary {
-  final double totalCommitted;
-  final int unpaidClosedCycles;
-
-  _CardSummary({
-    required this.totalCommitted,
-    required this.unpaidClosedCycles,
-  });
-}
+/// Cartões e bancos. Sem banco informado, o cartão cai no grupo "Outros" (por último).
+const _noBank = 'Outros';
 
 class CardsPage extends StatefulWidget {
   const CardsPage({super.key});
@@ -33,481 +21,198 @@ class CardsPage extends StatefulWidget {
   State<CardsPage> createState() => _CardsPageState();
 }
 
-class _CardsPageState extends State<CardsPage>
-    with RouteAware {
-  late final CardsRepository _cardsRepository;
-  List<CardEntity>          _cards     = const [];
-  Map<String, _CardSummary> _summaries = const {};
-  bool _isLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _cardsRepository = RepositoryLocator.instance.cards;
-    _loadData();
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    appRouteObserver.subscribe(this, ModalRoute.of(context)!);
-  }
-
-  @override
-  void dispose() {
-    appRouteObserver.unsubscribe(this);
-    super.dispose();
-  }
-
-  /// Chamado quando uma rota pushed sobre esta é removida (pop).
-  /// Garante que o limite e status de fatura reflitam qualquer
-  /// alteração feita em TransactionsPage (ex: apagar bill payment).
-  @override
-  void didPopNext() {
-    _loadData();
-  }
-
-  int _effectiveClosingDay(CardEntity card) {
-    if (card.closingDay != null) return card.closingDay!;
-    return (card.dueDay - 7).clamp(1, 28);
-  }
-
-  Future<void> _loadData() async {
-    final locator      = RepositoryLocator.instance;
-    final cards        = await _cardsRepository.getAll();
-    final transactions = await locator.transactions.getAll();
-    final stmtService  = StatementService.instance;
-    final now          = DateTime.now();
-    final today        = DateTime(now.year, now.month, now.day);
-
-    final Map<String, _CardSummary> summaries = {};
-
-    for (final card in cards) {
-      if (card.type != CardType.credit) {
-        summaries[card.id] =
-            _CardSummary(totalCommitted: 0, unpaidClosedCycles: 0);
-        continue;
-      }
-
-      final closingDay = _effectiveClosingDay(card);
-
-      DateTime openEnd = DateTime(today.year, today.month, closingDay);
-      if (openEnd.isBefore(today)) {
-        openEnd = DateTime(today.year, today.month + 1, closingDay);
-      }
-      final openStart =
-          DateTime(openEnd.year, openEnd.month - 1, closingDay)
-              .add(const Duration(days: 1));
-
-      double totalCommitted = 0.0;
-      int    unpaidClosed   = 0;
-
-      final openSpend = transactions
-          .where((tx) =>
-              tx.cardId == card.id &&
-              tx.type == TransactionType.expense &&
-              !tx.isProvisioned &&
-              !tx.date.isBefore(openStart) &&
-              !tx.date.isAfter(openEnd))
-          .fold(0.0, (s, tx) => s + tx.amount.amount);
-
-      totalCommitted += openSpend;
-
-      for (int i = 1; i <= 12; i++) {
-        final cycleEnd =
-            DateTime(openEnd.year, openEnd.month - i, closingDay);
-        final cycleStart =
-            DateTime(cycleEnd.year, cycleEnd.month - 1, closingDay)
-                .add(const Duration(days: 1));
-
-        if (cycleEnd.isAfter(today)) continue;
-
-        final isPaid = await stmtService.isPaid(
-          card.id,
-          cycleEnd.year,
-          cycleEnd.month,
-        );
-
-        if (!isPaid) {
-          final cycleSpend = transactions
-              .where((tx) =>
-                  tx.cardId == card.id &&
-                  tx.type == TransactionType.expense &&
-                  !tx.isProvisioned &&
-                  !tx.date.isBefore(cycleStart) &&
-                  !tx.date.isAfter(cycleEnd))
-              .fold(0.0, (s, tx) => s + tx.amount.amount);
-
-          if (cycleSpend > 0) {
-            totalCommitted += cycleSpend;
-            unpaidClosed++;
-          }
-        } else if (unpaidClosed == 0 && i > 3) {
-          break;
-        }
-      }
-
-      summaries[card.id] = _CardSummary(
-        totalCommitted:   totalCommitted,
-        unpaidClosedCycles: unpaidClosed,
-      );
-    }
-
-    setState(() {
-      _cards     = cards;
-      _summaries = summaries;
-      _isLoading = false;
-    });
-  }
-
-  String _cardTypeLabel(CardType type) {
-    switch (type) {
-      case CardType.credit: return 'Crédito';
-      case CardType.debit:  return 'Débito';
-    }
-  }
-
-  Future<void> _openCardForm({CardEntity? initial}) async {
-    final result = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-          builder: (context) => NewCardPage(initialCard: initial)),
-    );
-    if (result == true) await _loadData();
-  }
-
-  Future<void> _openStatements(CardEntity card) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => CardStatementsPage(card: card)),
-    );
-    await _loadData();
-  }
-
-  Future<bool?> _confirmDelete(CardEntity card) {
-    return showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Excluir cartão'),
-        content: Text('Deseja excluir o cartão "${card.name}"?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancelar'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text('Excluir',
-                style: TextStyle(color: AppColors.danger)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Color _limitColor(double ratio) {
-    if (ratio < 0.5) return AppColors.limitLow;
-    if (ratio < 0.8) return AppColors.limitMid;
-    return AppColors.limitHigh;
-  }
-
-  Widget _buildLimitBar(CardEntity card) {
-    final limit = card.limit;
-    if (limit == null || limit <= 0) return const SizedBox.shrink();
-
-    final summary = _summaries[card.id];
-    final used    = summary?.totalCommitted ?? 0;
-    final unpaid  = summary?.unpaidClosedCycles ?? 0;
-    final ratio   = (used / limit).clamp(0.0, 1.0);
-    final color   = _limitColor(ratio);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(height: AppSpacing.sm),
-        Row(
-          children: [
-            Expanded(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(AppRadius.chip),
-                child: LinearProgressIndicator(
-                  value: ratio,
-                  minHeight: 8,
-                  backgroundColor: AppColors.limitTrack,
-                  color: color,
-                ),
-              ),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            Text(
-              '${(ratio * 100).toStringAsFixed(1)}%',
-              style: AppText.badge
-                  .copyWith(fontWeight: FontWeight.bold, color: color),
-            ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'R\$ ${used.toStringAsFixed(2)} / R\$ ${limit.toStringAsFixed(2)}',
-                style: AppText.secondary,
-              ),
-            ),
-            if (unpaid > 0)
-              Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.xs, vertical: 1),
-                decoration: BoxDecoration(
-                  color: AppColors.limitHigh.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(AppRadius.chip),
-                ),
-                child: Text(
-                  '$unpaid fatura${unpaid > 1 ? 's' : ''} em aberto',
-                  style: AppText.badge
-                      .copyWith(color: AppColors.limitHigh),
-                ),
-              ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildDonutChart(CardEntity card) {
-    final limit = card.limit;
-    if (limit == null || limit <= 0) return const SizedBox.shrink();
-
-    final summary = _summaries[card.id];
-    final used    = summary?.totalCommitted ?? 0;
-    final free    = (limit - used).clamp(0.0, limit);
-    final ratio   = (used / limit).clamp(0.0, 1.0);
-    final color   = _limitColor(ratio);
-
-    return SizedBox(
-      width: 100,
-      height: 100,
-      child: PieChart(
-        PieChartData(
-          sectionsSpace: 2,
-          centerSpaceRadius: 30,
-          sections: [
-            PieChartSectionData(
-              value: used > 0 ? used : 0.001,
-              color: color,
-              title: '',
-              radius: 18,
-            ),
-            PieChartSectionData(
-              value: free > 0 ? free : 0.001,
-              color: AppColors.limitTrack,
-              title: '',
-              radius: 18,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPaidBadge() {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.sm, vertical: 2),
-      decoration: BoxDecoration(
-        color: AppColors.limitLow.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(AppRadius.chip),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.check_circle_outline,
-              size: 11, color: AppColors.limitLow),
-          const SizedBox(width: 3),
-          Text('Em dia',
-              style: AppText.badge.copyWith(color: AppColors.limitLow)),
-        ],
-      ),
-    );
-  }
+class _CardsPageState extends State<CardsPage> {
+  bool _showArchived = false;
 
   @override
   Widget build(BuildContext context) {
-    final modeController = AppModeController.instance;
-
-    return AnimatedBuilder(
-      animation: modeController,
+    final s = AppScope.of(context);
+    return ListenableBuilder(
+      listenable: s.ledger,
       builder: (context, _) {
-        final mode     = modeController.mode;
-        final isSimple = mode == AppMode.simple;
-        final isUltra  = mode == AppMode.ultra;
-
-        return Scaffold(
-          appBar: AppBar(title: const Text('Cartões')),
-          floatingActionButton: FloatingActionButton.extended(
-            onPressed: () => _openCardForm(),
-            icon: const Icon(Icons.add),
-            label: const Text('Novo cartão'),
-          ),
-          body: _isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : Column(
+        final ultra = s.settings.value.mode == AppMode.ultra;
+        final showArchived = ultra && _showArchived;
+        final groups = _groupByBank(
+          s.cards.all.where((c) => showArchived || !c.archived),
+        );
+        final subscriptions = _subscriptionCounts(s.recurring.all);
+        final options = s.ledger.bestCardsToday;
+        final noAccount = {
+          for (final c in s.ledger.cardsWithoutPaymentAccount)
+            if (c.kind == CardKind.credit) c.id,
+        };
+        final inset = MediaQuery.sizeOf(context).width < 600
+            ? AppSpace.lg
+            : AppSpace.xl;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            PageHeader(
+              title: 'Cartões',
+              actions: [
+                FilledButton.icon(
+                  onPressed: () => showCardForm(context),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Novo cartão'),
+                ),
+              ],
+            ),
+            if (ultra)
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: inset),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (isSimple)
-                      Container(
-                        width: double.infinity,
-                        margin: const EdgeInsets.all(AppSpacing.lg),
-                        padding: const EdgeInsets.all(AppSpacing.md),
-                        decoration: BoxDecoration(
-                          color: AppColors.sidebar,
-                          borderRadius:
-                              BorderRadius.circular(AppRadius.card),
-                        ),
-                        child: Text(
-                          'Detalhes de cartões são mais úteis no Modo Ultra.',
-                          style: AppText.secondary,
-                        ),
-                      ),
-                    Expanded(
-                      child: _cards.isEmpty
-                          ? AppEmptyState(
-                              icon: Icons.credit_card_off_outlined,
-                              title: 'Nenhum cartão cadastrado',
-                              message:
-                                  'Toque em "Novo cartão" para começar.',
-                              actionLabel: 'Novo cartão',
-                              onAction: () => _openCardForm(),
-                            )
-                          : ListView.separated(
-                              padding: const EdgeInsets.only(
-                                  bottom: 80, top: AppSpacing.sm),
-                              itemCount: _cards.length,
-                              separatorBuilder: (_, __) =>
-                                  const Divider(height: 1),
-                              itemBuilder: (context, index) {
-                                final card     = _cards[index];
-                                final isCredit =
-                                    card.type == CardType.credit;
-                                final summary  = _summaries[card.id];
-                                final unpaid   =
-                                    summary?.unpaidClosedCycles ?? 0;
-                                final allPaid  = unpaid == 0;
-
-                                return Dismissible(
-                                  key: ValueKey(card.id),
-                                  direction:
-                                      DismissDirection.endToStart,
-                                  confirmDismiss: (_) =>
-                                      _confirmDelete(card),
-                                  onDismissed: (_) async {
-                                    await _cardsRepository
-                                        .remove(card.id);
-                                    await _loadData();
-                                    if (!mounted) return;
-                                    ScaffoldMessenger.of(context)
-                                        .showSnackBar(const SnackBar(
-                                      content: Text(
-                                          'Cartão excluído com sucesso'),
-                                    ));
-                                  },
-                                  background:
-                                      const SizedBox.shrink(),
-                                  secondaryBackground: Container(
-                                    color: AppColors.danger,
-                                    alignment: Alignment.centerRight,
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: AppSpacing.lg),
-                                    child: const Icon(
-                                        Icons.delete_outline,
-                                        color: Colors.white),
-                                  ),
-                                  child: InkWell(
-                                    onTap: isCredit
-                                        ? () => _openStatements(card)
-                                        : () => _openCardForm(
-                                            initial: card),
-                                    child: Padding(
-                                      padding: const EdgeInsets
-                                          .symmetric(
-                                              horizontal: AppSpacing.lg,
-                                              vertical: AppSpacing.md),
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            children: [
-                                              Expanded(
-                                                child: Column(
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment
-                                                          .start,
-                                                  children: [
-                                                    Text(
-                                                      card.name,
-                                                      style: AppText.body
-                                                          .copyWith(
-                                                        fontWeight:
-                                                            FontWeight
-                                                                .w600,
-                                                        fontSize: 15,
-                                                      ),
-                                                    ),
-                                                    const SizedBox(
-                                                        height: 2),
-                                                    Text(
-                                                      isCredit
-                                                          ? '${card.bankName} · ${_cardTypeLabel(card.type)} · Venc. dia ${card.dueDay} · Ver faturas'
-                                                          : '${card.bankName} · ${_cardTypeLabel(card.type)} · Venc. dia ${card.dueDay}',
-                                                      style: AppText
-                                                          .secondary,
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                              if (isCredit && isUltra && allPaid)
-                                                _buildPaidBadge(),
-                                              const SizedBox(
-                                                  width: AppSpacing.xs),
-                                              if (isCredit)
-                                                Icon(
-                                                  Icons.chevron_right,
-                                                  size: 18,
-                                                  color: Theme.of(context)
-                                                      .colorScheme
-                                                      .onSurfaceVariant,
-                                                ),
-                                            ],
-                                          ),
-                                          if (isUltra &&
-                                              card.limit != null) ...[
-                                            const SizedBox(
-                                                height: AppSpacing.sm),
-                                            Row(
-                                              children: [
-                                                _buildDonutChart(card),
-                                                const SizedBox(
-                                                    width:
-                                                        AppSpacing.md),
-                                                Expanded(
-                                                  child:
-                                                      _buildLimitBar(
-                                                          card),
-                                                ),
-                                              ],
-                                            ),
-                                          ],
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
+                    Switch(
+                      value: _showArchived,
+                      onChanged: (v) => setState(() => _showArchived = v),
                     ),
+                    const Text('Mostrar arquivados'),
                   ],
                 ),
+              ),
+            Expanded(
+              child: groups.isEmpty
+                  ? EmptyState(
+                      icon: Icons.credit_card,
+                      message: 'Nenhum cartão cadastrado.',
+                      action: FilledButton.icon(
+                        onPressed: () => showCardForm(context),
+                        icon: const Icon(Icons.add),
+                        label: const Text('Novo cartão'),
+                      ),
+                    )
+                  : Align(
+                      alignment: Alignment.topCenter,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 1200),
+                        child: ListView.builder(
+                          padding: EdgeInsets.all(inset),
+                          itemCount: groups.length + 1,
+                          itemBuilder: (context, i) {
+                            if (i == 0) {
+                              return BestCardPanel(
+                                options: options,
+                                ultra: ultra,
+                              );
+                            }
+                            final (bank, cards) = groups[i - 1];
+                            return _BankSection(
+                              bank: bank,
+                              cards: cards,
+                              ultra: ultra,
+                              subscriptions: subscriptions,
+                              missingAccount: noAccount,
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+            ),
+          ],
         );
       },
     );
   }
+}
+
+/// Cabeçalho do banco (nome + contagem) e os cartões dele em Wrap.
+class _BankSection extends StatelessWidget {
+  const _BankSection({
+    required this.bank,
+    required this.cards,
+    required this.ultra,
+    required this.subscriptions,
+    required this.missingAccount,
+  });
+
+  final String bank;
+  final List<PaymentCard> cards;
+  final bool ultra;
+  final Map<String, int> subscriptions;
+
+  /// Ids de cartões de crédito sem conta de pagamento ativa.
+  final Set<String> missingAccount;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final count = cards.length;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpace.xl),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              if (ultra) ...[
+                BankAvatar(bankName: bank == _noBank ? '' : bank, size: 20),
+                const SizedBox(width: AppSpace.sm),
+              ],
+              Text(
+                bank,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: c.textPrimary,
+                ),
+              ),
+              const SizedBox(width: AppSpace.sm),
+              Text(
+                '$count ${count == 1 ? 'cartão' : 'cartões'}',
+                style: TextStyle(fontSize: 12, color: c.textSecondary),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpace.md),
+          Wrap(
+            spacing: AppSpace.lg,
+            runSpacing: AppSpace.lg,
+            children: [
+              for (final card in cards)
+                CardTile(
+                  card: card,
+                  ultra: ultra,
+                  subscriptions: subscriptions[card.id] ?? 0,
+                  missingPaymentAccount: missingAccount.contains(card.id),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Grupos (banco, cartões) em ordem alfabética, "Outros" por último; cartões por nome.
+List<(String, List<PaymentCard>)> _groupByBank(Iterable<PaymentCard> cards) {
+  final byBank = <String, List<PaymentCard>>{};
+  for (final card in cards) {
+    final bank = card.bankName.trim();
+    byBank.putIfAbsent(bank.isEmpty ? _noBank : bank, () => []).add(card);
+  }
+  final names = byBank.keys.toList()..sort(_compareBanks);
+  return [
+    for (final name in names)
+      (name, byBank[name]!..sort((a, b) => a.name.compareTo(b.name))),
+  ];
+}
+
+int _compareBanks(String a, String b) {
+  if (a == _noBank || b == _noBank) {
+    return a == b ? 0 : (a == _noBank ? 1 : -1);
+  }
+  return a.compareTo(b);
+}
+
+/// Assinaturas ativas por cartão (badge do modo Ultra). Calculado uma vez por build.
+Map<String, int> _subscriptionCounts(Iterable<RecurringRule> rules) {
+  final counts = <String, int>{};
+  for (final rule in rules) {
+    final cardId = rule.cardId;
+    if (cardId != null && rule.isSubscription && rule.active) {
+      counts[cardId] = (counts[cardId] ?? 0) + 1;
+    }
+  }
+  return counts;
 }

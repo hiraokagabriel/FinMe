@@ -1,4 +1,0 @@
-enum CardType {
-  credit,
-  debit,
-}

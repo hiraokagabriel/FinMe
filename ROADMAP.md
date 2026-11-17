@@ -1,190 +1,38 @@
-# Roadmap – FinMe
+# Roadmap — FinMe
 
-Este arquivo dá uma visão geral da direção do FinMe e das próximas etapas de desenvolvimento.  
-O roadmap é organizado em marcos (M1, M2, …), cada um com um foco específico.
+Direção do produto e próximos passos. Tarefas detalhadas e status: `docs/BACKLOG.md`. Estado implementado: `CONTEXT.md`.
 
-> Este roadmap é um documento vivo e será atualizado conforme novas funcionalidades forem desenvolvidas e prioridades mudarem.
+## Histórico
 
----
+- **v1 (descontinuada)**: M1–M3 do projeto anterior. Apagada e substituída pelo rewrite v2. Docs antigos em `docs/legacy/`.
 
-## Visão geral
+## v2 — concluída
 
-FinMe é um app de finanças para pessoas que lidam com **alto volume de cartões, contas e bancos**, com foco em:
+- **Fase 0 — Fundação**: limpeza, utilitários, tema, persistência e configurações.
+- **Fase 1 — Domínio**: entidades, faturas, parcelas, recorrência, saldos, categorias, previsão e correções da revisão.
+- **Fase 2 — App**: bootstrap, Ledger memoizado, shell de navegação, onboarding e widgets compartilhados.
+- **Fase 3 — Telas**: Painel, Previsão, Cartões, Contas, Transações, Recorrentes, Categorias e Ajustes.
+- **Fase 4 — Integração**: polimento de app, dados e formulários; smoke test.
+- **Fase 5 — Previsibilidade avançada**: cobertura de faturas, linha do tempo de vencimentos (60 dias), parcelas comprometidas, melhor cartão para comprar hoje e mudança de ciclo com vigência.
+- **Fase 6 — Pendências conhecidas**: import de backup tudo-ou-nada, previsão cobre os 60 dias da linha do tempo, `copyWith` limpa anuláveis e fatura de transição sem fusão na mudança de ciclo (T-040..T-046).
 
-- Provisionamento de gastos futuros.
-- Visão consolidada de gastos passados, recentes e próximos.
-- Organização de dezenas de cartões (10, 20, 30+), inclusive múltiplos cartões do mesmo banco.
-- Dois modos de uso: **Modo Simples** (iniciante) e **Modo Ultra** (usuário avançado).
+## v3 — concluída (`docs/V3_DIRECTION.md`)
 
----
+- **Fase 7 — Identidade visual e polimento**: tipografia Plex + Source Serif 4, neutros quentes, deltas/sparklines, avatar de banco, ordenação, estados vazios, shell só desktop (T-050..T-068).
+- **Fase 8 — Importação, regras e categorização**: CSV com perfis, OFX, prévia com deduplicação, casamento com provisionados e parcelas, categorização offline em cascata, regras e dicionário editáveis (T-070..T-092).
+- **Fase 9 — Produtividade**: paleta Ctrl+K, atalhos globais, multi-seleção com ações em massa e edição inline (T-100..T-115).
+- **Fase 10 — Subcategorias, tags, metas e "posso gastar hoje"** (T-120..T-142).
+- **Fase 11 — Patrimônio e devo/me devem** (T-150..T-164).
+- **Fase 12 — Relatórios**: 7 relatórios curados com filtros globais e CSV (T-170..T-190). **v3 concluída.**
+- **Fase 14 — Perfis**: vários perfis com dados isolados e PIN opcional (T-230..T-233).
 
-## Estado atual
+## Próximos passos sugeridos
 
-- Status: **Em desenvolvimento ativo**.
-- Plataforma principal atual: **Windows (desktop)**.
-- Público alvo inicial: usuário final avançado (quem trabalha com muitos cartões), mas com espaço para iniciantes via Modo Simples.
-- Progresso geral atual:
-  - **M1: concluído**.
-  - **M2: concluído**.
-  - **M3: concluído**.
-  - **M4: concluído**.
-  - **M5-A: concluído**.
-  - **M5-B: em planejamento**.
+Direção da v3 (Fases 7–12): `docs/V3_DIRECTION.md`. Fase 7 (identidade visual e polimento) está no `docs/BACKLOG.md`.
 
----
-
-## M1 – Infraestrutura básica & setup de desenvolvimento
-
-**Objetivo:** Ter um projeto Flutter estruturado, rodando em desktop, com base para evolução.
-
-**Status:** ✅ **Concluído**
-
-**Itens entregues:**
-
-- Projeto Flutter criado e versionado no GitHub.
-- Organização inicial de pastas em `lib/`:
-  - `lib/app/`
-    - `app.dart` (widget raiz, `MaterialApp`).
-    - `router.dart` (definição de rotas/navegação).
-  - `lib/core/`
-    - `models/` (modelos genéricos, ex.: Money, DateRange).
-    - `services` (serviços genéricos, ex.: storage local, controller de modo, inicialização Hive).
-    - `utils/` (helpers e funções utilitárias).
-    - `theme/` (cores, tipografia, temas).
-  - `lib/features/`
-    - `cards/` (cartões e bancos – `data/`, `domain/`, `presentation/`).
-    - `transactions/` (receitas, despesas, boletos – `data/`, `domain/`, `presentation/`).
-    - `categories/` (categorias de despesa/receita – `data/`, `domain/`, `presentation/`).
-    - `dashboard/` (tela inicial e visões consolidadas – `presentation/`).
-    - `settings/` (configurações do app, incluindo Modo Simples/Ultra – `presentation/`).
-- Navegação básica entre dashboard, transações, cartões e configurações.
-- Dashboard inicial com placeholder funcional e ações rápidas.
-
----
-
-## M2 – Núcleo financeiro (MVP funcional)
-
-**Objetivo:** Permitir uso básico do FinMe para controle de cartões, receitas e despesas.
-
-**Status:** ✅ **Concluído**
-
-**Funcionalidades entregues:**
-
-- **Cadastro de cartões**
-  - Múltiplos cartões cadastráveis.
-  - Dados disponíveis: nome do cartão, banco, tipo, dia de vencimento e limite.
-
-- **Cadastro de receitas e despesas**
-  - Registro de transações com:
-    - Valor, data, tipo (receita/despesa).
-    - Forma de pagamento (crédito, débito, boleto, pix, dinheiro e outros).
-    - Associação com cartão quando aplicável.
-  - Provisionamento manual de gastos futuros.
-  - Suporte a parcelas via campo de quantidade.
-
-- **Categorias de despesas e receitas**
-  - CRUD básico de categorias.
-  - Associação de transações a categorias.
-
-- **Visualização básica**
-  - Lista filtrável por período.
-  - Resumo de despesas, receitas e saldo.
-  - Visualização de gastos por categoria.
-  - Visualização de gastos por cartão.
-
-- **Persistência local**
-  - Dados persistidos com Hive.
-  - Seeds iniciais para categorias, cartões e transações.
-
----
-
-## M3 – Modo Simples vs Modo Ultra
-
-**Objetivo:** Entregar experiências distintas de uso, respeitando o nível de complexidade desejado.
-
-**Status:** ✅ **Concluído**
-
-### Funcionalidades entregues ✅
-
-| Item | Commit |
-|------|--------|
-| Modo Simples vs Ultra — UI adaptativa | #13, #27 |
-| Persistência de preferências (modo + tema) | #38 |
-| Padronização visual tema claro (tokens em `app_theme.dart`) | #28–#30 |
-| Recorrência automática de transações | #39 |
-| Ícones personalizados por categoria | #40 |
-| Dashboard aprimorado (KPIs + gráfico de linha mensal + últimas transações) | #32, #41 |
-| Tela de metas (Meta de Economia + Teto de Gastos) | #33, #44 |
-| Relatórios com filtros e exportação CSV | #34 |
-| Tema escuro com toggle persistido | #36 |
-| Múltiplas contas/carteiras (`AccountsPage`, seed, rota `/accounts`) | #48 |
-| Transferência entre contas (`TransferPage`, rota `/transfer`) | #49 |
-| Splash + onboarding com seleção de modo (`OnboardingPage`, flag Hive em `HiveInit`, rota `/onboarding`) | #56+ |
-| Persistência definitiva de preferências avançadas (`PreferencesService`) | concluído |
-| Orçamento mensal por categoria (`BudgetPage`, `BudgetModel` typeId 6) | concluído |
-
-> Detalhes de implementação em `docs/M3_REPORT.md`.
-
----
-
-## M4 – Detecção de gastos desnecessários & análises
-
-**Objetivo:** Ajudar o usuário a identificar desperdícios e oportunidades de economia.
-
-**Status:** ✅ **Concluído**
-
-**Funcionalidades entregues:**
-
-- Identificação de assinaturas recorrentes e gastos repetitivos.
-- Relatórios comparativos entre períodos.
-- Visões analíticas para gastos por categoria, cartão e recorrência.
-- Consolidação de indicadores para apoiar revisão de despesas.
-
----
-
-## M5 – UX, visualizações e distribuição
-
-**Objetivo:** Melhorar a experiência de uso e facilitar a adoção.
-
-**Status:** 🟡 **Em andamento**
-
-### M5-A — Refinamento UX/UI e visualizações iniciais ✅
-
-**Status:** ✅ **Concluído**
-
-**Entregas realizadas:**
-
-- Transição de rota com slide horizontal entre páginas.
-- Dashboard com KPIs animados (count-up), sparkline inline por card e toggle de séries no gráfico mensal.
-- TransactionsPage com agrupamento por data e stagger de entrada nos itens.
-- Bottom sheet de filtros com período, tipo e faixa de valor.
-- Tipografia global com Inter.
-- Varredura de espaçamentos padronizando os arquivos tocados com tokens (`AppSpacing`).
-
-### M5-B — Próxima etapa 🔲
-
-**Status:** 🔲 **Pendente / em definição**
-
-**Frentes previstas para refinamento via perguntas e respostas:**
-
-- Ajustes adicionais de UX/UI nas telas restantes.
-- Linha de tempo de gastos por dia/semana/mês.
-- Refinos de responsividade entre Modo Simples e Modo Ultra.
-- Empacotamento `.exe` para Windows.
-- Preparação de builds Android (APK/AAB para testes).
-
-**Não incluso em M5:**
-
-- Publicação em lojas (Microsoft Store, Google Play, App Store) – a definir.
-
----
-
-## Futuro (ideias sem compromisso de prazo)
-
-- Importação/exportação de dados (CSV, backup).
-- Suporte completo a:
-  - iOS / iPadOS.
-  - macOS.
-- Painel “Saúde financeira” com indicadores e dicas.
-- Possíveis integrações com bancos, APIs de extrato ou agregadores financeiros.
-- Modo “auditoria rápida” para revisar um período (ex.: últimos 15 dias) e marcar gastos como essenciais/supérfluos.
+1. Memoizar a linha de fechamentos do cartão (T-047, desempenho em volume Ultra).
+2. Importação de extrato CSV/OFX, manual (o usuário escolhe o arquivo).
+3. Metas de economia.
+4. Auditoria rápida de gastos: essencial × supérfluo.
+5. Detecção automática de assinaturas a partir do histórico de transações.
+6. Distribuição do Windows: `.exe` e instalador.

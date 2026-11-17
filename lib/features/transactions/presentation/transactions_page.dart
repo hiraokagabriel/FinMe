@@ -1,1637 +1,874 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
-import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter/services.dart';
 
-import '../data/transactions_repository.dart';
-import '../domain/transaction_entity.dart';
-import '../domain/transaction_type.dart';
-import '../../categories/domain/category_entity.dart';
-import '../../cards/domain/card_entity.dart';
-import '../../cards/domain/statement_service.dart';
-import '../../../core/models/app_mode.dart';
-import '../../../core/services/app_mode_controller.dart';
-import '../../../core/services/preferences_service.dart';
-import '../../../core/services/repository_locator.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../core/widgets/app_empty_state.dart';
-import 'new_transaction_page.dart';
-
-// ── Enums de filtro ──────────────────────────────────────────────────────────
-
-enum _PeriodFilter { thisMonth, lastMonth, thisWeek, all }
-
-enum _TypeFilter { all, income, expense, transfer }
-
-/// Filtro pelo estado de realização da transação.
-enum _StatusFilter { all, paid, unpaid, future }
-
-enum _DeleteAction { none, single, group }
-
-extension _PeriodFilterPersistence on _PeriodFilter {
-  String get key => name;
-  static _PeriodFilter fromKey(String key) =>
-      _PeriodFilter.values.firstWhere((e) => e.name == key,
-          orElse: () => _PeriodFilter.thisMonth);
-}
-
-String _periodLabel(_PeriodFilter f) {
-  switch (f) {
-    case _PeriodFilter.thisMonth:  return 'Este mês';
-    case _PeriodFilter.lastMonth:  return 'Mês anterior';
-    case _PeriodFilter.thisWeek:   return 'Esta semana';
-    case _PeriodFilter.all:        return 'Tudo';
-  }
-}
-
-(DateTime, DateTime) _periodRange(_PeriodFilter f) {
-  final now = DateTime.now();
-  switch (f) {
-    case _PeriodFilter.thisMonth:
-      return (
-        DateTime(now.year, now.month, 1),
-        DateTime(now.year, now.month + 1, 0, 23, 59, 59),
-      );
-    case _PeriodFilter.lastMonth:
-      return (
-        DateTime(now.year, now.month - 1, 1),
-        DateTime(now.year, now.month, 0, 23, 59, 59),
-      );
-    case _PeriodFilter.thisWeek:
-      final start = now.subtract(Duration(days: now.weekday - 1));
-      return (
-        DateTime(start.year, start.month, start.day),
-        DateTime(now.year, now.month, now.day, 23, 59, 59),
-      );
-    case _PeriodFilter.all:
-      return (DateTime(2000), DateTime(2100));
-  }
-}
-
-// ── Page ─────────────────────────────────────────────────────────────────────
+import '../../../app/app_scope.dart';
+import '../../../app/app_shortcuts.dart';
+import '../../../app/ledger.dart';
+import '../../../core/models/app_settings.dart';
+import '../../../core/models/year_month.dart';
+import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_spacing.dart';
+import '../../../core/utils/id.dart';
+import '../../../core/widgets/widgets.dart';
+import '../../categories/domain/transaction_category.dart';
+import '../../importing/presentation/import_flow.dart';
+import '../../rules/domain/rule_engine.dart';
+import '../../rules/domain/rule_suggestion.dart';
+import '../../rules/presentation/rule_form.dart';
+import '../domain/tags.dart';
+import '../domain/transaction.dart';
+import '../domain/transaction_bulk.dart';
+import 'bulk_action_bar.dart';
+import 'bulk_dialogs.dart';
+import 'tag_widgets.dart';
+import 'transaction_filters.dart';
+import 'transaction_form.dart';
+import 'transaction_row.dart';
+import 'transaction_selection.dart';
 
 class TransactionsPage extends StatefulWidget {
-  const TransactionsPage({super.key});
+  const TransactionsPage({
+    super.key,
+    this.focusNode,
+    this.searchFocusNode,
+    this.initialQuery,
+  });
+
+  /// Foco da página (atalhos de seleção). Nulo → a página cria e descarta o próprio.
+  final FocusNode? focusNode;
+
+  /// Foco do campo de busca da barra de filtros (Ultra); `/` do shell usa este nó.
+  final FocusNode? searchFocusNode;
+
+  /// Busca inicial (ex.: vinda da paleta). Só o Ultra mostra a barra de filtros.
+  final String? initialQuery;
 
   @override
   State<TransactionsPage> createState() => _TransactionsPageState();
 }
 
 class _TransactionsPageState extends State<TransactionsPage> {
-  late final TransactionsRepository _transactionsRepository;
-  List<TransactionEntity> _allTransactions = const [];
-  List<TransactionEntity> _filtered        = const [];
-  List<TransactionEntity> _provisioned     = const [];
-  Map<String, CategoryEntity> _categoriesById = const {};
-  Map<String, CardEntity>     _cardsById      = const {};
-  bool _isLoading = true;
+  final FocusNode _ownFocus = FocusNode(debugLabel: 'transactions');
+  YearMonth? _month;
+  late TransactionFilter _filter;
+  TxSort _sort = kDefaultTxSort;
+  // Troca a chave da barra de filtros: `initialValue` não reseta sozinho.
+  int _filterEpoch = 0;
+  TransactionSelection _selection = TransactionSelection.empty;
 
-  late _PeriodFilter _period;
-  String? _filterCategoryId;
-  TransactionType? _filterType;
-  _StatusFilter   _filterStatus = _StatusFilter.all;
-  double? _minAmountFilter;
-  double? _maxAmountFilter;
-  double _maxAmountInData = 0;
-
-  bool   _searchActive = false;
-  String _searchQuery  = '';
-  final _searchController = TextEditingController();
-  final _searchFocus      = FocusNode();
-
-  double _totalExpenses = 0;
-  double _totalIncome   = 0;
+  FocusNode get _focus => widget.focusNode ?? _ownFocus;
 
   @override
   void initState() {
     super.initState();
-    _transactionsRepository = RepositoryLocator.instance.transactions;
-    final prefs = PreferencesService.instance;
-    _period = _PeriodFilterPersistence.fromKey(prefs.transactionsPeriod);
-    _filterCategoryId = prefs.transactionsCategoryId;
-    _loadData();
+    _filter = TransactionFilter(query: widget.initialQuery ?? '');
   }
 
   @override
   void dispose() {
-    _searchController.dispose();
-    _searchFocus.dispose();
+    _ownFocus.dispose();
     super.dispose();
   }
 
-  // ── Data ──────────────────────────────────────────────────────────────────
-
-  Future<void> _loadData() async {
-    final locator        = RepositoryLocator.instance;
-    final transactions   = await _transactionsRepository.getAll();
-    final categoriesList = await locator.categories.getAll();
-    final cardsList      = await locator.cards.getAll();
-
-    double maxAmount = 0;
-    for (final tx in transactions) {
-      if (tx.isProvisioned) continue;
-      final v = tx.amount.amount.abs();
-      if (v > maxAmount) maxAmount = v;
-    }
-
-    setState(() {
-      _allTransactions = transactions;
-      _categoriesById  = {for (final c in categoriesList) c.id: c};
-      _cardsById       = {for (final c in cardsList)      c.id: c};
-      _maxAmountInData = maxAmount;
-      _isLoading       = false;
-    });
-    _applyFilters();
-  }
-
-  // ── Helpers de grupo e parcelas ───────────────────────────────────────────
-
-  List<TransactionEntity> _siblingsFor(TransactionEntity tx) {
-    final groupId = tx.recurrenceSourceId ?? tx.id;
-    return _allTransactions
-        .where((t) =>
-            t.recurrenceSourceId == groupId ||
-            t.id == groupId)
-        .toList();
-  }
-
-  String? _installmentLabel(TransactionEntity tx) {
-    final total = tx.installmentCount;
-    if (total == null || total <= 1) return null;
-
-    final siblings = _siblingsFor(tx)
-      ..sort((a, b) => a.date.compareTo(b.date));
-    final index = siblings.indexWhere((t) => t.id == tx.id);
-    if (index == -1) return null;
-
-    final current = index + 1; // 1-based
-    return '$current/$total';
-  }
-
-  // ── Filters ───────────────────────────────────────────────────────────────
-
-  void _applyFilters() {
-    final (start, end) = _periodRange(_period);
-    final query  = _searchQuery.toLowerCase().trim();
-    final today  = DateTime.now();
-    final todayDay = DateTime(today.year, today.month, today.day);
-
-    // — Provisioned (não realizadas) filtradas por _statusFilter —
-    List<TransactionEntity> provisioned = [];
-    if (_filterStatus == _StatusFilter.all ||
-        _filterStatus == _StatusFilter.unpaid ||
-        _filterStatus == _StatusFilter.future) {
-      provisioned = _allTransactions.where((tx) {
-        if (!tx.isProvisioned) return false;
-        final dueDate = tx.provisionedDueDate ?? tx.date;
-        final dueDay  = DateTime(dueDate.year, dueDate.month, dueDate.day);
-        final isPast  = dueDay.compareTo(todayDay) <= 0;
-        if (_filterStatus == _StatusFilter.unpaid  && !isPast) return false;
-        if (_filterStatus == _StatusFilter.future  &&  isPast) return false;
-        return true;
-      }).toList()
-        ..sort((a, b) {
-          final da = a.provisionedDueDate ?? a.date;
-          final db = b.provisionedDueDate ?? b.date;
-          return da.compareTo(db);
-        });
-    }
-
-    // — Realizadas filtradas por todos os critérios —
-    List<TransactionEntity> result = [];
-    if (_filterStatus == _StatusFilter.all ||
-        _filterStatus == _StatusFilter.paid) {
-      result = _allTransactions.where((tx) {
-        if (tx.isProvisioned) return false;
-        final inPeriod   = !tx.date.isBefore(start) && !tx.date.isAfter(end);
-        final inCategory = _filterCategoryId == null ||
-            tx.categoryId == _filterCategoryId;
-        final inSearch   = query.isEmpty ||
-            (tx.description?.toLowerCase().contains(query) ?? false);
-        final inType     = _filterType == null || tx.type == _filterType;
-        final amountAbs  = tx.amount.amount.abs();
-        final inMin = _minAmountFilter == null || amountAbs >= _minAmountFilter!;
-        final inMax = _maxAmountFilter == null || amountAbs <= _maxAmountFilter!;
-        return inPeriod && inCategory && inSearch && inType && inMin && inMax;
-      }).toList()
-        ..sort((a, b) => b.date.compareTo(a.date));
-    }
-
-    double expenses = 0, income = 0;
-    for (final tx in result) {
-      if (tx.type == TransactionType.expense) {
-        expenses += tx.amount.amount;
-      } else if (tx.type == TransactionType.income) {
-        income += tx.amount.amount;
-      }
-    }
-
-    setState(() {
-      _filtered      = result;
-      _provisioned   = provisioned;
-      _totalExpenses = expenses;
-      _totalIncome   = income;
-    });
-  }
-
-  void _setPeriod(_PeriodFilter f) {
-    setState(() => _period = f);
-    PreferencesService.instance.setTransactionsPeriod(f.key);
-    _applyFilters();
-  }
-
-  void _setCategoryFilter(String? categoryId) {
-    setState(() => _filterCategoryId = categoryId);
-    PreferencesService.instance.setTransactionsCategoryId(categoryId);
-    _applyFilters();
-  }
-
-  void _setTypeFilter(_TypeFilter filter) {
-    setState(() {
-      switch (filter) {
-        case _TypeFilter.all:      _filterType = null; break;
-        case _TypeFilter.income:   _filterType = TransactionType.income; break;
-        case _TypeFilter.expense:  _filterType = TransactionType.expense; break;
-        case _TypeFilter.transfer: _filterType = TransactionType.transfer; break;
-      }
-    });
-    _applyFilters();
-  }
-
-  void _setStatusFilter(_StatusFilter s) {
-    setState(() => _filterStatus = s);
-    _applyFilters();
-  }
-
-  void _toggleSearch() {
-    setState(() {
-      _searchActive = !_searchActive;
-      if (!_searchActive) {
-        _searchQuery = '';
-        _searchController.clear();
-        _applyFilters();
-      } else {
-        SchedulerBinding.instance
-            .addPostFrameCallback((_) => _searchFocus.requestFocus());
-      }
-    });
-  }
-
-  int get _activeFilterCount {
-    int count = 0;
-    if (_period != _PeriodFilter.thisMonth) count++;
-    if (_filterCategoryId != null) count++;
-    if (_filterType != null) count++;
-    if (_filterStatus != _StatusFilter.all) count++;
-    if (_minAmountFilter != null || _maxAmountFilter != null) count++;
-    if (_searchQuery.trim().isNotEmpty) count++;
-    return count;
-  }
-
-  // ── Deleção e consolidação ────────────────────────────────────────────────
-
-  Future<void> _deleteTransaction(TransactionEntity tx) async {
-    await _transactionsRepository.remove(tx.id);
-
-    if (tx.isBillPayment && tx.cardId != null) {
-      await StatementService.instance.markPaid(
-        tx.cardId!,
-        tx.date.year,
-        tx.date.month,
-        paid: false,
-      );
-    }
-
-    await _loadData();
-    if (!mounted) return;
-
-    if (tx.isBillPayment) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text(
-            'Pagamento de fatura removido. A fatura foi reaberta.',
-          ),
-          backgroundColor: AppColors.warning,
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 4),
-          action: SnackBarAction(
-            label: 'OK',
-            textColor: Colors.white,
-            onPressed: () {},
-          ),
-        ),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Transação excluída')),
-      );
-    }
-  }
-
-  Future<_DeleteAction> _confirmDeleteWithGroup(TransactionEntity tx) async {
-    final siblings = _siblingsFor(tx);
-    final hasGroup = siblings.length > 1 && tx.installmentCount != null;
-
-    if (!hasGroup && !tx.isBillPayment) {
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Excluir transação'),
-          content: Text(
-            'Deseja excluir "${tx.description ?? 'Sem descrição'}"?',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancelar'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: Text('Excluir',
-                  style: TextStyle(color: AppColors.danger)),
-            ),
-          ],
-        ),
-      );
-      return ok == true ? _DeleteAction.single : _DeleteAction.none;
-    }
-
-    return showDialog<_DeleteAction>(
-      context: context,
-      builder: (context) {
-        _DeleteAction selected = _DeleteAction.single;
-
-        return StatefulBuilder(
-          builder: (context, setStateDialog) {
-            return AlertDialog(
-              title: const Text('Excluir transação'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('"${tx.description ?? 'Sem descrição'}"'),
-                  if (hasGroup) ...[
-                    const SizedBox(height: 12),
-                    const Text('O que você deseja excluir?'),
-                    const SizedBox(height: 8),
-                    RadioListTile<_DeleteAction>(
-                      value: _DeleteAction.single,
-                      groupValue: selected,
-                      onChanged: (v) {
-                        if (v != null) setStateDialog(() => selected = v);
-                      },
-                      title: const Text('Somente esta parcela'),
-                    ),
-                    RadioListTile<_DeleteAction>(
-                      value: _DeleteAction.group,
-                      groupValue: selected,
-                      onChanged: (v) {
-                        if (v != null) setStateDialog(() => selected = v);
-                      },
-                      title: Text(
-                        'Toda a compra (${siblings.length} parcelas)',
-                      ),
-                    ),
-                  ],
-                  if (tx.isBillPayment) ...[
-                    const SizedBox(height: 12),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(Icons.warning_amber_rounded,
-                            color: AppColors.warning, size: 18),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Esta é um pagamento de fatura. Excluí-lo irá reabrir a fatura do cartão.',
-                            style: TextStyle(
-                              color: AppColors.warning,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () =>
-                      Navigator.of(context).pop(_DeleteAction.none),
-                  child: const Text('Cancelar'),
-                ),
-                TextButton(
-                  onPressed: () =>
-                      Navigator.of(context).pop(selected),
-                  child: Text('Excluir',
-                      style: TextStyle(color: AppColors.danger)),
-                ),
-              ],
-            );
-          },
+  @override
+  Widget build(BuildContext context) {
+    final s = AppScope.of(context);
+    return ListenableBuilder(
+      listenable: s.ledger,
+      builder: (context, _) {
+        final ultra = s.settings.value.mode == AppMode.ultra;
+        final ledger = s.ledger;
+        final month = _month ?? YearMonth.fromDate(ledger.today);
+        // Simples: só mês e provisionados ocultos (CLAUDE.md: Provisionados = Ocultos).
+        final filter = ultra
+            ? _filter
+            : const TransactionFilter(showPlanned: false);
+        final tree = ledger.categoryTree;
+        final filtered = visibleTransactions(
+          s.transactions.all,
+          month,
+          filter,
+          tree: tree,
         );
-      },
-    ).then((value) => value ?? _DeleteAction.none);
-  }
-
-  Future<bool> _handleDelete(TransactionEntity tx) async {
-    final action = await _confirmDeleteWithGroup(tx);
-    if (action == _DeleteAction.none) return false;
-
-    if (action == _DeleteAction.single) {
-      await _deleteTransaction(tx);
-    } else {
-      final siblings = _siblingsFor(tx);
-      for (final t in siblings) {
-        await _transactionsRepository.remove(t.id);
-      }
-      await _loadData();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Compra parcelada (${siblings.length} parcelas) excluída',
-            ),
-          ),
-        );
-      }
-    }
-    return true;
-  }
-
-  /// Converte uma transação provisionada em realizada (isProvisioned = false).
-  /// Remove o registro antigo e insere o novo com a data de hoje.
-  Future<void> _consolidatePayment(TransactionEntity tx) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Confirmar pagamento'),
-        content: Text(
-          'Marcar "${tx.description ?? 'Sem descrição'}" como pago?\n'
-          'A transação será registrada com a data de hoje.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Confirmar'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-
-    final paid = TransactionEntity(
-      id:                 DateTime.now().microsecondsSinceEpoch.toString(),
-      amount:             tx.amount,
-      date:               DateTime.now(),
-      type:               tx.type,
-      paymentMethod:      tx.paymentMethod,
-      description:        tx.description,
-      categoryId:         tx.categoryId,
-      cardId:             tx.cardId,
-      accountId:          tx.accountId,
-      toAccountId:        tx.toAccountId,
-      isBoleto:           tx.isBoleto,
-      isProvisioned:      false,
-      installmentCount:   tx.installmentCount,
-      provisionedDueDate: tx.provisionedDueDate,
-      recurrenceRule:     tx.recurrenceRule,
-      recurrenceSourceId: tx.recurrenceSourceId,
-      notes:              tx.notes,
-      isBillPayment:      tx.isBillPayment,
-    );
-
-    await _transactionsRepository.remove(tx.id);
-    await _transactionsRepository.add(paid);
-    await _loadData();
-
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          '${tx.description ?? 'Transação'} marcada como paga.',
-        ),
-        backgroundColor: AppColors.limitLow,
-      ),
-    );
-  }
-
-  // ── Forms ─────────────────────────────────────────────────────────────────
-
-  Future<void> _openForm({TransactionEntity? initial}) async {
-    final ok = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (context) => NewTransactionPage(initialTransaction: initial),
-      ),
-    );
-    if (ok == true) await _loadData();
-  }
-
-  // ── Helpers de display ────────────────────────────────────────────────────
-
-  /// Retorna o nome da categoria para exibição, tratando bill-payment e
-  /// categoryId vazio/null sem mostrar "Sem categoria" incorretamente.
-  String _categoryLabel(TransactionEntity tx) {
-    if (tx.isBillPayment) return 'Pagamento de fatura';
-    final cat = _categoriesById[tx.categoryId];
-    if (cat != null) return cat.name;
-    return 'Sem categoria';
-  }
-
-  // ── AppBar ────────────────────────────────────────────────────────────────
-
-  PreferredSizeWidget _buildAppBar() {
-    if (_searchActive) {
-      return AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: _toggleSearch,
-        ),
-        title: TextField(
-          controller: _searchController,
-          focusNode: _searchFocus,
-          decoration: const InputDecoration(
-            hintText: 'Buscar transação...',
-            border: InputBorder.none,
-          ),
-          onChanged: (v) {
-            setState(() => _searchQuery = v);
-            _applyFilters();
-          },
-        ),
-        actions: [
-          if (_searchQuery.isNotEmpty)
-            IconButton(
-              icon: const Icon(Icons.clear),
-              onPressed: () {
-                _searchController.clear();
-                setState(() => _searchQuery = '');
-                _applyFilters();
-              },
-            ),
-        ],
-      );
-    }
-
-    return AppBar(
-      title: const Text('Transações'),
-      actions: [
-        IconButton(
-          tooltip: 'Buscar',
-          icon: const Icon(Icons.search_outlined),
-          onPressed: _toggleSearch,
-        ),
-        _FilterBadge(
-          count: _activeFilterCount,
-          child: IconButton(
-            tooltip: 'Filtros',
-            icon: const Icon(Icons.filter_list_outlined),
-            onPressed: _openFiltersBottomSheet,
-          ),
-        ),
-      ],
-    );
-  }
-
-  void _openFiltersBottomSheet() {
-    final initialPeriod = _period;
-    final initialType   = _filterType;
-    final initialStatus = _filterStatus;
-    final initialMin    = _minAmountFilter ?? 0;
-    final initialMax    = _maxAmountFilter ?? _maxAmountInData;
-
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (context) {
-        _PeriodFilter  modalPeriod = initialPeriod;
-        TransactionType? modalType = initialType;
-        _StatusFilter  modalStatus = initialStatus;
-        double modalMin = initialMin;
-        double modalMax = initialMax;
-
-        _TypeFilter typeFromTx(TransactionType? txType) {
-          if (txType == null) return _TypeFilter.all;
-          switch (txType) {
-            case TransactionType.income:   return _TypeFilter.income;
-            case TransactionType.expense:  return _TypeFilter.expense;
-            case TransactionType.transfer: return _TypeFilter.transfer;
-          }
+        // Ordenação só no Ultra e só sobre as linhas já filtradas do mês.
+        final rows = ultra
+            ? sortTransactions(
+                filtered,
+                _sort,
+                originName: (t) => _originText(ledger, t),
+                categoryName: (t) => tree.label(t.categoryId ?? ''),
+              )
+            : filtered;
+        // Seleção só no Ultra: ao sair dele zera (já estamos no build, sem setState).
+        if (!ultra) {
+          _selection = TransactionSelection.empty;
         }
-
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            final selectedType   = typeFromTx(modalType);
-            final hasAmountRange = _maxAmountInData > 0;
-
-            return Padding(
-              padding: EdgeInsets.only(
-                left:   AppSpacing.lg,
-                right:  AppSpacing.lg,
-                top:    AppSpacing.lg,
-                bottom: MediaQuery.of(context).viewInsets.bottom + AppSpacing.lg,
+        // Seleção só no Ultra; conta apenas as linhas visíveis (filtro escondido não entra).
+        final order = [for (final t in rows) t.id];
+        final selected = ultra
+            ? [
+                for (final t in rows)
+                  if (_selection.contains(t.id)) t,
+              ]
+            : const <Transaction>[];
+        final bulkActions = [
+          BulkAction(
+            label: 'Recategorizar',
+            icon: Icons.category_outlined,
+            onPressed: () => _recategorize(context, s, selected),
+          ),
+          BulkAction(
+            label: 'Tags',
+            icon: Icons.sell_outlined,
+            onPressed: () => _bulkTags(context, s, selected),
+          ),
+          BulkAction(
+            label: 'Confirmar pagamento',
+            icon: Icons.event_available,
+            onPressed: selected.any((t) => t.isPlanned)
+                ? () => _confirmBulk(context, s, selected)
+                : null,
+          ),
+          BulkAction(
+            label: 'Criar regra',
+            icon: Icons.rule,
+            onPressed: () => _createRule(context, s, selected),
+          ),
+          BulkAction(
+            label: 'Excluir',
+            icon: Icons.delete_outline,
+            destructive: true,
+            onPressed: () => _deleteBulk(context, s, selected),
+          ),
+        ];
+        final newButton = Tooltip(
+          message: 'Atalho: N',
+          child: FilledButton.icon(
+            icon: const Icon(Icons.add),
+            label: const Text('Nova transação'),
+            onPressed: () => showTransactionForm(context),
+          ),
+        );
+        // Opções do dropdown inline na ordem da árvore (raiz seguida das filhas).
+        final expenseOptions = tree.options(CategoryKind.expense);
+        final incomeOptions = tree.options(CategoryKind.income);
+        final emptyAction = ultra && _filter.hasCriteria
+            ? Wrap(
+                alignment: WrapAlignment.center,
+                spacing: AppSpace.sm,
+                runSpacing: AppSpace.sm,
+                children: [
+                  newButton,
+                  OutlinedButton(
+                    onPressed: _clearFilters,
+                    child: const Text('Limpar filtros'),
+                  ),
+                ],
+              )
+            : newButton;
+        final pad = MediaQuery.sizeOf(context).width < 600
+            ? AppSpace.lg
+            : AppSpace.xl;
+        return Shortcuts(
+          shortcuts: kSelectionShortcuts,
+          child: Actions(
+            actions: <Type, Action<Intent>>{
+              SelectAllRowsIntent: TypingGuardAction<SelectAllRowsIntent>(
+                onInvoke: (_) {
+                  if (ultra) {
+                    setState(() => _selection = _selection.selectAll(order));
+                  }
+                  return null;
+                },
               ),
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('Filtros', style: AppText.screenTitle),
-                    const SizedBox(height: AppSpacing.lg),
-
-                    // — Período —
-                    Text('Período', style: AppText.sectionLabel),
-                    const SizedBox(height: AppSpacing.sm),
-                    Wrap(
-                      spacing: AppSpacing.xs,
-                      runSpacing: AppSpacing.xs,
-                      children: _PeriodFilter.values.map((f) {
-                        final selected = f == modalPeriod;
-                        return ChoiceChip(
-                          label: Text(_periodLabel(f)),
-                          selected: selected,
-                          selectedColor: AppColors.primarySubtle,
-                          labelStyle: TextStyle(
-                            color: selected
-                                ? AppColors.primary
-                                : AppColors.textSecondary,
-                            fontSize: 13,
+              ClearSelectionIntent: TypingGuardAction<ClearSelectionIntent>(
+                onInvoke: (_) {
+                  if (ultra) {
+                    _clearSelection();
+                  }
+                  return null;
+                },
+              ),
+            },
+            child: Focus(
+              focusNode: _focus,
+              autofocus: true,
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1200),
+                  child: Column(
+                    children: [
+                      PageHeader(
+                        title: 'Transações',
+                        actions: [
+                          Tooltip(
+                            message: 'Atalho: Ctrl+I',
+                            child: OutlinedButton.icon(
+                              onPressed: () => startImport(context),
+                              icon: const Icon(Icons.upload_file),
+                              label: const Text('Importar'),
+                            ),
                           ),
-                          onSelected: (_) =>
-                              setModalState(() => modalPeriod = f),
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: AppSpacing.lg),
-
-                    // — Status —
-                    Text('Status', style: AppText.sectionLabel),
-                    const SizedBox(height: AppSpacing.sm),
-                    Wrap(
-                      spacing: AppSpacing.xs,
-                      runSpacing: AppSpacing.xs,
-                      children: [
-                        _StatusFilter.all,
-                        _StatusFilter.paid,
-                        _StatusFilter.unpaid,
-                        _StatusFilter.future,
-                      ].map((s) {
-                        final selected = s == modalStatus;
-                        final label = switch (s) {
-                          _StatusFilter.all    => 'Todos',
-                          _StatusFilter.paid   => 'Pagos',
-                          _StatusFilter.unpaid => 'Não pagos',
-                          _StatusFilter.future => 'Futuros',
-                        };
-                        final color = switch (s) {
-                          _StatusFilter.paid   => AppColors.limitLow,
-                          _StatusFilter.unpaid => AppColors.danger,
-                          _StatusFilter.future => AppColors.warning,
-                          _StatusFilter.all    => AppColors.primary,
-                        };
-                        return ChoiceChip(
-                          label: Text(label),
-                          selected: selected,
-                          selectedColor: selected
-                              ? color.withOpacity(0.14)
-                              : AppColors.primarySubtle,
-                          labelStyle: TextStyle(
-                            color: selected
-                                ? color
-                                : AppColors.textSecondary,
-                            fontSize: 13,
-                            fontWeight: selected
-                                ? FontWeight.w600
-                                : FontWeight.normal,
+                          MonthSelector(
+                            value: month,
+                            // Seleção é por mês: trocar o mês limpa.
+                            onChanged: (m) => setState(() {
+                              _month = m;
+                              _selection = TransactionSelection.empty;
+                            }),
                           ),
-                          onSelected: (_) =>
-                              setModalState(() => modalStatus = s),
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: AppSpacing.lg),
-
-                    // — Tipo —
-                    Text('Tipo', style: AppText.sectionLabel),
-                    const SizedBox(height: AppSpacing.sm),
-                    Wrap(
-                      spacing: AppSpacing.xs,
-                      children: _TypeFilter.values.map((t) {
-                        final selected = t == selectedType;
-                        final label = switch (t) {
-                          _TypeFilter.all      => 'Todos',
-                          _TypeFilter.income   => 'Receitas',
-                          _TypeFilter.expense  => 'Despesas',
-                          _TypeFilter.transfer => 'Transferências',
-                        };
-                        return ChoiceChip(
-                          label: Text(label),
-                          selected: selected,
-                          selectedColor: AppColors.primarySubtle,
-                          labelStyle: TextStyle(
-                            color: selected
-                                ? AppColors.primary
-                                : AppColors.textSecondary,
-                            fontSize: 13,
-                          ),
-                          onSelected: (_) {
-                            setModalState(() {
-                              switch (t) {
-                                case _TypeFilter.all:
-                                  modalType = null; break;
-                                case _TypeFilter.income:
-                                  modalType = TransactionType.income; break;
-                                case _TypeFilter.expense:
-                                  modalType = TransactionType.expense; break;
-                                case _TypeFilter.transfer:
-                                  modalType = TransactionType.transfer; break;
-                              }
-                            });
-                          },
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: AppSpacing.lg),
-
-                    // — Valor —
-                    Text('Valor (R\$)', style: AppText.sectionLabel),
-                    const SizedBox(height: AppSpacing.sm),
-                    if (!hasAmountRange)
-                      Text(
-                        'Sem dados suficientes para limitar por valor.',
-                        style: AppText.secondary,
-                      )
-                    else ...[
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text('Mín: R\$ ${modalMin.toStringAsFixed(0)}',
-                              style: AppText.secondary),
-                          Text('Máx: R\$ ${modalMax.toStringAsFixed(0)}',
-                              style: AppText.secondary),
                         ],
                       ),
-                      RangeSlider(
-                        values: RangeValues(modalMin, modalMax),
-                        min: 0,
-                        max: _maxAmountInData,
-                        divisions: 20,
-                        labels: RangeLabels(
-                          'R\$ ${modalMin.toStringAsFixed(0)}',
-                          'R\$ ${modalMax.toStringAsFixed(0)}',
+                      if (ultra)
+                        Padding(
+                          padding: EdgeInsets.fromLTRB(
+                            pad,
+                            0,
+                            pad,
+                            AppSpace.md,
+                          ),
+                          child: TransactionFilterBar(
+                            key: ValueKey(_filterEpoch),
+                            filter: _filter,
+                            accounts: [
+                              for (final a in s.accounts.all)
+                                if (!a.archived) a,
+                            ],
+                            cards: [
+                              for (final c in s.cards.all)
+                                if (!c.archived) c,
+                            ],
+                            tree: tree,
+                            tagOptions: ledger.allTags,
+                            searchFocusNode: widget.searchFocusNode,
+                            // Seleção é por filtro: mudar o filtro limpa, como trocar o mês.
+                            onChanged: (f) => setState(() {
+                              _filter = f;
+                              _selection = TransactionSelection.empty;
+                            }),
+                          ),
                         ),
-                        onChanged: (values) {
-                          setModalState(() {
-                            modalMin = values.start;
-                            modalMax = values.end;
-                          });
-                        },
+                      Expanded(
+                        child: Padding(
+                          padding: EdgeInsets.fromLTRB(
+                            pad,
+                            0,
+                            pad,
+                            AppSpace.lg,
+                          ),
+                          child: Column(
+                            children: [
+                              if (selected.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    bottom: AppSpace.sm,
+                                  ),
+                                  child: BulkActionBar(
+                                    count: selected.length,
+                                    actions: bulkActions,
+                                    onClear: _clearSelection,
+                                  ),
+                                ),
+                              Expanded(
+                                child: _TransactionTable(
+                                  rows: rows,
+                                  ultra: ultra,
+                                  pastBefore: YearMonth.fromDate(
+                                    s.ledger.today,
+                                  ).firstDay,
+                                  services: s,
+                                  sort: _sort,
+                                  onSort: (c) => setState(
+                                    () => _sort = toggleTxSort(_sort, c),
+                                  ),
+                                  emptyAction: emptyAction,
+                                  onAction: (t, a) =>
+                                      _onAction(context, s, t, a),
+                                  selection: _selection,
+                                  allSelected: _selection.allState(order),
+                                  onToggleSelect: (id) => _toggleRow(id, order),
+                                  onSelectAll: () => _selectAll(order),
+                                  expenseOptions: ultra ? expenseOptions : null,
+                                  incomeOptions: ultra ? incomeOptions : null,
+                                  onCategoryChanged: ultra
+                                      ? (t, v) => _saveCategory(s, t, v)
+                                      : null,
+                                  onAmountChanged:
+                                      ultra && !s.settings.value.hideValues
+                                      ? (t, v) => _saveAmount(s, t, v)
+                                      : null,
+                                ),
+                              ),
+                              _TotalsBar(totals: txTotals(rows), ultra: ultra),
+                            ],
+                          ),
+                        ),
                       ),
                     ],
-                    const SizedBox(height: AppSpacing.lg),
-
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        TextButton(
-                          onPressed: () {
-                            setState(() {
-                              _period           = _PeriodFilter.thisMonth;
-                              _filterType       = null;
-                              _filterStatus     = _StatusFilter.all;
-                              _filterCategoryId = null;
-                              _minAmountFilter  = null;
-                              _maxAmountFilter  = null;
-                            });
-                            _applyFilters();
-                            Navigator.of(context).pop();
-                          },
-                          child: const Text('Limpar tudo'),
-                        ),
-                        ElevatedButton(
-                          onPressed: () {
-                            setState(() {
-                              _period       = modalPeriod;
-                              _filterType   = modalType;
-                              _filterStatus = modalStatus;
-                              if (hasAmountRange) {
-                                _minAmountFilter =
-                                    modalMin <= 0 ? null : modalMin;
-                                _maxAmountFilter =
-                                    modalMax >= _maxAmountInData
-                                        ? null
-                                        : modalMax;
-                              }
-                            });
-                            PreferencesService.instance
-                                .setTransactionsPeriod(_period.key);
-                            _applyFilters();
-                            Navigator.of(context).pop();
-                          },
-                          child: const Text('Aplicar filtros'),
-                        ),
-                      ],
-                    ),
-                  ],
+                  ),
                 ),
               ),
-            );
-          },
+            ),
+          ),
         );
       },
     );
   }
 
-  // ── Filtros inline ────────────────────────────────────────────────────────
-
-  Widget _buildSimpleFiltersRow() {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md, vertical: AppSpacing.sm),
-      child: Row(
-        children: _PeriodFilter.values.map((f) {
-          final selected = f == _period;
-          return Padding(
-            padding: const EdgeInsets.only(right: AppSpacing.xs + 2),
-            child: FilterChip(
-              label: Text(_periodLabel(f)),
-              selected: selected,
-              selectedColor: AppColors.primarySubtle,
-              checkmarkColor: AppColors.primary,
-              labelStyle: TextStyle(
-                color: selected
-                    ? AppColors.primary
-                    : AppColors.textSecondary,
-                fontSize: 13,
-              ),
-              onSelected: (_) => _setPeriod(f),
-            ),
-          );
-        }).toList(),
-      ),
-    );
+  void _clearFilters() {
+    setState(() {
+      _filter = const TransactionFilter();
+      _selection = TransactionSelection.empty;
+      _filterEpoch++;
+    });
   }
 
-  Widget _buildUltraFiltersRow() {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md, vertical: AppSpacing.sm),
-      child: Row(
-        children: [
-          ..._PeriodFilter.values.map((f) {
-            final selected = f == _period;
-            return Padding(
-              padding: const EdgeInsets.only(right: AppSpacing.xs + 2),
-              child: FilterChip(
-                label: Text(_periodLabel(f)),
-                selected: selected,
-                selectedColor: AppColors.primarySubtle,
-                checkmarkColor: AppColors.primary,
-                labelStyle: TextStyle(
-                  color: selected
-                      ? AppColors.primary
-                      : AppColors.textSecondary,
-                  fontSize: 13,
-                ),
-                onSelected: (_) => _setPeriod(f),
-              ),
-            );
-          }),
-          Container(
-            width: 1,
-            height: 24,
-            color: AppColors.divider,
-            margin:
-                const EdgeInsets.symmetric(horizontal: AppSpacing.xs + 2),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(right: AppSpacing.xs + 2),
-            child: FilterChip(
-              label: const Text('Todas'),
-              selected: _filterCategoryId == null,
-              selectedColor: AppColors.primarySubtle,
-              checkmarkColor: AppColors.primary,
-              labelStyle: TextStyle(
-                color: _filterCategoryId == null
-                    ? AppColors.primary
-                    : AppColors.textSecondary,
-                fontSize: 13,
-              ),
-              onSelected: (_) => _setCategoryFilter(null),
-            ),
-          ),
-          ..._categoriesById.values.map((cat) {
-            final selected = _filterCategoryId == cat.id;
-            final color = cat.colorValue != null
-                ? Color(cat.colorValue!)
-                : AppColors.textSecondary;
-            return Padding(
-              padding: const EdgeInsets.only(right: AppSpacing.xs + 2),
-              child: FilterChip(
-                avatar: CircleAvatar(
-                  backgroundColor: color.withOpacity(0.22),
-                  child: Text(
-                    cat.name[0].toUpperCase(),
-                    style: TextStyle(fontSize: 10, color: color),
-                  ),
-                ),
-                label: Text(cat.name),
-                selected: selected,
-                selectedColor: AppColors.primarySubtle,
-                checkmarkColor: AppColors.primary,
-                labelStyle: TextStyle(
-                  color: selected
-                      ? AppColors.primary
-                      : AppColors.textSecondary,
-                  fontSize: 13,
-                ),
-                onSelected: (_) =>
-                    _setCategoryFilter(selected ? null : cat.id),
-              ),
-            );
-          }),
-        ],
-      ),
-    );
+  /// Shift+clique estende a partir da âncora; clique comum inverte a linha.
+  void _toggleRow(String id, List<String> order) {
+    final shift = HardwareKeyboard.instance.isShiftPressed;
+    setState(() {
+      _selection = shift
+          ? _selection.extendTo(id, order)
+          : _selection.toggle(id);
+    });
   }
 
-  // ── Status filter row (exibido em ambos os modos) ─────────────────────────
-
-  Widget _buildStatusFilterRow() {
-    const statusOptions = [
-      (_StatusFilter.all,    'Todos',     null),
-      (_StatusFilter.paid,   'Pagos',     AppColors.limitLow),
-      (_StatusFilter.unpaid, 'Não pagos', AppColors.danger),
-      (_StatusFilter.future, 'Futuros',   AppColors.warning),
-    ];
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md, vertical: AppSpacing.xs),
-      child: Row(
-        children: statusOptions.map((entry) {
-          final (status, label, color) = entry;
-          final selected = _filterStatus == status;
-          final effectiveColor = color ?? AppColors.primary;
-          return Padding(
-            padding: const EdgeInsets.only(right: AppSpacing.xs + 2),
-            child: FilterChip(
-              label: Text(label),
-              selected: selected,
-              selectedColor: effectiveColor.withOpacity(0.13),
-              checkmarkColor: effectiveColor,
-              labelStyle: TextStyle(
-                color: selected ? effectiveColor : AppColors.textSecondary,
-                fontSize: 12,
-                fontWeight:
-                    selected ? FontWeight.w600 : FontWeight.normal,
-              ),
-              side: selected
-                  ? BorderSide(color: effectiveColor.withOpacity(0.4))
-                  : null,
-              onSelected: (_) => _setStatusFilter(status),
-            ),
-          );
-        }).toList(),
-      ),
-    );
+  /// Cabeçalho: com tudo marcado limpa; senão marca as linhas visíveis.
+  void _selectAll(List<String> order) {
+    setState(() {
+      _selection = _selection.allState(order) == true
+          ? TransactionSelection.empty
+          : _selection.selectAll(order);
+    });
   }
 
-  // ── Resumo ────────────────────────────────────────────────────────────────
+  void _clearSelection() =>
+      setState(() => _selection = TransactionSelection.empty);
 
-  Widget _buildSimpleSummary() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.lg, vertical: AppSpacing.sm + 2),
-      child: _SummaryChip(
-        label: 'Despesas no período',
-        value: '- R\$ ${_totalExpenses.toStringAsFixed(2)}',
-        color: AppColors.danger,
-      ),
-    );
+  /// Edição inline de categoria (Ultra). "Sem categoria" chega como null.
+  Future<void> _saveCategory(
+    AppServices s,
+    Transaction t,
+    String? categoryId,
+  ) async {
+    await s.transactions.upsert(t.copyWith(categoryId: categoryId));
   }
 
-  Widget _buildUltraSummary() {
-    final balance = _totalIncome - _totalExpenses;
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.lg, vertical: AppSpacing.sm + 2),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          _SummaryChip(
-            label: 'Despesas',
-            value: '- R\$ ${_totalExpenses.toStringAsFixed(2)}',
-            color: AppColors.danger,
-          ),
-          _SummaryChip(
-            label: 'Receitas',
-            value: '+ R\$ ${_totalIncome.toStringAsFixed(2)}',
-            color: AppColors.limitLow,
-          ),
-          _SummaryChip(
-            label: 'Saldo',
-            value: 'R\$ ${balance.toStringAsFixed(2)}',
-            color: balance >= 0 ? AppColors.primary : AppColors.danger,
-          ),
-        ],
-      ),
-    );
+  /// Edição inline de valor (Ultra, sem hideValues). Parcelas não chegam aqui.
+  Future<void> _saveAmount(AppServices s, Transaction t, int cents) async {
+    await s.transactions.upsert(t.copyWith(amountCents: cents));
   }
 
-  // ── Gráficos ──────────────────────────────────────────────────────────────
-
-  static const List<Color> _chartColors = [
-    AppColors.primary,
-    Color(0xFF7E57C2),
-    Color(0xFF26A69A),
-    AppColors.warning,
-    Color(0xFFEC407A),
-    Color(0xFF5C6BC0),
-    AppColors.danger,
-    AppColors.limitLow,
-  ];
-
-  Widget _buildPieCard({
-    required String title,
-    required List<MapEntry<String, double>> entries,
-    required String Function(String key) labelOf,
-  }) {
-    if (entries.isEmpty) return const SizedBox.shrink();
-    return Card(
-      margin: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: AppText.sectionLabel),
-            const SizedBox(height: AppSpacing.md),
-            SizedBox(
-              height: 160,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: PieChart(
-                      PieChartData(
-                        sectionsSpace: 2,
-                        centerSpaceRadius: 38,
-                        sections: [
-                          for (int i = 0; i < entries.length; i++)
-                            PieChartSectionData(
-                              value: entries[i].value,
-                              color: _chartColors[i % _chartColors.length],
-                              title: '',
-                              radius: 24,
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.md),
-                  Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      for (int i = 0; i < entries.length; i++) ...[
-                        Row(
-                          children: [
-                            Container(
-                              width: 10,
-                              height: 10,
-                              decoration: BoxDecoration(
-                                color:
-                                    _chartColors[i % _chartColors.length],
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                            const SizedBox(width: AppSpacing.xs + 2),
-                            Text(labelOf(entries[i].key),
-                                style: AppText.secondary),
-                          ],
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(
-                              left: AppSpacing.lg, bottom: AppSpacing.xs),
-                          child: Text(
-                            'R\$ ${entries[i].value.toStringAsFixed(2)}',
-                            style: AppText.secondary,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+  void _notify(BuildContext context, String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  Widget _buildExpensesByCategoryChart() {
-    final Map<String, double> byCategory = {};
-    for (final tx in _filtered) {
-      if (tx.type == TransactionType.expense) {
-        final catId = tx.categoryId ?? '';
-        byCategory[catId] = (byCategory[catId] ?? 0) + tx.amount.amount;
-      }
+  Future<void> _onAction(
+    BuildContext context,
+    AppServices s,
+    Transaction t,
+    TransactionAction action,
+  ) async {
+    switch (action) {
+      case TransactionAction.edit:
+        await showTransactionForm(context, initial: t);
+      case TransactionAction.confirm:
+        await _confirmPlanned(context, s, t);
+      case TransactionAction.duplicate:
+        await s.transactions.upsert(_duplicate(t));
+      case TransactionAction.delete:
+        await _delete(context, s, t);
     }
-    final entries = byCategory.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-    return _buildPieCard(
-      title: 'Gastos por categoria',
-      entries: entries,
-      labelOf: (key) => _categoriesById[key]?.name ?? key,
-    );
   }
 
-  Widget _buildExpensesByCardChart() {
-    final entries = _cardsById.values
-        .map((c) {
-          double total = 0;
-          for (final tx in _filtered) {
-            if (tx.type == TransactionType.expense && tx.cardId == c.id) {
-              total += tx.amount.amount;
+  /// Provisionado → pago, com data editável (padrão: hoje).
+  Future<void> _confirmPlanned(
+    BuildContext context,
+    AppServices s,
+    Transaction t,
+  ) async {
+    var date = s.ledger.today;
+    var answered = false;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialog) {
+          // Duplo clique faria um segundo pop, fechando a rota de baixo.
+          void close(bool value) {
+            if (!answered) {
+              answered = true;
+              Navigator.of(ctx).pop(value);
             }
           }
-          return MapEntry(c.id, total);
-        })
-        .where((e) => e.value > 0)
-        .toList();
 
-    return _buildPieCard(
-      title: 'Gastos por cartão',
-      entries: entries,
-      labelOf: (key) => _cardsById[key]?.name ?? key,
+          return AlertDialog(
+            title: const Text('Confirmar pagamento'),
+            content: DateField(
+              value: date,
+              label: 'Data do pagamento',
+              onChanged: (d) => setDialog(() => date = d),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => close(false),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () => close(true),
+                child: const Text('Confirmar'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    if (ok != true || !context.mounted) {
+      return;
+    }
+    await s.transactions.upsert(
+      t.copyWith(status: TransactionStatus.paid, date: date),
     );
   }
 
-  // ── Seção A vencer / provisionadas ────────────────────────────────────────
-
-  Widget _buildProvisionedSection() {
-    if (_provisioned.isEmpty) return const SizedBox.shrink();
-
-    final today    = DateTime.now();
-    final todayDay = DateTime(today.year, today.month, today.day);
-
-    // Título dinâmico conforme o filtro de status
-    final sectionTitle = switch (_filterStatus) {
-      _StatusFilter.future => 'FUTUROS',
-      _StatusFilter.unpaid => 'NÃO PAGOS',
-      _            => 'A VENCER',
-    };
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-              AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.xs),
-          child: Row(
-            children: [
-              Icon(Icons.schedule_outlined,
-                  size: 14, color: AppColors.warning),
-              const SizedBox(width: AppSpacing.xs + 2),
-              Text(
-                sectionTitle,
-                style: AppText.badge.copyWith(
-                  color: AppColors.warning,
-                  letterSpacing: 1,
-                ),
-              ),
-            ],
-          ),
-        ),
-        ..._provisioned.map((tx) {
-          final dueDate = tx.provisionedDueDate ?? tx.date;
-          final dueDay  =
-              DateTime(dueDate.year, dueDate.month, dueDate.day);
-          final daysLeft   = dueDay.difference(todayDay).inDays;
-          final isOverdue  = daysLeft < 0;
-          final isDueToday = daysLeft == 0;
-
-          final dueDateText =
-              '${dueDate.day.toString().padLeft(2, '0')}'
-              '/${dueDate.month.toString().padLeft(2, '0')}'
-              '/${dueDate.year}';
-
-          final String daysLabel;
-          if (isOverdue) {
-            daysLabel =
-                'Vencido há ${-daysLeft} dia${(-daysLeft) != 1 ? 's' : ''}';
-          } else if (isDueToday) {
-            daysLabel = 'Vence hoje';
-          } else {
-            daysLabel =
-                'Vence em $daysLeft dia${daysLeft != 1 ? 's' : ''}';
+  /// Parcela: pergunta se apaga só esta ou o grupo inteiro. Demais: confirmação simples.
+  Future<void> _delete(
+    BuildContext context,
+    AppServices s,
+    Transaction t,
+  ) async {
+    if (t.isInstallment) {
+      final group = t.installmentGroupId;
+      var answered = false;
+      final scope = await showDialog<_DeleteScope>(
+        context: context,
+        builder: (ctx) {
+          // Duplo clique faria um segundo pop, fechando a rota de baixo.
+          void close([_DeleteScope? value]) {
+            if (!answered) {
+              answered = true;
+              Navigator.of(ctx).pop(value);
+            }
           }
 
-          final badgeColor = isOverdue
-              ? AppColors.danger
-              : (isDueToday ? AppColors.warning : AppColors.primary);
-
-          final card            = tx.cardId != null ? _cardsById[tx.cardId!] : null;
-          final installmentLabel = _installmentLabel(tx);
-          final installmentText  =
-              installmentLabel != null ? ' ($installmentLabel)' : '';
-
-          final categoryLabel = _categoryLabel(tx);
-
-          return Dismissible(
-            key: ValueKey('prov_${tx.id}'),
-            direction: DismissDirection.endToStart,
-            confirmDismiss: (_) => _handleDelete(tx),
-            onDismissed: (_) {},
-            background: Container(
-              color: AppColors.danger,
-              alignment: Alignment.centerRight,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              child: const Icon(Icons.delete_outline, color: Colors.white),
+          return AlertDialog(
+            title: const Text('Excluir parcela'),
+            content: Text(
+              '${t.description} · parcela ${t.installmentIndex}/${t.installmentCount}',
             ),
-            child: ListTile(
-              onTap: () => _openForm(initial: tx),
-              leading: tx.isBillPayment
-                  ? CircleAvatar(
-                      radius: 18,
-                      backgroundColor:
-                          AppColors.primary.withOpacity(0.18),
-                      child: Icon(Icons.credit_card_outlined,
-                          size: 16, color: AppColors.primary),
-                    )
-                  : _CategoryDot(
-                      category: _categoriesById[tx.categoryId]),
-              title: Text(
-                  '${tx.description ?? 'Sem descrição'}$installmentText'),
-              subtitle: Text(
-                '$categoryLabel'
-                '${card != null ? ' · ${card.name}' : ''}'
-                ' · $dueDateText',
+            actions: [
+              TextButton(
+                onPressed: () => close(),
+                child: const Text('Cancelar'),
               ),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
+              TextButton(
+                onPressed: () => close(_DeleteScope.one),
+                child: const Text('Só esta parcela'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: ctx.colors.danger,
+                ),
+                onPressed: () => close(_DeleteScope.all),
+                child: const Text('Todas as parcelas'),
+              ),
+            ],
+          );
+        },
+      );
+      if (scope == null || !context.mounted) {
+        return;
+      }
+      if (scope == _DeleteScope.one) {
+        await s.transactions.delete(t.id);
+      } else {
+        await s.transactions.deleteWhere((x) => x.installmentGroupId == group);
+      }
+      return;
+    }
+    final ok = await confirmDialog(
+      context,
+      title: 'Excluir transação',
+      message: '"${t.description}" será removida.',
+      confirmLabel: 'Excluir',
+      destructive: true,
+    );
+    if (!ok || !context.mounted) {
+      return;
+    }
+    await s.transactions.delete(t.id);
+  }
+
+  /// Ações em massa (SPEC §6.3). Cada uma grava com um único `upsertAll`/`deleteWhere`.
+  Future<void> _recategorize(
+    BuildContext context,
+    AppServices s,
+    List<Transaction> selected,
+  ) async {
+    final tree = s.ledger.categoryTree;
+    final choice = await showBulkCategoryDialog(
+      context,
+      count: selected.length,
+      categories: [
+        ...tree.options(CategoryKind.expense),
+        ...tree.options(CategoryKind.income),
+      ],
+      labelOf: (c) => tree.label(c.id),
+    );
+    if (choice == null || !context.mounted) {
+      return;
+    }
+    final result = bulkRecategorize(selected, choice.category);
+    await s.transactions.upsertAll(result.changed);
+    if (!context.mounted) {
+      return;
+    }
+    final skipped = result.skipped > 0
+        ? ' · ${result.skipped} ignoradas (tipo incompatível)'
+        : '';
+    _notify(
+      context,
+      '${_countLabel(result.changed.length, 'recategorizada', 'recategorizadas')}$skipped',
+    );
+  }
+
+  /// Tags em massa: adiciona ou remove só onde muda; a seleção é mantida.
+  Future<void> _bulkTags(
+    BuildContext context,
+    AppServices s,
+    List<Transaction> selected,
+  ) async {
+    final choice = await showBulkTagsDialog(
+      context,
+      count: selected.length,
+      suggestions: s.ledger.allTags,
+    );
+    if (choice == null || !context.mounted) {
+      return;
+    }
+    final changed = choice.remove
+        ? bulkRemoveTags(selected, choice.tags)
+        : bulkAddTags(selected, choice.tags);
+    await s.transactions.upsertAll(changed);
+    if (!context.mounted) {
+      return;
+    }
+    _notify(
+      context,
+      'Tags atualizadas em ${_countLabel(changed.length, 'transação', 'transações')}',
+    );
+  }
+
+  Future<void> _confirmBulk(
+    BuildContext context,
+    AppServices s,
+    List<Transaction> selected,
+  ) async {
+    final date = await showBulkConfirmDialog(
+      context,
+      count: selected.length,
+      initialDate: s.ledger.today,
+    );
+    if (date == null || !context.mounted) {
+      return;
+    }
+    final result = bulkConfirmPlanned(selected, date);
+    await s.transactions.upsertAll(result.changed);
+    if (!context.mounted) {
+      return;
+    }
+    _notify(
+      context,
+      _countLabel(
+        result.changed.length,
+        'provisionado confirmado',
+        'provisionados confirmados',
+      ),
+    );
+  }
+
+  /// Formulário de regra com o padrão da seleção; a regra salva recategoriza a seleção na hora.
+  Future<void> _createRule(
+    BuildContext context,
+    AppServices s,
+    List<Transaction> selected,
+  ) async {
+    final rule = await showRuleForm(
+      context,
+      initialPattern: suggestRulePattern([
+        for (final t in selected) ruleSubject(t),
+      ]),
+      initialCategoryId: commonCategoryId(selected),
+      sampleDescription: ruleSubject(selected.first),
+    );
+    if (rule == null || !context.mounted) {
+      return;
+    }
+    final changed = reapplyRules(
+      compileRules([rule]),
+      selected,
+      categoriesById: s.ledger.categoriesById,
+      overwriteCategory: true,
+    );
+    await s.transactions.upsertAll(changed);
+    if (!context.mounted) {
+      return;
+    }
+    _notify(
+      context,
+      'Regra criada · ${_countLabel(changed.length, 'transação atualizada', 'transações atualizadas')}',
+    );
+  }
+
+  /// Parcelas na seleção pedem o escopo (só as selecionadas ou grupos inteiros).
+  Future<void> _deleteBulk(
+    BuildContext context,
+    AppServices s,
+    List<Transaction> selected,
+  ) async {
+    final groups = installmentGroupsOf(selected).length;
+    final wholeGroupsCount = bulkDeleteIds(
+      selected,
+      s.transactions.all,
+      wholeGroups: true,
+    ).length;
+    final scope = await showBulkDeleteDialog(
+      context,
+      count: selected.length,
+      groups: groups,
+      wholeGroupsCount: wholeGroupsCount,
+    );
+    if (scope == null || !context.mounted) {
+      return;
+    }
+    final ids = bulkDeleteIds(
+      selected,
+      s.transactions.all,
+      wholeGroups: scope == BulkDeleteScope.wholeGroups,
+    );
+    await s.transactions.deleteWhere((t) => ids.contains(t.id));
+    if (!context.mounted) {
+      return;
+    }
+    _clearSelection();
+    _notify(
+      context,
+      _countLabel(ids.length, 'transação excluída', 'transações excluídas'),
+    );
+  }
+}
+
+/// "1 transação" ou "2 transações": singular só para 1.
+String _countLabel(int n, String one, String many) =>
+    n == 1 ? '1 $one' : '$n $many';
+
+enum _DeleteScope { one, all }
+
+/// Cópia avulsa: novo id, sem vínculo de parcela, recorrência nem id externo (importação), mesma data.
+Transaction _duplicate(Transaction t) => Transaction.fromMap({
+  ...t.toMap(),
+  'id': newId(),
+  'installmentGroupId': null,
+  'installmentIndex': null,
+  'installmentCount': null,
+  'recurringId': null,
+  'externalId': null,
+});
+
+/// Conta ou cartão de origem; '—' quando não há vínculo.
+String _originName(Ledger ledger, Transaction t) =>
+    ledger.accountsById[t.accountId]?.name ??
+    ledger.cardsById[t.cardId]?.name ??
+    '—';
+
+/// Conta destino (transferência) ou cartão pago (pagamento de fatura).
+String? _destinationName(Ledger ledger, Transaction t) => switch (t.type) {
+  TransactionType.transfer => ledger.accountsById[t.toAccountId]?.name,
+  TransactionType.invoicePayment => ledger.cardsById[t.cardId]?.name,
+  _ => null,
+};
+
+/// Texto da coluna Conta / Cartão; também é o critério de ordenação dessa coluna.
+String _originText(Ledger ledger, Transaction t) {
+  final destination = _destinationName(ledger, t);
+  final origin = _originName(ledger, t);
+  return destination == null ? origin : '$origin → $destination';
+}
+
+class _TransactionTable extends StatelessWidget {
+  const _TransactionTable({
+    required this.rows,
+    required this.ultra,
+    required this.pastBefore,
+    required this.services,
+    required this.sort,
+    required this.onSort,
+    required this.emptyAction,
+    required this.onAction,
+    required this.selection,
+    required this.allSelected,
+    required this.onToggleSelect,
+    required this.onSelectAll,
+    this.expenseOptions,
+    this.incomeOptions,
+    this.onCategoryChanged,
+    this.onAmountChanged,
+  });
+
+  final List<Transaction> rows;
+  final bool ultra;
+  final DateTime pastBefore;
+  final AppServices services;
+  final TxSort sort;
+  final ValueChanged<TxSortColumn> onSort;
+  final Widget emptyAction;
+  final void Function(Transaction, TransactionAction) onAction;
+  final TransactionSelection selection;
+
+  /// Estado do checkbox de cabeçalho (null = parcial).
+  final bool? allSelected;
+  final ValueChanged<String> onToggleSelect;
+  final VoidCallback onSelectAll;
+
+  /// Edição inline (Ultra): opções por `kind` e gravadores; null = célula estática.
+  final List<TransactionCategory>? expenseOptions;
+  final List<TransactionCategory>? incomeOptions;
+  final void Function(Transaction, String?)? onCategoryChanged;
+  final void Function(Transaction, int)? onAmountChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    if (rows.isEmpty) {
+      return Card(
+        child: EmptyState(
+          icon: Icons.receipt_long,
+          message: 'Nenhuma transação neste filtro.',
+          action: emptyAction,
+        ),
+      );
+    }
+    final ledger = services.ledger;
+    final list = ListView.builder(
+      // Folga para o FAB "Nova transação" não cobrir a última linha.
+      padding: const EdgeInsets.only(bottom: 64),
+      itemExtent: ultra ? kTxRowExtentUltra : kTxRowExtentSimple,
+      itemCount: rows.length,
+      itemBuilder: (context, i) {
+        final t = rows[i];
+        final onCat = onCategoryChanged;
+        final onAmount = onAmountChanged;
+        final category = ledger.categoriesById[t.categoryId];
+        return TransactionRow(
+          transaction: t,
+          ultra: ultra,
+          past: t.date.isBefore(pastBefore),
+          category: category,
+          categoryLabel: category == null
+              ? null
+              : ledger.categoryTree.label(category.id),
+          origin: _originName(ledger, t),
+          destination: _destinationName(ledger, t),
+          selected: ultra ? selection.contains(t.id) : null,
+          onToggleSelect: ultra ? () => onToggleSelect(t.id) : null,
+          onAction: (a) => onAction(t, a),
+          categoryOptions: t.type == TransactionType.income
+              ? incomeOptions
+              : expenseOptions,
+          categoryLabelOf: (c) => ledger.categoryTree.label(c.id),
+          onCategoryChanged: onCat == null ? null : (v) => onCat(t, v),
+          // Parcela não edita valor inline (ver canEditAmountInline).
+          onAmountChanged: onAmount == null || !canEditAmountInline(t)
+              ? null
+              : (v) => onAmount(t, v),
+        );
+      },
+    );
+    if (!ultra) {
+      return Card(
+        child: Column(
+          children: [
+            const TransactionTableHeader(ultra: false),
+            Expanded(child: list),
+          ],
+        ),
+      );
+    }
+    // Ultra: tabela rola na horizontal abaixo de kTxUltraMinWidth.
+    return Card(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth > kTxUltraMinWidth
+              ? constraints.maxWidth
+              : kTxUltraMinWidth;
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              width: width,
+              height: constraints.maxHeight,
+              child: Column(
                 children: [
-                  Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        '- R\$ ${tx.amount.amount.toStringAsFixed(2)}',
-                        style: AppText.body.copyWith(
-                          color: AppColors.danger,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: AppSpacing.xs + 2,
-                            vertical: AppSpacing.xs - 2),
-                        decoration: BoxDecoration(
-                          color: badgeColor.withOpacity(0.12),
-                          borderRadius:
-                              BorderRadius.circular(AppRadius.chip),
-                        ),
-                        child: Text(
-                          daysLabel,
-                          style: AppText.badge.copyWith(
-                              color: badgeColor,
-                              fontWeight: FontWeight.w600),
-                        ),
-                      ),
-                    ],
+                  TransactionTableHeader(
+                    ultra: true,
+                    sort: sort,
+                    onSort: onSort,
+                    selectable: true,
+                    selectAllState: allSelected,
+                    onSelectAll: onSelectAll,
                   ),
-                  const SizedBox(width: AppSpacing.xs),
-                  IconButton(
-                    tooltip: 'Marcar como pago',
-                    icon: Icon(Icons.check_circle_outline,
-                        color: AppColors.limitLow, size: 22),
-                    onPressed: () => _consolidatePayment(tx),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(
-                        minWidth: 32, minHeight: 32),
-                  ),
+                  Expanded(child: list),
                 ],
               ),
             ),
           );
-        }),
-        const Divider(height: 1),
-      ],
-    );
-  }
-
-  // ── Lista de transações realizadas ────────────────────────────────────────
-
-  List<_TransactionDayGroup> _groupByDay(List<TransactionEntity> txs) {
-    final Map<String, List<TransactionEntity>> map = {};
-    for (final tx in txs) {
-      final key =
-          '${tx.date.year}-${tx.date.month.toString().padLeft(2, '0')}-${tx.date.day.toString().padLeft(2, '0')}';
-      map.putIfAbsent(key, () => []).add(tx);
-    }
-    return map.entries
-        .map((e) => _TransactionDayGroup(dateKey: e.key, txs: e.value))
-        .toList()
-      ..sort((a, b) => b.dateKey.compareTo(a.dateKey));
-  }
-
-  Widget _buildTransactionList() {
-    if (_filtered.isEmpty) {
-      return const AppEmptyState(
-        icon: Icons.receipt_long_outlined,
-        title: 'Nenhuma transação',
-        message: 'Tente ajustar os filtros ou adicione uma nova transação.',
-      );
-    }
-
-    final groups = _groupByDay(_filtered);
-    final isUltra = AppModeController.instance.mode == AppMode.ultra;
-
-    return ListView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: groups.length,
-      itemBuilder: (context, gi) {
-        final group = groups[gi];
-        final parts = group.dateKey.split('-');
-        final day   = int.parse(parts[2]);
-        final month = int.parse(parts[1]);
-        final year  = int.parse(parts[0]);
-        final date  = DateTime(year, month, day);
-
-        final now       = DateTime.now();
-        final today     = DateTime(now.year, now.month, now.day);
-        final yesterday = today.subtract(const Duration(days: 1));
-
-        final String dateLabel;
-        if (date == today) {
-          dateLabel = 'Hoje';
-        } else if (date == yesterday) {
-          dateLabel = 'Ontem';
-        } else {
-          const months = [
-            '', 'jan', 'fev', 'mar', 'abr', 'mai', 'jun',
-            'jul', 'ago', 'set', 'out', 'nov', 'dez',
-          ];
-          dateLabel = '$day ${months[month]}${year != now.year ? ' $year' : ''}';
-        }
-
-        final dayTotal = group.txs.fold<double>(0, (sum, tx) {
-          if (tx.type == TransactionType.income)    return sum + tx.amount.amount;
-          if (tx.type == TransactionType.expense)   return sum - tx.amount.amount;
-          return sum;
-        });
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // — Cabeçalho do dia —
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.xs),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    dateLabel.toUpperCase(),
-                    style: AppText.badge.copyWith(
-                      color: AppColors.textSecondary,
-                      letterSpacing: 0.8,
-                    ),
-                  ),
-                  Text(
-                    '${dayTotal >= 0 ? '+' : ''}R\$ ${dayTotal.toStringAsFixed(2)}',
-                    style: AppText.badge.copyWith(
-                      color: dayTotal >= 0
-                          ? AppColors.limitLow
-                          : AppColors.danger,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // — Itens do dia —
-            ...group.txs.map((tx) {
-              final isTransfer = tx.type == TransactionType.transfer;
-              final isIncome   = tx.type == TransactionType.income;
-              final amountSign = isIncome ? '+' : '-';
-              final amountColor = isTransfer
-                  ? AppColors.primary
-                  : (isIncome ? AppColors.limitLow : AppColors.danger);
-
-              final card = tx.cardId != null ? _cardsById[tx.cardId!] : null;
-              final installmentLabel = _installmentLabel(tx);
-              final installmentText  =
-                  installmentLabel != null ? ' ($installmentLabel)' : '';
-
-              final categoryLabel = _categoryLabel(tx);
-
-              String subtitle;
-              if (isUltra) {
-                subtitle =
-                    '$categoryLabel${card != null ? ' · ${card.name}' : ''}';
-              } else {
-                subtitle = categoryLabel;
-              }
-
-              return Dismissible(
-                key: ValueKey(tx.id),
-                direction: DismissDirection.endToStart,
-                confirmDismiss: (_) => _handleDelete(tx),
-                onDismissed: (_) {},
-                background: Container(
-                  color: AppColors.danger,
-                  alignment: Alignment.centerRight,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.lg),
-                  child:
-                      const Icon(Icons.delete_outline, color: Colors.white),
-                ),
-                child: ListTile(
-                  onTap: () => _openForm(initial: tx),
-                  leading: tx.isBillPayment
-                      ? CircleAvatar(
-                          radius: 18,
-                          backgroundColor:
-                              AppColors.primary.withOpacity(0.18),
-                          child: Icon(Icons.credit_card_outlined,
-                              size: 16, color: AppColors.primary),
-                        )
-                      : _CategoryDot(
-                          category: _categoriesById[tx.categoryId]),
-                  title: Text(
-                      '${tx.description ?? 'Sem descrição'}$installmentText'),
-                  subtitle: Text(subtitle),
-                  trailing: Text(
-                    '$amountSign R\$ ${tx.amount.amount.toStringAsFixed(2)}',
-                    style: AppText.body.copyWith(
-                      color: amountColor,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              );
-            }),
-            const Divider(height: 1),
-          ],
-        );
-      },
-    );
-  }
-
-  // ── Build ─────────────────────────────────────────────────────────────────
-
-  @override
-  Widget build(BuildContext context) {
-    final isUltra = AppModeController.instance.mode == AppMode.ultra;
-
-    return Scaffold(
-      appBar: _buildAppBar(),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _loadData,
-              child: CustomScrollView(
-                slivers: [
-                  SliverToBoxAdapter(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // — Filtros de período —
-                        if (isUltra)
-                          _buildUltraFiltersRow()
-                        else
-                          _buildSimpleFiltersRow(),
-
-                        // — Filtros de status —
-                        _buildStatusFilterRow(),
-
-                        // — Resumo —
-                        if (isUltra)
-                          _buildUltraSummary()
-                        else
-                          _buildSimpleSummary(),
-
-                        // — Seção provisionadas —
-                        _buildProvisionedSection(),
-
-                        // — Gráficos (Ultra only) —
-                        if (isUltra) ...[
-                          _buildExpensesByCategoryChart(),
-                          _buildExpensesByCardChart(),
-                        ],
-
-                        // — Lista de transações realizadas —
-                        _buildTransactionList(),
-
-                        const SizedBox(height: AppSpacing.xl),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _openForm(),
-        tooltip: 'Nova transação',
-        child: const Icon(Icons.add),
+        },
       ),
     );
   }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+/// Rodapé: despesas, provisionado e receitas do filtro ativo.
+class _TotalsBar extends StatelessWidget {
+  const _TotalsBar({required this.totals, required this.ultra});
 
-class _TransactionDayGroup {
-  final String dateKey;
-  final List<TransactionEntity> txs;
-  const _TransactionDayGroup({required this.dateKey, required this.txs});
-}
-
-class _CategoryDot extends StatelessWidget {
-  final CategoryEntity? category;
-  const _CategoryDot({this.category});
+  final TxTotals totals;
+  // Simples oculta provisionados, então o total provisionado também some.
+  final bool ultra;
 
   @override
-  Widget build(BuildContext context) {
-    final color = category?.colorValue != null
-        ? Color(category!.colorValue!)
-        : AppColors.textSecondary;
-    final label = category != null ? category!.name[0].toUpperCase() : '?';
-    return CircleAvatar(
-      radius: 18,
-      backgroundColor: color.withOpacity(0.18),
-      child: Text(label, style: TextStyle(color: color, fontSize: 13)),
-    );
-  }
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: AppSpace.md),
+    child: Wrap(
+      spacing: AppSpace.xl,
+      runSpacing: AppSpace.xs,
+      children: [
+        _Total(label: 'Despesas', cents: totals.expenses),
+        if (ultra) _Total(label: 'Provisionado', cents: totals.provisioned),
+        _Total(label: 'Receitas', cents: totals.income),
+      ],
+    ),
+  );
 }
 
-class _SummaryChip extends StatelessWidget {
+class _Total extends StatelessWidget {
+  const _Total({required this.label, required this.cents});
+
   final String label;
-  final String value;
-  final Color  color;
-
-  const _SummaryChip({
-    required this.label,
-    required this.value,
-    required this.color,
-  });
+  final int cents;
 
   @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label,
-            style: AppText.secondary.copyWith(fontSize: 11)),
-        const SizedBox(height: 2),
-        Text(value,
-            style: AppText.body
-                .copyWith(color: color, fontWeight: FontWeight.w600)),
-      ],
-    );
-  }
-}
-
-class _FilterBadge extends StatelessWidget {
-  final int count;
-  final Widget child;
-  const _FilterBadge({required this.count, required this.child});
-
-  @override
-  Widget build(BuildContext context) {
-    if (count == 0) return child;
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        child,
-        Positioned(
-          top: 6,
-          right: 6,
-          child: Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(
-              color: AppColors.primary,
-              shape: BoxShape.circle,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Text(
+        label,
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: context.colors.textSecondary),
+      ),
+      const SizedBox(width: AppSpace.xs),
+      MoneyText(cents, style: const TextStyle(fontWeight: FontWeight.w600)),
+    ],
+  );
 }

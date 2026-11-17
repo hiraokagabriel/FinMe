@@ -1,10 +1,27 @@
 import 'package:flutter/material.dart';
-import '../domain/account_entity.dart';
-import '../data/accounts_repository.dart';
-import '../../../core/services/repository_locator.dart';
-import '../../../core/widgets/app_empty_state.dart';
-import '../../transactions/domain/transaction_entity.dart';
 
+import '../../../app/app_scope.dart';
+import '../../../core/models/app_settings.dart';
+import '../../../core/models/year_month.dart';
+import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_spacing.dart';
+import '../../../core/utils/formatters.dart';
+import '../../../core/widgets/widgets.dart';
+import '../../goals/domain/goal_math.dart';
+import '../../goals/presentation/goals_section.dart';
+import '../domain/account.dart';
+import 'account_form.dart';
+import 'transfer_dialog.dart';
+
+const _noBank = 'Sem banco';
+const _wideBreakpoint = 600.0;
+const _balanceWidth = 130.0;
+const _forecastWidth = 170.0;
+const _menuWidth = 48.0;
+
+enum _AccountAction { edit, archive, delete }
+
+/// Contas agrupadas por banco, com saldo atual e (Ultra) previsto do fim do mês.
 class AccountsPage extends StatefulWidget {
   const AccountsPage({super.key});
 
@@ -13,374 +30,444 @@ class AccountsPage extends StatefulWidget {
 }
 
 class _AccountsPageState extends State<AccountsPage> {
-  late AccountsRepository _repo;
-  List<AccountEntity> _accounts = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _repo = RepositoryLocator.instance.accounts;
-    _load();
-  }
-
-  Future<void> _load() async {
-    final accounts = await _repo.getAll();
-    if (!mounted) return;
-    setState(() => _accounts = accounts);
-  }
-
-  Future<void> _openForm({AccountEntity? editing}) async {
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => _AccountForm(repo: _repo, editing: editing),
-    );
-    _load();
-  }
-
-  Future<void> _delete(AccountEntity account) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Excluir conta'),
-        content: Text('Excluir "${account.name}"?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text('Excluir', style: TextStyle(color: Theme.of(context).colorScheme.error)),
-          ),
-        ],
-      ),
-    );
-    if (confirm == true) {
-      await _repo.delete(account.id);
-      _load();
-    }
-  }
-
-  Future<double> _computeBalance(AccountEntity account) async {
-    final List<TransactionEntity> txs =
-        await RepositoryLocator.instance.transactions.getAll();
-    double balance = account.initialBalance;
-    for (final tx in txs) {
-      if (tx.accountId != account.id) continue;
-      if (tx.type.index == 0) {
-        balance += tx.amount.amount;
-      } else {
-        balance -= tx.amount.amount;
-      }
-    }
-    return balance;
-  }
+  bool _showArchived = false;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
+    final s = AppScope.of(context);
+    return ListenableBuilder(
+      listenable: s.ledger,
+      builder: (context, _) {
+        final ultra = s.settings.value.mode == AppMode.ultra;
+        final wide = MediaQuery.sizeOf(context).width >= _wideBreakpoint;
+        final pad = wide ? AppSpace.xl : AppSpace.lg;
+        final balances = s.ledger.accountBalances;
+        final reserved = s.ledger.reservedByAccount;
+        final active = s.accounts.all.where((a) => !a.archived).toList();
+        final showArchived = ultra && _showArchived;
+        final shown = [
+          for (final a in s.accounts.all)
+            if (showArchived || !a.archived) a,
+        ]..sort((a, b) => a.name.compareTo(b.name));
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Contas'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            tooltip: 'Nova conta',
-            onPressed: () => _openForm(),
-          ),
-        ],
-      ),
-      body: _accounts.isEmpty
-          ? AppEmptyState(
-              icon: Icons.account_balance_wallet_outlined,
-              title: 'Nenhuma conta cadastrada',
-              message: 'Crie sua primeira conta para começar a registrar transações.',
-              actionLabel: 'Criar conta',
-              onAction: () => _openForm(),
-            )
-          : ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemCount: _accounts.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemBuilder: (context, index) {
-                final account = _accounts[index];
-                final color = Color(account.colorValue);
-                return FutureBuilder<double>(
-                  future: _computeBalance(account),
-                  builder: (context, snap) {
-                    final balance = snap.data ?? account.initialBalance;
-                    return Dismissible(
-                      key: Key(account.id),
-                      direction: DismissDirection.endToStart,
-                      background: Container(
-                        alignment: Alignment.centerRight,
-                        padding: const EdgeInsets.only(right: 20),
-                        decoration: BoxDecoration(
-                          color: cs.error,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Icon(Icons.delete_outline, color: Colors.white),
+        // Previsto do fim do mês: uma passada sobre os eventos, por conta.
+        final forecastByAccount = <String, int>{};
+        if (ultra) {
+          final end = YearMonth.fromDate(s.ledger.today).lastDay;
+          for (final e in s.ledger.forecast.events) {
+            final id = e.accountId;
+            if (id != null && !e.date.isAfter(end)) {
+              forecastByAccount[id] =
+                  (forecastByAccount[id] ?? 0) + e.amountCents;
+            }
+          }
+        }
+        final transferEnabled = active.length >= 2;
+        final totalCents = active.fold<int>(
+          0,
+          (sum, a) => sum + (balances[a.id] ?? 0),
+        );
+
+        final items = _groupByBank(shown);
+        final showForecastColumn = ultra && wide;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            PageHeader(
+              title: 'Contas',
+              actions: wide
+                  ? [
+                      OutlinedButton.icon(
+                        onPressed: transferEnabled
+                            ? () => showTransferDialog(context)
+                            : null,
+                        icon: const Icon(Icons.swap_horiz),
+                        label: const Text('Transferir'),
                       ),
-                      confirmDismiss: (_) async {
-                        await _delete(account);
-                        return false;
-                      },
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(12),
-                        onTap: () => _openForm(editing: account),
-                        child: Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: cs.surface,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: cs.outline.withOpacity(0.15),
+                      FilledButton.icon(
+                        onPressed: () => showAccountForm(context),
+                        icon: const Icon(Icons.add),
+                        label: const Text('Nova conta'),
+                      ),
+                    ]
+                  // Mobile: só ícones, para o cabeçalho caber numa linha.
+                  : [
+                      IconButton.outlined(
+                        tooltip: 'Transferir',
+                        onPressed: transferEnabled
+                            ? () => showTransferDialog(context)
+                            : null,
+                        icon: const Icon(Icons.swap_horiz),
+                      ),
+                      IconButton.filled(
+                        tooltip: 'Nova conta',
+                        onPressed: () => showAccountForm(context),
+                        icon: const Icon(Icons.add),
+                      ),
+                    ],
+            ),
+            Expanded(
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1200),
+                  child: Padding(
+                    padding: EdgeInsets.all(pad),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        KpiTile(label: 'Saldo total', cents: totalCents),
+                        if (ultra) ...[
+                          const SizedBox(height: AppSpace.md),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: FilterChip(
+                              label: const Text('Mostrar arquivadas'),
+                              selected: _showArchived,
+                              onSelected: (v) =>
+                                  setState(() => _showArchived = v),
                             ),
                           ),
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 44,
-                                height: 44,
-                                decoration: BoxDecoration(
-                                  color: color.withOpacity(0.15),
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Icon(account.type.icon, color: color, size: 22),
-                              ),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Text(account.name,
-                                            style: theme.textTheme.titleSmall
-                                                ?.copyWith(fontWeight: FontWeight.w600)),
-                                        if (account.isDefault) ...[
-                                          const SizedBox(width: 6),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 6, vertical: 2),
-                                            decoration: BoxDecoration(
-                                              color: cs.primary.withOpacity(0.12),
-                                              borderRadius: BorderRadius.circular(20),
-                                            ),
-                                            child: Text('principal',
-                                                style: TextStyle(
-                                                    fontSize: 10,
-                                                    color: cs.primary,
-                                                    fontWeight: FontWeight.w600)),
-                                          ),
-                                        ],
-                                      ],
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(account.type.label,
-                                        style: theme.textTheme.bodySmall
-                                            ?.copyWith(color: cs.onSurface.withOpacity(0.5))),
-                                  ],
-                                ),
-                              ),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  Text(
-                                    'R\$ ${balance.toStringAsFixed(2).replaceAll('.', ',')}',
-                                    style: theme.textTheme.titleSmall?.copyWith(
-                                      fontWeight: FontWeight.w700,
-                                      color: balance >= 0 ? const Color(0xFF43A047) : cs.error,
+                        ],
+                        const SizedBox(height: AppSpace.lg),
+                        if (showForecastColumn) const _ColumnHeader(),
+                        Expanded(
+                          // Uma rolagem só: a seção de metas fica depois da lista de contas.
+                          child: CustomScrollView(
+                            slivers: [
+                              if (items.isEmpty)
+                                SliverFillRemaining(
+                                  hasScrollBody: false,
+                                  child: EmptyState(
+                                    icon: Icons.account_balance_wallet_outlined,
+                                    message: s.accounts.isEmpty
+                                        ? 'Nenhuma conta cadastrada.'
+                                        : 'Todas as contas estão arquivadas.',
+                                    action: FilledButton.icon(
+                                      onPressed: () => showAccountForm(context),
+                                      icon: const Icon(Icons.add),
+                                      label: const Text('Nova conta'),
                                     ),
                                   ),
-                                  Text('saldo atual',
-                                      style: theme.textTheme.labelSmall
-                                          ?.copyWith(color: cs.onSurface.withOpacity(0.4))),
-                                ],
+                                )
+                              else
+                                SliverList.builder(
+                                  itemCount: items.length,
+                                  itemBuilder: (context, i) =>
+                                      switch (items[i]) {
+                                        final String bank => _BankHeader(
+                                          bank,
+                                          ultra: ultra,
+                                        ),
+                                        final Account a => _AccountRow(
+                                          account: a,
+                                          balanceCents: balances[a.id] ?? 0,
+                                          forecastCents: ultra
+                                              ? (balances[a.id] ?? 0) +
+                                                    (forecastByAccount[a.id] ??
+                                                        0)
+                                              : null,
+                                          reservedCents: ultra
+                                              ? (reserved[a.id] ?? 0)
+                                              : null,
+                                          showForecastColumn:
+                                              showForecastColumn,
+                                          onAction: (action) =>
+                                              _onAction(context, s, a, action),
+                                        ),
+                                        _ => const SizedBox.shrink(),
+                                      },
+                                ),
+                              const SliverToBoxAdapter(
+                                child: SizedBox(height: AppSpace.lg),
                               ),
+                              const SliverToBoxAdapter(child: GoalsSection()),
                             ],
                           ),
                         ),
-                      ),
-                    );
-                  },
-                );
-              },
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             ),
+          ],
+        );
+      },
     );
   }
-}
 
-// ────────────────────────────────────────────
-// Bottom sheet: formulário de conta
-// ────────────────────────────────────────────
-
-class _AccountForm extends StatefulWidget {
-  final AccountsRepository repo;
-  final AccountEntity? editing;
-
-  const _AccountForm({required this.repo, this.editing});
-
-  @override
-  State<_AccountForm> createState() => _AccountFormState();
-}
-
-class _AccountFormState extends State<_AccountForm> {
-  final _nameController = TextEditingController();
-  final _balanceController = TextEditingController();
-  AccountType _type = AccountType.checking;
-  Color _color = const Color(0xFF01696F);
-  bool _isDefault = false;
-
-  final List<Color> _palette = const [
-    Color(0xFF01696F), Color(0xFF43A047), Color(0xFF1E88E5),
-    Color(0xFFE53935), Color(0xFFD19900), Color(0xFF7B1FA2),
-    Color(0xFFFF7043), Color(0xFF455A64),
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.editing != null) {
-      final e = widget.editing!;
-      _nameController.text = e.name;
-      _balanceController.text = e.initialBalance.toStringAsFixed(2);
-      _type = e.type;
-      _color = Color(e.colorValue);
-      _isDefault = e.isDefault;
+  Future<void> _onAction(
+    BuildContext context,
+    AppServices s,
+    Account a,
+    _AccountAction action,
+  ) async {
+    switch (action) {
+      case _AccountAction.edit:
+        await showAccountForm(context, initial: a);
+      case _AccountAction.archive:
+        await s.accounts.upsert(a.copyWith(archived: !a.archived));
+      case _AccountAction.delete:
+        await _delete(context, s, a);
     }
   }
 
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _balanceController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    if (_nameController.text.trim().isEmpty) return;
-    final balance = double.tryParse(
-            _balanceController.text.replaceAll(',', '.')) ??
-        0.0;
-    final entity = AccountEntity(
-      id: widget.editing?.id ??
-          'acc_${DateTime.now().millisecondsSinceEpoch}',
-      name: _nameController.text.trim(),
-      type: _type,
-      initialBalance: balance,
-      colorValue: _color.value,
-      isDefault: _isDefault,
+  Future<void> _delete(BuildContext context, AppServices s, Account a) async {
+    final inUse =
+        s.transactions.all.any(
+          (t) => t.accountId == a.id || t.toAccountId == a.id,
+        ) ||
+        s.cards.all.any((c) => c.paymentAccountId == a.id) ||
+        s.recurring.all.any((r) => r.accountId == a.id) ||
+        s.goals.all.any((g) => g.accountId == a.id);
+    if (inUse) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Conta usada por lançamentos, cartões, recorrências ou metas. Arquive em vez de excluir.',
+          ),
+        ),
+      );
+      return;
+    }
+    final ok = await confirmDialog(
+      context,
+      title: 'Excluir conta?',
+      message: '"${a.name}" será removida.',
+      confirmLabel: 'Excluir',
+      destructive: true,
     );
-    await widget.repo.save(entity);
-    if (_isDefault) await widget.repo.setDefault(entity.id);
-    if (mounted) Navigator.pop(context);
+    if (ok) {
+      await s.accounts.delete(a.id);
+    }
   }
+}
+
+/// Lista plana: cada banco (String) seguido das suas contas (Account).
+/// Ordena bancos por nome e deixa "Sem banco" por último.
+List<Object> _groupByBank(List<Account> accounts) {
+  final groups = <String, List<Account>>{};
+  for (final a in accounts) {
+    final bank = a.bankName.isEmpty ? _noBank : a.bankName;
+    groups.putIfAbsent(bank, () => []).add(a);
+  }
+  final banks = groups.keys.toList()
+    ..sort((x, y) {
+      if (x == _noBank || y == _noBank) {
+        return x == y ? 0 : (x == _noBank ? 1 : -1);
+      }
+      return x.compareTo(y);
+    });
+  return [
+    for (final bank in banks) ...[bank, ...groups[bank]!],
+  ];
+}
+
+class _BankHeader extends StatelessWidget {
+  const _BankHeader(this.bank, {required this.ultra});
+
+  final String bank;
+  final bool ultra;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: AppSpace.lg, bottom: AppSpace.xs),
+    child: Row(
+      children: [
+        if (ultra) ...[
+          BankAvatar(bankName: bank == _noBank ? '' : bank, size: 20),
+          const SizedBox(width: AppSpace.sm),
+        ],
+        Text(
+          bank,
+          style: Theme.of(
+            context,
+          ).textTheme.titleSmall?.copyWith(color: context.colors.textSecondary),
+        ),
+      ],
+    ),
+  );
+}
+
+class _ColumnHeader extends StatelessWidget {
+  const _ColumnHeader();
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    final bottom = MediaQuery.of(context).viewInsets.bottom;
-
+    final style = Theme.of(
+      context,
+    ).textTheme.bodySmall?.copyWith(color: context.colors.textSecondary);
     return Padding(
-      padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + bottom),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.symmetric(vertical: AppSpace.xs),
+      child: Row(
         children: [
-          Text(
-            widget.editing == null ? 'Nova Conta' : 'Editar Conta',
-            style: theme.textTheme.titleMedium
-                ?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 20),
-          TextField(
-            controller: _nameController,
-            decoration: const InputDecoration(
-              labelText: 'Nome da conta',
-              border: OutlineInputBorder(),
-            ),
-            textCapitalization: TextCapitalization.words,
-          ),
-          const SizedBox(height: 14),
-          DropdownButtonFormField<AccountType>(
-            value: _type,
-            decoration: const InputDecoration(
-              labelText: 'Tipo',
-              border: OutlineInputBorder(),
-            ),
-            items: AccountType.values
-                .map((t) => DropdownMenuItem(
-                      value: t,
-                      child: Row(
-                        children: [
-                          Icon(t.icon, size: 18),
-                          const SizedBox(width: 8),
-                          Text(t.label),
-                        ],
-                      ),
-                    ))
-                .toList(),
-            onChanged: (v) => setState(() => _type = v!),
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _balanceController,
-            keyboardType:
-                const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-              labelText: 'Saldo inicial (R\$)',
-              border: OutlineInputBorder(),
-              prefixText: 'R\$ ',
-            ),
-          ),
-          const SizedBox(height: 14),
-          Text('Cor', style: theme.textTheme.bodySmall),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            children: _palette.map((c) {
-              final selected = c.value == _color.value;
-              return GestureDetector(
-                onTap: () => setState(() => _color = c),
-                child: Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: c,
-                    shape: BoxShape.circle,
-                    border: selected
-                        ? Border.all(color: cs.onSurface, width: 2.5)
-                        : null,
-                  ),
-                  child: selected
-                      ? const Icon(Icons.check, color: Colors.white, size: 16)
-                      : null,
-                ),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 10),
-          SwitchListTile(
-            value: _isDefault,
-            onChanged: (v) => setState(() => _isDefault = v),
-            title: const Text('Conta principal'),
-            contentPadding: EdgeInsets.zero,
-          ),
-          const SizedBox(height: 10),
+          Expanded(child: Text('Conta', style: style)),
           SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: _save,
-              child: const Text('Salvar'),
+            width: _balanceWidth,
+            child: Text('Saldo atual', style: style, textAlign: TextAlign.end),
+          ),
+          SizedBox(
+            width: _forecastWidth,
+            child: Text(
+              'Previsto fim do mês',
+              style: style,
+              textAlign: TextAlign.end,
             ),
           ),
+          const SizedBox(width: _menuWidth),
         ],
+      ),
+    );
+  }
+}
+
+class _AccountRow extends StatelessWidget {
+  const _AccountRow({
+    required this.account,
+    required this.balanceCents,
+    required this.forecastCents,
+    required this.reservedCents,
+    required this.showForecastColumn,
+    required this.onAction,
+  });
+
+  final Account account;
+  final int balanceCents;
+
+  /// null no modo Simples.
+  final int? forecastCents;
+
+  /// Reserva ativa das metas nesta conta; null no modo Simples.
+  final int? reservedCents;
+  final bool showForecastColumn;
+  final ValueChanged<_AccountAction> onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final textTheme = Theme.of(context).textTheme;
+    final archived = account.archived;
+    final nameColor = archived ? c.textSecondary : c.textPrimary;
+    final forecast = forecastCents;
+    final reserved = reservedCents;
+    final hidden = AppScope.of(context).settings.value.hideValues;
+    final overReserved = overReservedCents(
+      accountBalanceCents: balanceCents,
+      reservedCents: reserved ?? 0,
+    );
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: c.border)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
+        child: Row(
+          children: [
+            Container(
+              width: 12,
+              height: 12,
+              decoration: BoxDecoration(
+                color: Color(account.colorValue),
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: AppSpace.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          account.name,
+                          overflow: TextOverflow.ellipsis,
+                          style: textTheme.bodyMedium?.copyWith(
+                            color: nameColor,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      if (archived) ...[
+                        const SizedBox(width: AppSpace.sm),
+                        StatusBadge(label: 'Arquivada', color: c.textSecondary),
+                      ],
+                    ],
+                  ),
+                  Text(
+                    accountTypeLabel(account.type),
+                    style: textTheme.bodySmall,
+                  ),
+                  if (forecast != null && !showForecastColumn)
+                    Wrap(
+                      children: [
+                        Text(
+                          'Previsto fim do mês: ',
+                          style: textTheme.bodySmall,
+                        ),
+                        MoneyText(forecast, style: textTheme.bodySmall),
+                      ],
+                    ),
+                  if (reserved != null && reserved > 0)
+                    Text(
+                      '${formatMoney(reserved, hidden: hidden)} reservado',
+                      style: textTheme.bodySmall?.copyWith(
+                        color: overReserved > 0 ? c.warning : c.textSecondary,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            SizedBox(
+              width: _balanceWidth,
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: MoneyText(
+                  balanceCents,
+                  colorBySign: true,
+                  style: textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+            if (showForecastColumn)
+              SizedBox(
+                width: _forecastWidth,
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: MoneyText(
+                    forecast ?? balanceCents,
+                    style: textTheme.bodyMedium,
+                  ),
+                ),
+              ),
+            SizedBox(
+              width: _menuWidth,
+              child: PopupMenuButton<_AccountAction>(
+                tooltip: 'Ações da conta',
+                onSelected: onAction,
+                itemBuilder: (_) => [
+                  const PopupMenuItem(
+                    value: _AccountAction.edit,
+                    child: Text('Editar'),
+                  ),
+                  PopupMenuItem(
+                    value: _AccountAction.archive,
+                    child: Text(archived ? 'Desarquivar' : 'Arquivar'),
+                  ),
+                  const PopupMenuItem(
+                    value: _AccountAction.delete,
+                    child: Text('Excluir'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

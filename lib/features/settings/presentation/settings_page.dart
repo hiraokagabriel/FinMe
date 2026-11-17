@@ -1,295 +1,365 @@
+import 'dart:io';
+
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
-import '../../../app/router.dart';
-import '../../../core/models/app_mode.dart';
-import '../../../core/services/app_mode_controller.dart';
-import '../../../core/services/auth_service.dart';
-import '../../../core/services/demo_seed_service.dart';
-import '../../../core/services/preferences_service.dart';
-import '../../../core/services/profile_service.dart';
-import '../../../core/services/theme_controller.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../categories/presentation/categories_page.dart';
+import '../../../app/app_scope.dart';
+import '../../../app/seed.dart';
+import '../../../core/models/app_settings.dart';
+import '../../../core/models/year_month.dart';
+import '../../../core/services/backup_service.dart';
+import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_spacing.dart';
+import '../../../core/utils/date_utils.dart';
+import '../../../core/widgets/widgets.dart';
+import '../../importing/domain/merchant_dictionary.dart';
+import '../../profiles/presentation/profile_section.dart';
 
-class SettingsPage extends StatefulWidget {
+const _jsonGroup = XTypeGroup(label: 'JSON', extensions: ['json']);
+const _csvGroup = XTypeGroup(label: 'CSV', extensions: ['csv']);
+
+class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
 
   @override
-  State<SettingsPage> createState() => _SettingsPageState();
+  Widget build(BuildContext context) {
+    final s = AppScope.of(context);
+    final pad = MediaQuery.sizeOf(context).width < 600
+        ? AppSpace.lg
+        : AppSpace.xl;
+    return ListenableBuilder(
+      listenable: s.settings,
+      builder: (context, _) {
+        final settings = s.settings.value;
+        final ultra = settings.mode == AppMode.ultra;
+        return Column(
+          children: [
+            const PageHeader(title: 'Ajustes'),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: EdgeInsets.all(pad),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1200),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const ProfileSection(),
+                        _AppearanceCard(services: s, settings: settings),
+                        if (ultra) ...[
+                          const SizedBox(height: AppSpace.lg),
+                          _ForecastCard(services: s, settings: settings),
+                        ],
+                        const SizedBox(height: AppSpace.lg),
+                        _DataCard(services: s, ultra: ultra),
+                        const SizedBox(height: AppSpace.xl),
+                        Text(
+                          'FinMe v2 · dados locais',
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: context.colors.textSecondary),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
 }
 
-class _SettingsPageState extends State<SettingsPage> {
-  late String _currency;
-  late String _dateFormat;
-  bool _switchingProfile = false;
+class _AppearanceCard extends StatelessWidget {
+  const _AppearanceCard({required this.services, required this.settings});
 
-  static const _currencies  = ['BRL', 'USD', 'EUR', 'GBP', 'JPY'];
-  static const _dateFormats = ['dd/MM/yyyy', 'MM/dd/yyyy', 'yyyy-MM-dd'];
+  final AppServices services;
+  final AppSettings settings;
 
   @override
-  void initState() {
-    super.initState();
-    final prefs = PreferencesService.instance;
-    _currency   = prefs.currency;
-    _dateFormat = prefs.dateFormat;
-  }
-
-  Future<void> _setCurrency(String value) async {
-    await PreferencesService.instance.setCurrency(value);
-    setState(() => _currency = value);
-  }
-
-  Future<void> _setDateFormat(String value) async {
-    await PreferencesService.instance.setDateFormat(value);
-    setState(() => _dateFormat = value);
-  }
-
-  Future<void> _toggleDemo(bool enable) async {
-    if (_switchingProfile) return;
-
-    final title   = enable ? 'Ativar Modo Demo?'    : 'Desativar Modo Demo?';
-    final content = enable
-        ? 'Seus dados reais serão preservados. O app será recarregado com dados de exemplo cobrindo 12 meses.\n\nDesative o Modo Demo a qualquer momento para voltar aos seus dados.'
-        : 'O app voltará para os seus dados reais. Os dados demo permanecem salvos e podem ser reativados.';
-
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title),
-        content: Text(content),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true),  child: Text(enable ? 'Ativar' : 'Desativar')),
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final secondary = textTheme.bodySmall?.copyWith(
+      color: context.colors.textSecondary,
+    );
+    return SectionCard(
+      title: 'Aparência',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Modo', style: textTheme.titleSmall),
+          const SizedBox(height: AppSpace.sm),
+          SegmentedButton<AppMode>(
+            segments: const [
+              ButtonSegment(value: AppMode.simple, label: Text('Simples')),
+              ButtonSegment(value: AppMode.ultra, label: Text('Ultra')),
+            ],
+            selected: {settings.mode},
+            onSelectionChanged: (sel) =>
+                services.settings.update((c) => c.copyWith(mode: sel.first)),
+          ),
+          const SizedBox(height: AppSpace.sm),
+          Text(
+            settings.mode == AppMode.ultra
+                ? 'Visão detalhada: limites, categorias, filtros e provisionados.'
+                : 'Visão enxuta: saldo, faturas e próximos vencimentos.',
+            style: secondary,
+          ),
+          const SizedBox(height: AppSpace.lg),
+          Text('Tema', style: textTheme.titleSmall),
+          const SizedBox(height: AppSpace.sm),
+          SegmentedButton<ThemePreference>(
+            segments: const [
+              ButtonSegment(
+                value: ThemePreference.system,
+                label: Text('Sistema'),
+              ),
+              ButtonSegment(value: ThemePreference.light, label: Text('Claro')),
+              ButtonSegment(value: ThemePreference.dark, label: Text('Escuro')),
+            ],
+            selected: {settings.theme},
+            onSelectionChanged: (sel) =>
+                services.settings.update((c) => c.copyWith(theme: sel.first)),
+          ),
+          const SizedBox(height: AppSpace.sm),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Ocultar valores'),
+            subtitle: Text(
+              'Mostra "R\$ ••••" no lugar dos valores',
+              style: secondary,
+            ),
+            value: settings.hideValues,
+            onChanged: (on) =>
+                services.settings.update((c) => c.copyWith(hideValues: on)),
+          ),
         ],
       ),
     );
-    if (confirm != true || !mounted) return;
+  }
+}
 
-    setState(() => _switchingProfile = true);
+class _ForecastCard extends StatelessWidget {
+  const _ForecastCard({required this.services, required this.settings});
+
+  final AppServices services;
+  final AppSettings settings;
+
+  @override
+  Widget build(BuildContext context) {
+    final months = settings.forecastMonths;
+    return SectionCard(
+      title: 'Previsão',
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Horizonte de previsão',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ),
+              Text(
+                '$months meses',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          Slider(
+            min: AppSettings.minForecastMonths.toDouble(),
+            max: AppSettings.maxForecastMonths.toDouble(),
+            divisions:
+                AppSettings.maxForecastMonths - AppSettings.minForecastMonths,
+            value: months.toDouble(),
+            label: '$months meses',
+            onChanged: (v) => services.settings.update(
+              (c) => c.copyWith(forecastMonths: v.round()),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DataCard extends StatefulWidget {
+  const _DataCard({required this.services, required this.ultra});
+
+  final AppServices services;
+  final bool ultra;
+
+  @override
+  State<_DataCard> createState() => _DataCardState();
+}
+
+class _DataCardState extends State<_DataCard> {
+  YearMonth? _csvMonth;
+
+  AppServices get _s => widget.services;
+
+  void _snack(ScaffoldMessengerState messenger, String text) =>
+      messenger.showSnackBar(SnackBar(content: Text(text)));
+
+  Future<void> _exportBackup() async {
+    final messenger = ScaffoldMessenger.of(context);
     try {
-      final loginId = AuthService.instance.activeLoginId!;
-      final target  = enable ? ProfileService.profileDemo : ProfileService.profileDefault;
+      final location = await getSaveLocation(
+        suggestedName: 'finme-backup-${dateKey(_s.clock())}.json',
+        acceptedTypeGroups: const [_jsonGroup],
+      );
+      if (location == null) {
+        return;
+      }
+      await File(location.path).writeAsString(BackupService.exportJson(_s));
+      _snack(messenger, 'Backup exportado.');
+    } catch (_) {
+      _snack(messenger, 'Não foi possível exportar o backup.');
+    }
+  }
 
-      await ProfileService.instance.switchTo(loginId, target);
-      if (enable) await DemoSeedService.instance.populate();
-      if (!mounted) return;
-      Navigator.of(context).pushNamedAndRemoveUntil('/', (_) => false);
-    } finally {
-      if (mounted) setState(() => _switchingProfile = false);
+  Future<void> _importBackup() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final file = await openFile(acceptedTypeGroups: const [_jsonGroup]);
+      if (file == null || !mounted) {
+        return;
+      }
+      final ok = await confirmDialog(
+        context,
+        title: 'Importar backup?',
+        message:
+            'Todos os dados atuais serão substituídos pelo conteúdo do arquivo.',
+        confirmLabel: 'Importar',
+        destructive: true,
+      );
+      if (!ok || !mounted) {
+        return;
+      }
+      await BackupService.importJson(_s, await file.readAsString());
+      _snack(messenger, 'Backup importado.');
+    } on FormatException {
+      _snack(messenger, 'Arquivo de backup inválido.');
+    } catch (_) {
+      _snack(messenger, 'Não foi possível importar o backup.');
+    }
+  }
+
+  Future<void> _exportCsv(YearMonth month) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final location = await getSaveLocation(
+        suggestedName: 'finme-${month.key}.csv',
+        acceptedTypeGroups: const [_csvGroup],
+      );
+      if (location == null) {
+        return;
+      }
+      // BOM UTF-8 para o Excel reconhecer acentos.
+      final csv = BackupService.transactionsCsv(_s, month: month);
+      await File(location.path).writeAsString('﻿$csv');
+      _snack(messenger, 'CSV exportado.');
+    } catch (_) {
+      _snack(messenger, 'Não foi possível exportar o CSV.');
+    }
+  }
+
+  Future<void> _eraseAll() async {
+    final ok = await confirmDialog(
+      context,
+      title: 'Apagar todos os dados?',
+      message:
+          'Contas, cartões, lançamentos, recorrências, metas, ativos, dívidas, regras e perfis de importação serão removidos. O dicionário volta ao padrão. Esta ação não pode ser desfeita.',
+      confirmLabel: 'Apagar',
+      destructive: true,
+    );
+    if (!ok || !mounted) {
+      return;
+    }
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      // Sem sync: a gravação assíncrona da dívida poderia ressuscitar pagamentos apagados (SPEC §9.12).
+      await _s.debtSync.suspendDuring(() async {
+        await _s.accounts.replaceAll(const []);
+        await _s.cards.replaceAll(const []);
+        await _s.transactions.replaceAll(const []);
+        await _s.recurring.replaceAll(const []);
+        await _s.goals.replaceAll(const []);
+        await _s.assets.replaceAll(const []);
+        await _s.debts.replaceAll(const []);
+        await _s.importBatches.replaceAll(const []);
+        await _s.categories.replaceAll(defaultCategories());
+        await _s.rules.replaceAll(const []);
+        await _s.importProfiles.replaceAll(const []);
+        await _s.dictionary.replaceAll(defaultDictionary());
+      });
+      // Volta ao onboarding: o shell some quando onboardingDone for false.
+      await _s.settings.update((c) => c.copyWith(onboardingDone: false));
+    } catch (_) {
+      _snack(messenger, 'Não foi possível apagar os dados.');
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final modeController  = AppModeController.instance;
-    final themeController = ThemeController.instance;
-    final profileService  = ProfileService.instance;
-    final auth            = AuthService.instance;
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Configurações')),
-      body: AnimatedBuilder(
-        animation: Listenable.merge([modeController, themeController, profileService, auth]),
-        builder: (context, _) {
-          final isUltra = modeController.mode == AppMode.ultra;
-          final isDark  = themeController.isDark;
-          final isDemo  = profileService.isDemoActive;
-
-          // Perfil ativo para exibir no tile
-          final profiles      = auth.profilesForActiveLogin;
-          final activeProfile = profiles
-              .where((p) => p.id == auth.activeProfileId)
-              .firstOrNull;
-          final profileLabel = activeProfile != null
-              ? '${activeProfile.avatarEmoji}  ${activeProfile.name}'
-              : auth.activeUsername ?? 'Sem perfil';
-          final profileCount = profiles.length;
-
-          return ListView(
-            children: [
-              // ── Conta / Perfis ──────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.xs),
-                child: Text('Conta', style: AppText.sectionLabel),
-              ),
-              ListTile(
-                leading: const Icon(Icons.manage_accounts_outlined),
-                title: const Text('Gerenciar perfis'),
-                subtitle: Text(
-                  '$profileLabel  ·  $profileCount perfil${profileCount != 1 ? 'is' : ''}',
-                ),
-                trailing: const Icon(Icons.chevron_right, color: AppColors.textSecondary),
-                onTap: () => Navigator.of(context).pushNamed(AppRouter.profilePick),
-              ),
-              const Divider(height: AppSpacing.h),
-
-              // ── Aparência ─────────────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xs),
-                child: Text('Aparência', style: AppText.sectionLabel),
-              ),
-              SwitchListTile(
-                secondary: Icon(isDark ? Icons.dark_mode_outlined : Icons.light_mode_outlined),
-                title: const Text('Tema escuro'),
-                subtitle: Text(isDark ? 'Interface escura ativa' : 'Interface clara ativa'),
-                value: isDark,
-                onChanged: themeController.setDark,
-              ),
-              const Divider(height: AppSpacing.h),
-
-              // ── Regional ───────────────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xs),
-                child: Text('Regional', style: AppText.sectionLabel),
-              ),
-              ListTile(
-                leading: const Icon(Icons.attach_money_outlined),
-                title: const Text('Moeda'),
-                subtitle: Text(_currency),
-                trailing: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: _currency,
-                    isDense: true,
-                    items: _currencies.map((c) => DropdownMenuItem(value: c, child: Text(c, style: AppText.body))).toList(),
-                    onChanged: (v) { if (v != null) _setCurrency(v); },
-                  ),
-                ),
-              ),
-              ListTile(
-                leading: const Icon(Icons.calendar_today_outlined),
-                title: const Text('Formato de data'),
-                subtitle: Text(_dateFormat),
-                trailing: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: _dateFormat,
-                    isDense: true,
-                    items: _dateFormats.map((f) => DropdownMenuItem(value: f, child: Text(f, style: AppText.body))).toList(),
-                    onChanged: (v) { if (v != null) _setDateFormat(v); },
-                  ),
-                ),
-              ),
-              const Divider(height: AppSpacing.h),
-
-              // ── Modo de uso ───────────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xs),
-                child: Text('Modo de uso', style: AppText.sectionLabel),
-              ),
-              RadioListTile<AppMode>(
-                value: AppMode.simple,
-                groupValue: modeController.mode,
-                activeColor: AppColors.primary,
-                onChanged: (v) { if (v != null) modeController.setMode(v); },
-                title: const Text('Modo Simples'),
-                subtitle: const Text('Interface enxuta, foco em resumo rápido.'),
-              ),
-              RadioListTile<AppMode>(
-                value: AppMode.ultra,
-                groupValue: modeController.mode,
-                activeColor: AppColors.primary,
-                onChanged: (v) { if (v != null) modeController.setMode(v); },
-                title: const Text('Modo Ultra'),
-                subtitle: const Text('Visão completa com gráficos, limite de crédito e campos avançados.'),
-              ),
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 250),
-                child: isUltra
-                    ? _ModeBanner(key: const ValueKey('ultra'),  icon: Icons.bolt,        accentColor: AppColors.primary,  title: 'Modo Ultra ativo',   message: 'Gráficos por categoria e cartão, limite de crédito e campos avançados nas transações.')
-                    : _ModeBanner(key: const ValueKey('simple'), icon: Icons.spa_outlined, accentColor: AppColors.limitLow, title: 'Modo Simples ativo', message: 'Interface enxuta: apenas data na lista de transações.'),
-              ),
-              const Divider(height: AppSpacing.h),
-
-              // ── Dados ──────────────────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xs),
-                child: Text('Dados', style: AppText.sectionLabel),
-              ),
-              ListTile(
-                leading: const Icon(Icons.label_outline),
-                title: const Text('Categorias'),
-                subtitle: const Text('Gerenciar categorias de despesa e receita'),
-                trailing: const Icon(Icons.chevron_right, color: AppColors.textSecondary),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const CategoriesPage()),
-                ),
-              ),
-              const Divider(height: AppSpacing.h),
-
-              // ── Benchmark ──────────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.xs),
-                child: Text('Benchmark', style: AppText.sectionLabel),
-              ),
-              SwitchListTile(
-                secondary: Icon(Icons.science_outlined, color: isDemo ? AppColors.warning : null),
-                title: const Text('Modo Demo'),
-                subtitle: const Text(
-                  'Preenche o app com dados de exemplo de 12 meses. Seus dados reais são preservados.',
-                ),
-                value: isDemo,
-                onChanged: _switchingProfile ? null : _toggleDemo,
-                activeColor: AppColors.warning,
-              ),
-              if (isDemo)
-                _ModeBanner(
-                  icon: Icons.science_outlined,
-                  accentColor: AppColors.warning,
-                  title: 'Modo Demo ativo',
-                  message: 'Você está visualizando dados fictícios. Todas as funções do app estão disponíveis. Desative para voltar aos seus dados reais.',
-                ),
-              if (_switchingProfile)
-                const Padding(
-                  padding: EdgeInsets.all(AppSpacing.lg),
-                  child: Center(child: CircularProgressIndicator()),
-                ),
-              const SizedBox(height: AppSpacing.lg),
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _ModeBanner extends StatelessWidget {
-  const _ModeBanner({
-    super.key,
-    required this.icon,
-    required this.accentColor,
-    required this.title,
-    required this.message,
-  });
-
-  final IconData icon;
-  final Color    accentColor;
-  final String   title;
-  final String   message;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.xs),
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: accentColor.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(AppRadius.card),
-        border: Border.all(color: accentColor.withOpacity(0.25)),
-      ),
-      child: Row(
+    final month = _csvMonth ?? YearMonth.fromDate(_s.clock());
+    return SectionCard(
+      title: 'Dados',
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: accentColor, size: 20),
-          const SizedBox(width: AppSpacing.sm + 2),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          Wrap(
+            spacing: AppSpace.sm,
+            runSpacing: AppSpace.sm,
+            children: [
+              OutlinedButton.icon(
+                onPressed: _exportBackup,
+                icon: const Icon(Icons.save_alt),
+                label: const Text('Exportar backup (JSON)'),
+              ),
+              if (widget.ultra)
+                OutlinedButton.icon(
+                  onPressed: _importBackup,
+                  icon: const Icon(Icons.file_open_outlined),
+                  label: const Text('Importar backup'),
+                ),
+            ],
+          ),
+          if (widget.ultra) ...[
+            const Divider(height: AppSpace.xl),
+            Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: AppSpace.md,
+              runSpacing: AppSpace.sm,
               children: [
-                Text(title,   style: AppText.sectionLabel.copyWith(color: accentColor)),
-                const SizedBox(height: 3),
-                Text(message, style: AppText.secondary),
+                MonthSelector(
+                  value: month,
+                  onChanged: (m) => setState(() => _csvMonth = m),
+                ),
+                FilledButton.icon(
+                  onPressed: () => _exportCsv(month),
+                  icon: const Icon(Icons.table_chart_outlined),
+                  label: const Text('Exportar CSV do mês'),
+                ),
               ],
             ),
-          ),
+            const Divider(height: AppSpace.xl),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: context.colors.danger,
+                ),
+                onPressed: _eraseAll,
+                icon: const Icon(Icons.delete_outline),
+                label: const Text('Apagar todos os dados'),
+              ),
+            ),
+          ],
         ],
       ),
     );

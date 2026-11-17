@@ -1,0 +1,2913 @@
+# FinMe v2 — Especificação
+
+> Fonte da verdade de domínio e arquitetura. Coders seguem os contratos daqui à risca.
+> Mudou o domínio? Atualize este arquivo primeiro (papel do `finme-planner`).
+> Direção da v3 (Fases 7–12): `docs/V3_DIRECTION.md`. Em conflito, ela vence este arquivo até ele ser atualizado.
+
+## 1. Produto
+
+FinMe dá **previsibilidade** a quem gerencia muitos cartões de crédito, várias contas e muitas despesas.
+Pergunta central: *"quanto vai sair, de onde e quando — e meu saldo aguenta?"*
+
+Pilares:
+1. **Faturas certas** por cartão (fechamento/vencimento, parcelas, assinaturas).
+2. **Previsão de caixa** consolidada e por conta, com alerta de saldo negativo.
+3. **Provisionamento**: boletos e despesas planejadas que ainda não saíram.
+4. **Categorias e orçamento** mensal.
+5. **Modo Simples** (enxuto) e **Modo Ultra** (denso) sobre o mesmo domínio.
+
+Local, sem backend, sem integração bancária. Foco em funcionalidade e desempenho.
+Plataforma: **só Windows desktop** (as demais foram removidas do projeto na v3).
+
+## 2. Arquitetura
+
+```
+lib/
+  main.dart                    # runApp(bootstrap)
+  app/
+    app.dart                   # FinMeApp (MaterialApp, tema, home)
+    bootstrap.dart             # abre storage, cria repos, seed, materializa recorrências
+    app_scope.dart             # AppServices + AppScope (InheritedWidget)
+    ledger.dart                # Ledger: visões derivadas memoizadas (faturas, saldos, previsão)
+    home_shell.dart            # sidebar desktop (colapsa para só ícones em janela estreita) + troca de páginas + atalhos globais
+    app_shortcuts.dart         # Fase 9: intents, mapa de atalhos, guarda de campo de texto
+    command_palette.dart       # Fase 9: paleta Ctrl+K (PaletteEntry, showCommandPalette)
+    app_commands.dart          # Fase 9: comandos da paleta e entradas de transação
+    boot_screen.dart           # skeleton exibido enquanto o bootstrap carrega (Fase 7)
+    seed.dart                  # categorias padrão + dados de exemplo fictícios
+  core/
+    models/                    # YearMonth, AppSettings, enums globais
+    services/                  # RecordStore, CollectionRepository, SettingsController
+    theme/                     # AppColors (ThemeExtension), AppTheme, AppText/AppFonts, AppSpace, AppRadius, AppMotion, paletas
+    utils/                     # formatters, date_utils, id, text_normalize (Fase 8), fuzzy (Fase 9)
+    widgets/                   # widgets compartilhados (MoneyText, SectionCard, ...)
+  features/
+    accounts/{domain,presentation}
+    cards/{domain,presentation}
+    categories/{domain,presentation}
+    transactions/{domain,presentation}
+    recurring/{domain,presentation}
+    forecast/{domain,presentation}
+    rules/{domain,presentation}        # Fase 8: regras de categorização/renomeação
+    importing/{domain,presentation}    # Fase 8: CSV/OFX, categorização em cascata, prévia
+    goals/{domain,presentation}        # Fase 10: metas/caixinhas (reserva virtual dentro de uma conta)
+    net_worth/{domain,presentation}    # Fase 11: ativos manuais com snapshots e patrimônio líquido (página Patrimônio)
+    debts/{domain,presentation}        # Fase 11: devo / me devem (pessoa, valor, pagamentos que geram transação)
+    reports/{domain,presentation}      # Fase 12: relatórios curados (filtros globais, cache no ReportsController, CSV)
+    dashboard/presentation
+    settings/presentation
+    onboarding/presentation
+```
+
+Regras:
+- `domain/` e `core/models|utils` = **Dart puro** (sem `package:flutter`). Testado com `flutter test`.
+- Persistência genérica: cada entidade tem `toMap()`/`fromMap()`; não há adapters Hive nem typeIds.
+- Estado: `ChangeNotifier` + `ListenableBuilder`. Sem pacotes de estado.
+- Todos os dados ficam **em memória** (carregados no boot); escrita no Hive é assíncrona.
+- Derivados caros (faturas, saldos, previsão) são calculados no `Ledger` e memoizados por versão dos repositórios — nunca em `build`.
+- Navegação: índice no `HomeShell`; formulários em `showDialog` (largura máx. 520).
+- Dependências permitidas: `hive`, `hive_flutter`, `path_provider`, `fl_chart`, `csv`, `file_selector`. Nenhuma outra.
+
+## 3. Core
+
+### 3.1 `lib/core/models/year_month.dart`
+```dart
+class YearMonth implements Comparable<YearMonth> {
+  const YearMonth(this.year, this.month); // month 1..12
+  factory YearMonth.fromDate(DateTime d);
+  factory YearMonth.fromKey(String key);   // "2026-11"
+  final int year, month;
+  String get key;                          // "2026-11" (mês com 2 dígitos)
+  int get daysInMonth;
+  DateTime get firstDay;                   // DateTime(year, month, 1)
+  DateTime get lastDay;
+  YearMonth addMonths(int n);              // aceita negativo, cruza anos
+  YearMonth next(); YearMonth prev();
+  DateTime dateAt(int day);                // dia limitado a 1..daysInMonth
+  bool contains(DateTime d);
+  int compareTo(YearMonth o);
+  // == e hashCode por (year, month); operadores <, <=, >, >=
+}
+```
+
+### 3.2 `lib/core/utils/date_utils.dart`
+- `DateTime dateOnly(DateTime d)` → meia-noite local.
+- `DateTime addMonthsClamped(DateTime d, int months)` → mesmo dia limitado ao fim do mês (31/01 + 1 = 28/02 ou 29/02).
+- `bool isSameDay(DateTime a, DateTime b)`.
+- `String dateKey(DateTime d)` → `"20261114"`.
+
+### 3.3 `lib/core/utils/formatters.dart`
+- `String formatMoney(int cents, {bool hidden = false, bool signed = false})` → `"R$ 1.234,56"`, negativo `"-R$ 1.234,56"`, `signed` prefixa `+` em positivos, `hidden` → `"R$ ••••"`.
+- `int? parseMoney(String input)` → aceita `"1.234,56"`, `"1234,5"`, `"1234.56"`, `"R$ 10"`, `"-5,00"`; inválido → `null`.
+- `String formatDate(DateTime d)` `"14/11/2026"`; `String formatShortDate(DateTime d)` `"14/11"`.
+- `String formatMonth(YearMonth m)` `"nov/2026"`; `String formatMonthLong(YearMonth m)` `"Novembro 2026"`.
+- `String formatPercent(double ratio, {int decimals = 1})` (Fase 7): `0.1234` → `"12,3%"`, `-0.05` → `"-5,0%"`, `0` → `"0,0%"`; vírgula decimal, arredondamento meio-para-cima.
+- Fase 12 (CSV de relatórios; mesmo formato do CSV de transações de `backup_service.dart`, que mantém as cópias privadas dele):
+  `String formatCsvMoney(int cents)` → sem "R$" e sem separador de milhar, vírgula decimal: `123456` → `"1234,56"`, `-5000` → `"-50,00"`, `0` → `"0,00"`, `7` → `"0,07"`.
+  `String csvText(String value)` → texto que começa com `=`, `+`, `-` ou `@` ganha `'` na frente (planilha não interpreta como fórmula):
+  `'=SOMA(A1)'` → `"'=SOMA(A1)"`, `'-x'` → `"'-x"`, `'Mercado'` → `'Mercado'`, `''` → `''`.
+
+### 3.4 `lib/core/utils/id.dart`
+- `String newId()` → único por processo (timestamp em micros base36 + contador + random). Sem dependência.
+
+### 3.5 Persistência — `lib/core/services/`
+```dart
+// record_store.dart
+abstract interface class RecordStore {
+  Iterable<Map<String, dynamic>> loadAll();
+  Future<void> put(String id, Map<String, dynamic> data);
+  Future<void> putAll(Map<String, Map<String, dynamic>> entries);
+  Future<void> delete(String id);
+  Future<void> deleteAll(Iterable<String> ids);
+  Future<void> clear();
+}
+class MemoryRecordStore implements RecordStore { ... }      // testes
+class HiveRecordStore implements RecordStore {             // Box<Map> do Hive
+  HiveRecordStore(Box<Map> box);
+  static Future<HiveRecordStore> open(String boxName);
+}
+// Mapas lidos do Hive são Map<dynamic,dynamic>: converter recursivamente para Map<String,dynamic>.
+
+// collection_repository.dart
+class CollectionRepository<T> extends ChangeNotifier {
+  CollectionRepository({
+    required RecordStore store,
+    required T Function(Map<String, dynamic>) fromMap,
+    required Map<String, dynamic> Function(T) toMap,
+    required String Function(T) idOf,
+  }); // carrega store.loadAll() no construtor
+  List<T> get all;          // lista imutável cacheada, invalida ao mudar
+  int get version;          // incrementa a cada mudança
+  bool get isEmpty;
+  T? byId(String id);
+  Future<void> upsert(T item);
+  Future<void> upsertAll(Iterable<T> items);   // um único notify
+  Future<void> delete(String id);
+  Future<void> deleteWhere(bool Function(T) test);
+  Future<void> replaceAll(Iterable<T> items);  // import de backup
+}
+```
+**Import de backup tudo-ou-nada (Fase 6, T-040).** Hive não tem transação entre boxes; o import usa compensação:
+1. Valida e converte tudo antes de gravar (`_parse`); erro → `FormatException`, nada muda (já era assim).
+2. Tira um retrato do estado atual: `all` de cada repositório (listas imutáveis) e `settings.value`.
+3. Grava coleções, configurações e roda `materializeRecurring` dentro de `try`.
+4. Qualquer exceção → restaura cada repositório com `replaceAll(retrato)` e `settings.update((_) => retrato)`,
+   cada restauração no seu próprio `try` (uma falha não impede as outras), e relança o erro original (`Error.throwWithStackTrace`).
+Memória e disco voltam ao estado anterior. Limite: se o próprio disco falhar também na restauração, o estado pode ficar
+parcial; o erro original sobe para a UI ("Erro ao importar"). **Fase 13:** retrato em arquivo antes de gravar e recuperação no boot (§9.13);
+`delete`/`deleteWhere`/`replaceAll` gravam antes de mudar a memória (§9.1).
+
+Boxes Hive (nomes novos, ignoram dados antigos): `fm_accounts`, `fm_cards`, `fm_categories`, `fm_transactions`, `fm_recurring`, `fm_settings`.
+Fase 8: `fm_rules` (`TransactionRule`, §4.6), `fm_import_profiles` (`ImportProfile`, §4.7), `fm_dictionary` (`DictionaryEntry`, §4.8).
+Fase 10: `fm_goals` (`Goal`, §4.9).
+Fase 11: `fm_assets` (`Asset`, §4.10), `fm_debts` (`Debt`, §4.11).
+No boot, `fm_dictionary` vazia é semeada com `defaultDictionary()` (§5.13). Shortcut: apagar todas as entradas do dicionário
+faz o padrão voltar no próximo boot (equivale a "restaurar padrão").
+
+**Backup e as boxes da Fase 8.** `exportJson` grava também `'rules'`, `'importProfiles'` e `'dictionary'` (listas de `toMap()`).
+`BackupService.version` continua `1`. No import: chave ausente (backup antigo) → `rules = []`, `importProfiles = []`,
+`dictionary = defaultDictionary()`. Perfil cujo `accountId`/`cardId` não existe no backup é descartado (`_linked`);
+regra com `categoryId` ausente no backup fica com `categoryId: null` (`_unlinkedCategory`). As três coleções entram no
+retrato e na restauração do import tudo-ou-nada. "Apagar todos os dados" (Ajustes) faz `rules.replaceAll([])`,
+`importProfiles.replaceAll([])` e `dictionary.replaceAll(defaultDictionary())`.
+
+**Fase 10: `fm_goals` e campos novos.** Box nova `fm_goals` (`Goal`, §4.9). `exportJson` grava `'goals'` (lista de `toMap()`;
+os movimentos vão dentro de cada meta). `BackupService.version` continua `1`. No import: chave ausente → `goals = []`; meta cujo
+`accountId` não existe nas contas do backup é descartada (mesma regra `_linked` dos perfis). `parentId` de categoria, `tags` de
+transação e `tags` de regra viajam dentro dos próprios mapas (`fromMap` tolerante: backup antigo sem eles importa normalmente;
+`parentId` inválido não é corrigido no import — a árvore o trata como raiz, §5.20). `goals` entra no retrato e na restauração do
+import tudo-ou-nada. "Apagar todos os dados" faz `goals.replaceAll([])`.
+Meta com `targetCents` nulo, não numérico ou `<= 0` no backup → `FormatException('Backup com meta de alvo inválido')` antes de gravar;
+no boot, `Goal.fromMap` lança `FormatException` e o registro é pulado (`progress` = 0 se alvo `<= 0`).
+CSV de transações (`transactionsCsv`): a coluna "Categoria" passa a usar o rótulo `'Pai › Filha'` (`CategoryTree.label`) e ganha a
+última coluna "Tags" (`t.tags.join(', ')`).
+
+**Fase 11: `fm_assets` e `fm_debts`.** Boxes novas `fm_assets` (`Asset`, §4.10; snapshots dentro de cada ativo) e `fm_debts` (`Debt`, §4.11;
+pagamentos dentro de cada dívida). `exportJson` grava `'assets'` e `'debts'` (listas de `toMap()`). `BackupService.version` continua `1`.
+No import: chave ausente (backup antigo) → `[]`. Nenhum vínculo é validado: `DebtPayment.transactionId` que não existe no backup fica como está
+(desfazer esse pagamento só não acha transação para excluir, §5.25). As duas coleções entram no retrato e na restauração do import tudo-ou-nada.
+"Apagar todos os dados" faz `assets.replaceAll([])` e `debts.replaceAll([])`; a mensagem de confirmação passa a
+'Contas, cartões, lançamentos, recorrências, metas, ativos, dívidas, regras e perfis de importação serão removidos. O dicionário volta ao padrão. Esta ação não pode ser desfeita.'
+CSV não muda (as transações de quitação já são transações comuns).
+
+### 3.6 Configurações
+```dart
+// core/models/app_settings.dart
+enum AppMode { simple, ultra }
+enum ThemePreference { system, light, dark }
+class AppSettings {
+  final AppMode mode;              // padrão simple
+  final ThemePreference theme;     // padrão system
+  final bool hideValues;           // padrão false
+  final int forecastMonths;        // padrão 6 (3..24)
+  final bool onboardingDone;       // padrão false
+  copyWith, toMap, fromMap (campos ausentes → padrão)
+}
+// core/services/settings_controller.dart
+class SettingsController extends ChangeNotifier {
+  SettingsController(RecordStore store); // registro único id "settings"
+  AppSettings get value;
+  Future<void> update(AppSettings Function(AppSettings) change);
+}
+```
+
+### 3.7 Normalização de texto — `lib/core/utils/text_normalize.dart` (Fase 8)
+Dart puro, usado por regras, histórico, dicionário e deduplicação.
+```dart
+String foldText(String s);
+  // maiúsculas; sem acento (ÁÀÂÃÄ→A, ÉÈÊË→E, ÍÌÎÏ→I, ÓÒÔÕÖ→O, ÚÙÛÜ→U, Ç→C, Ñ→N, idem minúsculas);
+  // espaços (inclui \t e U+00A0) colapsados em um; trim. Pontuação é mantida.
+String normalizeDescription(String s); // chave de histórico/dedupe (regras abaixo)
+Set<String> descriptionTokens(String normalized);
+  // split por espaço; remove tokens com < 2 caracteres e os de kStopTokens
+double jaccard(Set<String> a, Set<String> b); // |a∩b| / |a∪b|; ambos vazios → 0.0
+bool similarDescriptions(String a, String b);
+  // ka = normalizeDescription(a), kb = normalizeDescription(b); true se: ka == kb e não vazio;
+  // ou a menor (≥ 4 caracteres) está contida na maior; ou jaccard(descriptionTokens(ka), descriptionTokens(kb)) >= 0.5
+const Set<String> kStopTokens = {'PARC', 'PARCELA', 'PARCELADO', 'COMPRA', 'PAG', 'PAGTO', 'PGTO', 'PAGAMENTO',
+  'DEBITO', 'CREDITO', 'CARTAO', 'LTDA', 'EIRELI', 'ME', 'SA', 'DE', 'DA', 'DO', 'DOS', 'DAS', 'COM', 'EM', 'BR'};
+const Set<String> kUfTokens = {...27 siglas de UF..., 'BR', 'BRA', 'BRASIL'};
+const List<String> kCitySuffixes = ['SAO PAULO', 'RIO DE JANEIRO', 'BELO HORIZONTE', 'BRASILIA', 'SALVADOR',
+  'FORTALEZA', 'CURITIBA', 'RECIFE', 'PORTO ALEGRE', 'MANAUS', 'BELEM', 'GOIANIA', 'CAMPINAS', 'FLORIANOPOLIS',
+  'VITORIA', 'NATAL', 'JOAO PESSOA', 'OSASCO', 'SANTOS', 'GUARULHOS'];
+```
+`normalizeDescription`, em ordem:
+1. `foldText`.
+2. Remove datas `\b\d{1,2}[/.-]\d{1,2}([/.-]\d{2,4})?\b` e marcadores "N DE M" `\b\d{1,2}\s+DE\s+\d{1,2}\b` (troca por espaço).
+3. Todo caractere fora de `[A-Z0-9 ]` vira espaço (some `*`, `-`, `.`, `/`).
+4. Quebra em tokens; descarta tokens que contêm dígito (códigos, números de pedido) e `PARC`/`PARCELA`/`PARCELADO`.
+5. Até 3 vezes: remove tokens finais em `kUfTokens`; remove um sufixo final igual a um item de `kCitySuffixes`.
+   Nunca deixa a lista vazia: se a remoção esvaziaria, para antes.
+6. `join(' ')`. Pode resultar em `''` (ex.: só dígitos) → chave vazia não casa nada no histórico.
+Exemplos (teste obrigatório): `'UBER *TRIP 8X7Y2 SAO PAULO BR'` → `'UBER TRIP'`; `'IFOOD*RESTAURANTE 12/11'` → `'IFOOD RESTAURANTE'`;
+`'Farmácia São João 0412'` → `'FARMACIA SAO JOAO'`; `'LOJA EXEMPLO PARC 03/10'` → `'LOJA EXEMPLO'`;
+`'LOJA EXEMPLO 03 DE 10'` → `'LOJA EXEMPLO'`; `'PADARIA PAO BOM CURITIBA PR'` → `'PADARIA PAO BOM'`; `'123456'` → `''`; `'SP'` → `'SP'`.
+
+### 3.8 Busca aproximada — `lib/core/utils/fuzzy.dart` (Fase 9)
+Dart puro. Usada pela paleta de comandos (§7.3 "Produtividade") e pela busca de transações (§5.17). Reusa `foldText` (§3.7).
+```dart
+List<String> foldedWords(String folded);
+  // split de um texto JÁ dobrado por RegExp(r'[^A-Z0-9]+'), sem vazios. foldedWords('UBER *TRIP 8X') == ['UBER', 'TRIP', '8X']
+int? fuzzyTokenScore(String token, String folded, List<String> words);
+  // token e folded JÁ dobrados; words = foldedWords(folded). Primeira regra que vale:
+  // folded.startsWith(token) → 4; algum word.startsWith(token) → 3; folded.contains(token) → 2;
+  // token.length >= 3 e token é subsequência de folded (caracteres na ordem, não contíguos) → 1; senão null.
+int? fuzzyScore(String query, String text);
+  // tokens = foldText(query).split(' ') sem vazios; sem tokens → 0.
+  // f = foldText(text); soma de fuzzyTokenScore(token, f, foldedWords(f)); qualquer token null → null.
+List<T> fuzzyRank<T>(Iterable<T> items, String query, Iterable<String> Function(T item) texts, {int? limit});
+  // score do item = maior fuzzyScore(query, x) entre texts(item); itens com score null saem.
+  // Ordena por score desc, empate mantém a ordem de entrada (ordenação estável). Query vazia → itens na ordem de entrada.
+  // limit != null → take(limit).
+```
+Exemplos (teste obrigatório): `fuzzyScore('', 'x') == 0`; `fuzzyScore('nova', 'Nova transação') == 4`; `('trans', 'Nova transação') == 3`;
+`('ansa', 'Nova transação') == 2`; `('nvt', 'Nova transação') == 1`; `('nv', 'Nova transação') == null` (subsequência exige 3+);
+`('xyz', 'Nova transação') == null`; `('ir pain', 'Ir para Painel') == 7`; `('cafe', 'Café da manhã') == 4`.
+
+## 4. Entidades de domínio
+
+Todas imutáveis, com `copyWith`, `toMap`, `factory fromMap`.
+**`copyWith` e campos anuláveis (Fase 6, T-042/T-043):** todo parâmetro de campo anulável usa sentinela privada
+`const Object _keep = Object();` por arquivo, com assinatura `Object? campo = _keep`. Omitido → mantém;
+`campo: null` → limpa; valor → troca (`campo == _keep ? this.campo : campo as Tipo?`). Campos não anuláveis seguem `Tipo? campo` + `??`.
+Nenhuma chamada existente passa `null` explícito, então o comportamento atual não muda. Vale para `PaymentCard.paymentAccountId`,
+`TransactionCategory.monthlyBudgetCents`, os 10 anuláveis de `Transaction` (`categoryId`, `accountId`, `cardId`, `toAccountId`,
+`invoiceKey`, `installmentGroupId`, `installmentIndex`, `installmentCount`, `recurringId`, `notes`) e `RecurringRule`
+(`categoryId`, `accountId`, `cardId`, `endDate`, `materializedUntil`). `Account` e `AppSettings` não têm anuláveis.
+Os formulários continuam recriando pelo construtor (sem mudança obrigatória).
+Enums serializados por `name`;
+datas por `dateKey` (`"20261114"`); campos opcionais ausentes no mapa → `null`/padrão.
+`fromMap` tolera enum desconhecido usando o primeiro valor.
+
+### 4.1 `features/accounts/domain/account.dart`
+```dart
+enum AccountType { checking, savings, cash, investment, wallet }
+class Account { id, name, bankName, type, int initialBalanceCents, int colorValue, bool archived }
+```
+
+### 4.2 `features/cards/domain/payment_card.dart`
+```dart
+enum CardBrand { visa, mastercard, elo, amex, hipercard, other }
+enum CardKind { credit, debit }
+class PaymentCard {
+  id, name, bankName, brand, kind, String last4,
+  int limitCents,          // crédito; 0 em débito
+  int closingDay,          // 1..31 (crédito)
+  int dueDay,              // 1..31 (crédito)
+  String? paymentAccountId,// crédito: conta que paga a fatura; débito: conta debitada
+  int colorValue, bool archived,
+  List<CardCycle> cycleHistory, // padrão const []; ciclos ANTERIORES, ordenados por `until` asc (Fase 5)
+}
+class CardCycle {           // mesmo arquivo; ==/hashCode por campos
+  const CardCycle({required this.until, required this.closingDay, required this.dueDay});
+  final DateTime until;     // exclusivo, dateOnly: vale para compras com data < until
+  final int closingDay, dueDay;
+  Map<String, dynamic> toMap();  // {'until': dateKey(until), 'closingDay', 'dueDay'}
+  factory CardCycle.fromMap(Map<String, dynamic> m); // until via parseDateKey
+}
+// Em PaymentCard:
+({int closingDay, int dueDay}) cycleOn(DateTime date);
+  // 1º item de cycleHistory com dateOnly(date) < until → seus dias; senão (closingDay, dueDay) atuais.
+PaymentCard withCycleChange({required int closingDay, required int dueDay, required DateTime effectiveFrom});
+  // dias iguais aos atuais → this. Senão: cycleHistory + CardCycle(until: dateOnly(effectiveFrom),
+  // closingDay: this.closingDay, dueDay: this.dueDay), e closingDay/dueDay novos.
+  // ArgumentError se effectiveFrom <= último until do histórico.
+```
+- `closingDay`/`dueDay` continuam sendo o ciclo **atual** (vigente a partir do último `until`, ou sempre se o histórico é vazio): todos os chamadores existentes seguem válidos.
+- `toMap` grava `cycleHistory` como lista de mapas; `fromMap` tolera chave ausente, `null` ou item inválido (ignora o item) → sem migração de box. Backups antigos importam normalmente.
+- `copyWith` aceita `cycleHistory`; `==`/`hashCode` comparam a lista elemento a elemento (sem `package:flutter` — use loop ou `Object.hashAll`).
+
+### 4.3 `features/categories/domain/transaction_category.dart`
+```dart
+enum CategoryKind { expense, income }
+class TransactionCategory { id, name, kind, int iconCodePoint, int colorValue, int? monthlyBudgetCents,
+  String? parentId }   // Fase 10: subcategoria de 1 nível; null = categoria principal (raiz)
+```
+**Subcategorias (Fase 10).** `parentId` anulável com sentinela `_keep` no `copyWith`; `toMap` grava `'parentId'` só quando não nulo;
+`fromMap` tolera ausência (sem migração); `==`/`hashCode` incluem o campo. Um nível só. Vínculo **válido** quando: o pai existe,
+`pai.id != id`, `pai.parentId == null` (o pai é raiz) e `pai.kind == kind`. Vínculo inválido (dado antigo/corrompido) nunca derruba
+nada: a árvore trata a categoria como raiz (§5.20). A validação de escrita é `categoryParentError` (§5.20), usada pelo formulário.
+Uma categoria com filhas não pode virar filha; excluir uma categoria com filhas é bloqueado na UI ("Mova ou exclua as subcategorias antes").
+Uma transação pode usar o pai diretamente mesmo quando ele tem filhas (aparece como "sem subcategoria" no drill-down).
+
+### 4.4 `features/transactions/domain/transaction.dart`
+```dart
+enum TransactionType { expense, income, transfer, invoicePayment }
+enum TransactionStatus { paid, planned }
+class Transaction {
+  String id; TransactionType type;
+  int amountCents;            // sempre > 0
+  DateTime date;              // dateOnly
+  String description;
+  String? categoryId;
+  String? accountId;          // origem (expense/income/transfer/invoicePayment)
+  String? cardId;             // expense/income no cartão; invoicePayment: cartão pago
+  String? toAccountId;        // transfer: destino
+  TransactionStatus status;   // padrão paid
+  bool isBoleto;              // padrão false
+  String? invoiceKey;         // invoicePayment: YearMonth.key do vencimento da fatura
+  String? installmentGroupId; int? installmentIndex; int? installmentCount; // 1-based
+  String? recurringId;
+  String? notes;
+  String? externalId;          // Fase 8: FITID do OFX (deduplicação forte); null em manual/CSV
+  String? importedDescription; // Fase 8: descrição como veio do arquivo; null em lançamento manual
+  List<String> tags;           // Fase 10: tags livres, já normalizadas (§5.21); padrão const []
+}
+```
+Fase 10 (`tags`): o construtor normaliza com `normalizeTags` (§5.21) e guarda lista imutável (vazia → `const []`); `copyWith({List<String>? tags})`
+(não anulável: `??`); `toMap` grava `'tags'` só quando não vazia; `fromMap` tolera ausência, `null`, não-lista e itens não `String` (ignorados) → `[]`;
+`==`/`hashCode` comparam a lista elemento a elemento (loop / `Object.hashAll`, sem `package:flutter`). `buildInstallments` (§5.3) copia `base.tags`
+para todas as parcelas. **Todo código que recria uma transação pelo construtor a partir de outra** (formulário de edição, limpeza de categoria
+em Categorias) passa `tags: t.tags` ou usa `copyWith` — senão as tags se perdem.
+Fase 8: `externalId` e `importedDescription` são anuláveis com sentinela `_keep` no `copyWith`, entram em `toMap` só quando
+não nulos e `fromMap` tolera ausência (sem migração). `==`/`hashCode` incluem os dois. Regras e histórico leem o
+"assunto" da transação: `ruleSubject(t) = t.importedDescription ?? t.description` (assim renomear não apaga o que casa).
+Regras:
+- Construtor normaliza `date` com `dateOnly` (não é `const`). Idem `RecurringRule.startDate/endDate`.
+- `expense`/`income`: exatamente um de `accountId` ou `cardId`.
+- Lançamento em **cartão de crédito** compõe fatura; `status` é irrelevante (sempre tratado como lançado). `income` em cartão = estorno (abate a fatura).
+- Lançamento em **cartão de débito** afeta a conta `card.paymentAccountId`.
+- `transfer`: `accountId` → `toAccountId`; não é receita nem despesa.
+- `invoicePayment`: sai de `accountId`, quita fatura (`cardId`, `invoiceKey`). Sempre `paid`.
+- `planned` = provisionado: ainda não saiu. Não afeta saldo atual; entra na previsão.
+
+### 4.5 `features/recurring/domain/recurring_rule.dart`
+```dart
+enum Frequency { weekly, monthly, yearly }
+class RecurringRule {
+  id, description, TransactionType type (expense|income), int amountCents,
+  String? categoryId, String? accountId, String? cardId,
+  Frequency frequency, DateTime startDate, DateTime? endDate,
+  bool isSubscription, bool isBoleto, bool active,
+  DateTime? materializedUntil   // última data já materializada no boot (evita ressuscitar ocorrência apagada)
+  List<String> tags             // Fase 13 (§9.7): copiadas para as ocorrências; padrão const []
+}
+```
+
+### 4.6 `features/rules/domain/transaction_rule.dart` (Fase 8)
+```dart
+enum RuleMatchType { contains, startsWith, regex }
+class TransactionRule {
+  const TransactionRule({required this.id, required this.pattern, this.matchType = RuleMatchType.contains,
+    this.categoryId, this.renameTo, this.priority = 0, this.active = true});
+  final String id;
+  final String pattern;          // texto (contains/startsWith) ou expressão regular
+  final RuleMatchType matchType;
+  final String? categoryId;      // categoria a aplicar (null = só renomeia)
+  final String? renameTo;        // descrição final (null/vazio = não renomeia)
+  final int priority;            // menor vence; empate por id asc
+  final bool active;
+}
+```
+`copyWith` com `_keep` para `categoryId`/`renameTo`; `toMap`/`fromMap` (enum desconhecido → `contains`, `priority` ausente → 0,
+`active` ausente → true); `==`/`hashCode` por campos. Uma regra útil tem `categoryId != null`, `renameTo` não vazio ou `tags` não vazia (validado na UI).
+**Fase 10:** `final List<String> tags;` (construtor `this.tags = const []`; continua `const`). Tags a **acrescentar** à transação quando a regra casa
+(nunca remove). O formulário grava `normalizeTags(...)`; `fromMap` normaliza e tolera ausência/lixo como em `Transaction`; `copyWith({List<String>? tags})`;
+`toMap` grava só quando não vazia; `==`/`hashCode` elemento a elemento.
+
+### 4.7 `features/importing/domain/import_profile.dart` (Fase 8)
+Perfil salvo de importação (mapeamento CSV ou destino OFX), reaplicável com 1 clique.
+```dart
+enum ImportFormat { csv, ofx }
+enum DateOrder { dmy, mdy, ymd }          // dd/mm/aaaa, mm/dd/aaaa, aaaa-mm-dd (qualquer separador / . -)
+enum DecimalMark { comma, dot }
+enum InstallmentDateMode { posting, purchase } // data da linha de parcela = lançamento na fatura | compra original
+class ImportProfile {
+  const ImportProfile({required this.id, required this.name, this.format = ImportFormat.csv,
+    this.accountId, this.cardId, this.delimiter = ';', this.skipRows = 1, this.dateColumn = 0,
+    this.descriptionColumn = 1, this.amountColumn = 2, this.debitColumn, this.creditColumn, this.categoryColumn,
+    this.dateOrder = DateOrder.dmy, this.decimalMark = DecimalMark.comma, this.invertSign = false,
+    this.installmentDateMode = InstallmentDateMode.posting, this.categoryMap = const {}});
+  final String id, name;
+  final ImportFormat format;
+  final String? accountId, cardId;       // destino: exatamente um
+  final String delimiter;                // 1 caractere: ';' ',' '\t' '|'
+  final int skipRows;                    // linhas antes dos dados (inclui o cabeçalho)
+  final int dateColumn, descriptionColumn; // 0-based
+  final int? amountColumn;               // valor único com sinal …
+  final int? debitColumn, creditColumn;  // … ou débito/crédito separados
+  final int? categoryColumn;             // opcional
+  final DateOrder dateOrder;
+  final DecimalMark decimalMark;
+  final bool invertSign;                 // fatura de cartão com compras positivas
+  final InstallmentDateMode installmentDateMode;
+  final Map<String, String> categoryMap; // foldText(categoria do banco) → categoryId (de-para)
+  String? get mappingError;
+  ImportProfile learnBankCategories(Map<String, String> learned); // acrescenta só chaves novas
+}
+```
+`mappingError` (null = válido), na ordem: destino ausente ou duplo → `'Escolha a conta ou o cartão'`; formato CSV e não
+(`amountColumn != null` XOR (`debitColumn != null || creditColumn != null`)) → `'Use valor único ou débito/crédito'`;
+CSV com colunas definidas repetidas ou negativas → `'Colunas repetidas ou inválidas'`; `delimiter.length != 1` →
+`'Separador inválido'`; `skipRows < 0` → `'Linhas a pular inválidas'`. Para OFX só o destino é validado.
+`copyWith` com `_keep` para `accountId`, `cardId`, `amountColumn`, `debitColumn`, `creditColumn`, `categoryColumn`.
+`toMap` grava `categoryMap` como mapa; `fromMap` tolera ausência de qualquer campo (padrões acima). `==` compara o mapa por conteúdo.
+
+### 4.8 `features/importing/domain/merchant_dictionary.dart` — `DictionaryEntry` (Fase 8)
+```dart
+class DictionaryEntry {
+  const DictionaryEntry({required this.id, required this.pattern, required this.categoryName});
+  final String id;
+  final String pattern;       // guardado já em foldText (ex.: 'UBER', 'PAO DE ACUCAR', 'APPLE.COM')
+  final String categoryName;  // nome da categoria (resolvido por nome, §5.13)
+  // copyWith, toMap, fromMap, ==/hashCode
+}
+```
+Guarda nome e não id: o dicionário embutido precisa funcionar com qualquer conjunto de categorias e sobreviver a backups.
+Fase 10: `categoryName` pode ser um caminho `'Pai › Filha'` (o formulário do dicionário grava `CategoryTree.label` ao escolher uma subcategoria); ver `resolveCategoryByName` (§5.13).
+
+### 4.9 `features/goals/domain/goal.dart` (Fase 10)
+Meta/caixinha: **reserva virtual dentro de uma conta**. O dinheiro não sai da conta (nenhuma transação é criada); a reserva só reduz o "posso gastar" (§5.23).
+```dart
+class GoalMovement {
+  GoalMovement({required this.id, required DateTime date, required this.amountCents, this.note}); // date → dateOnly
+  final String id;
+  final DateTime date;
+  final int amountCents;   // != 0; > 0 aporte, < 0 retirada
+  final String? note;
+  bool get isContribution => amountCents > 0;
+  // toMap {'id', 'date': dateKey, 'amountCents', 'note'?}; fromMap; ==/hashCode por campos
+}
+class Goal {
+  Goal({required this.id, required this.name, required this.accountId, required this.targetCents, DateTime? targetDate,
+    List<GoalMovement> movements = const [], this.archived = false}); // targetDate → dateOnly; movements ordenados por (date, id) asc, imutável
+  final String id, name;
+  final String accountId;           // conta onde o dinheiro fica reservado
+  final int targetCents;            // > 0
+  final DateTime? targetDate;       // opcional
+  final List<GoalMovement> movements;
+  final bool archived;              // arquivada = reserva liberada (não conta em lugar nenhum)
+  int get rawReservedCents;         // soma de movements.amountCents (pode ser < 0 só em dado corrompido)
+  int get reservedCents;            // max(0, rawReservedCents)
+  int get remainingCents;           // max(0, targetCents - reservedCents)
+  double get progress;              // (reservedCents / targetCents).clamp(0.0, 1.0)
+  bool get reached;                 // reservedCents >= targetCents
+  Goal withMovement(GoalMovement m);   // nova meta com o movimento (reordena)
+  Goal withoutMovement(String movementId);
+  // copyWith (targetDate com _keep), toMap ('movements' como lista de mapas, 'targetDate' só se não nulo), fromMap tolerante
+  // (movements ausente/inválido → [], item inválido ignorado; archived ausente → false); ==/hashCode (lista elemento a elemento)
+}
+```
+
+### 4.10 `features/net_worth/domain/asset.dart` (Fase 11)
+Ativo manual (fora das contas): investimento não controlado como conta, imóvel, veículo, outro. O valor é **declarado** por snapshots datados;
+o valor numa data é o do último snapshot até ela. Nenhuma ação de ativo cria transação.
+```dart
+enum AssetKind { investment, realEstate, vehicle, other }
+String assetKindLabel(AssetKind k); // 'Investimento', 'Imóvel', 'Veículo', 'Outro'
+class AssetSnapshot {
+  AssetSnapshot({required this.id, required DateTime date, required this.valueCents, this.note}); // date → dateOnly
+  final String id;
+  final DateTime date;
+  final int valueCents;    // >= 0 (validado na escrita, §5.24)
+  final String? note;
+  // toMap {'id', 'date': dateKey, 'valueCents', 'note'?}; fromMap; ==/hashCode por campos
+}
+class Asset {
+  Asset({required this.id, required this.name, required this.kind, List<AssetSnapshot> snapshots = const [], this.archived = false});
+    // snapshots ordenados por date asc, imutável; no máximo 1 por data (se o construtor receber 2 na mesma data, vale o último da lista recebida)
+  final String id, name;
+  final AssetKind kind;
+  final List<AssetSnapshot> snapshots;
+  final bool archived;               // "encerrado" (vendido/baixado): só some da lista padrão; o histórico continua valendo (§5.24)
+  AssetSnapshot? get latest;         // snapshots.last ou null
+  int get currentValueCents;         // latest?.valueCents ?? 0
+  int valueAt(DateTime date);        // valueCents do último snapshot com date <= dateOnly(date); nenhum → 0
+  int? get lastChangeCents;          // latest − penúltimo; null com < 2 snapshots
+  Asset withSnapshot(AssetSnapshot s);   // substitui o snapshot da mesma data (se houver) e reordena
+  Asset withoutSnapshot(String snapshotId);
+  // copyWith (sem anuláveis), toMap ('snapshots' lista de mapas), fromMap tolerante (snapshots ausente/inválido → [], item
+  // inválido ignorado; kind desconhecido → investment; archived ausente → false); ==/hashCode (lista elemento a elemento)
+}
+```
+
+### 4.11 `features/debts/domain/debt.dart` (Fase 11)
+Devo / me devem: valor combinado com uma pessoa (texto livre). Registrar a dívida **não** cria transação; cada pagamento (quitação total ou
+parcial) cria uma transação na conta escolhida e guarda o id dela (§5.25).
+```dart
+enum DebtDirection { iOwe, owedToMe }   // iOwe primeiro: fromMap com valor desconhecido cai no lado conservador
+class DebtPayment {
+  DebtPayment({required this.id, required DateTime date, required this.amountCents, this.transactionId}); // date → dateOnly
+  final String id;
+  final DateTime date;
+  final int amountCents;          // > 0
+  final String? transactionId;    // transação gerada na quitação; null só em dado antigo/importado sem ela
+  // toMap {'id', 'date', 'amountCents', 'transactionId'?}; fromMap; ==/hashCode por campos
+}
+class Debt {
+  Debt({required this.id, required String person, required this.direction, required this.amountCents, required DateTime date,
+    this.description, DateTime? dueDate, List<DebtPayment> payments = const []});
+    // person → trim; date/dueDate → dateOnly; description vazia/só espaços → null; payments ordenados por (date, id) asc, imutável
+  final String id;
+  final String person;
+  final DebtDirection direction;
+  final int amountCents;          // > 0, valor total combinado
+  final DateTime date;            // data em que a dívida passou a existir
+  final String? description;
+  final DateTime? dueDate;        // vencimento opcional
+  final List<DebtPayment> payments;
+  int get paidCents;              // soma de payments
+  int get remainingCents;         // max(0, amountCents − paidCents)
+  bool get settled;               // remainingCents == 0 ("quitado" é derivado; não há flag gravada)
+  int remainingAt(DateTime d);    // dateOnly(d) < date → 0; senão max(0, amountCents − soma dos pagamentos com date <= d)
+  Debt withPayment(DebtPayment p);
+  Debt withoutPayment(String paymentId);
+  // copyWith (description e dueDate com _keep), toMap ('payments' lista de mapas; 'description'/'dueDate' só se não nulos),
+  // fromMap tolerante (payments ausente/inválido → [], item inválido ignorado); ==/hashCode (lista elemento a elemento)
+}
+```
+
+## 5. Regras financeiras (domínio puro)
+
+### 5.1 Ciclo de fatura — `features/cards/domain/invoice_cycle.dart`
+Convenção: compra **no dia do fechamento ou depois** vai para a próxima fatura.
+```dart
+YearMonth closingMonthFor(DateTime purchase, int closingDay);
+  // closing = YearMonth.fromDate(purchase).dateAt(closingDay)
+  // purchase.day < closing.day ? mês da compra : mês seguinte
+YearMonth invoiceDueMonth(DateTime purchase, PaymentCard card);
+  // c = closingMonthFor(...); card.dueDay > card.closingDay ? c : c.next()
+DateTime invoiceClosingDate(YearMonth dueMonth, PaymentCard card);
+  // (dueDay > closingDay ? dueMonth : dueMonth.prev()).dateAt(closingDay)
+DateTime invoiceDueDate(YearMonth dueMonth, PaymentCard card); // dueMonth.dateAt(dueDay)
+```
+Exemplo: fecha 5, vence 12. Compra 04/11 → fatura vence 12/11. Compra 05/11 → vence 12/12.
+Fecha 25, vence 5. Compra 24/11 → vence 05/12. Compra 25/11 → vence 05/01.
+
+**Histórico de ciclo (Fase 5).** Mudar fechamento/vencimento vale a partir de uma data, sem reescrever faturas passadas
+(senão pagamentos antigos, ligados por `invoiceKey`, cairiam em faturas erradas e reabririam faturas quitadas).
+Assinaturas finais:
+```dart
+YearMonth invoiceDueMonth(DateTime purchase, PaymentCard card);
+  // sem histórico: regra acima. Com histórico: linha de fechamentos (abaixo, Fase 6)
+DateTime invoiceClosingDate(YearMonth dueMonth, PaymentCard card, {DateTime? cycleDate});
+DateTime invoiceDueDate(YearMonth dueMonth, PaymentCard card, {DateTime? cycleDate});
+  // com histórico: datas do fechamento do mês (regra 7 abaixo); fallback c = card.cycleOn(cycleDate ?? dueMonth.firstDay)
+DateTime purchaseDueDate(DateTime purchase, PaymentCard card);
+  // vencimento do fechamento que recebe a compra (regra 8 abaixo)
+```
+Sem histórico, `cycleOn` devolve sempre o ciclo atual → comportamento idêntico ao anterior (testes de T-006 passam sem mudança).
+
+**Linha de fechamentos e fatura de transição (Fase 6, T-044 — substitui a fusão de faturas).**
+Com `cycleHistory` não vazio, a fatura é o período entre dois fechamentos consecutivos, como no banco.
+A data efetiva (`until`) de uma mudança significa "o primeiro fechamento no dia novo é o primeiro em ou após esta data".
+1. **Segmentos.** `cycleHistory[i]` vale em `[cycleHistory[i-1].until, cycleHistory[i].until)` (o 1º, desde sempre);
+   o ciclo atual (`closingDay`/`dueDay`) vale em `[último until, ∞)`.
+2. **Fechamentos de um segmento** `(cl, du)`: para cada mês `m`, `C = m.dateAt(cl)`, mantido se `from <= C < until`.
+   Vencimento de `C`: `dueMonth = du > cl ? YearMonth.fromDate(C) : YearMonth.fromDate(C).next()`, `dueDate = dueMonth.dateAt(du)`.
+3. **Sequência.** Fechamentos de todos os segmentos em ordem crescente de data. **Descarta** o fechamento cujo
+   `dueMonth` seja `<=` o `dueMonth` do último fechamento mantido. Assim cada `dueMonth` tem no máximo um fechamento:
+   não existe fusão. A fatura de transição só fica com um período mais longo.
+4. **Compra/estorno** com data `d` → primeiro fechamento mantido `C` com `d < C` (compra no dia do fechamento vai para o próximo).
+   `invoiceDueMonth(d, card)` = `dueMonth` de `C`.
+5. **Fatura de transição** = a do primeiro fechamento mantido do segmento novo. Período: do último fechamento antigo
+   (exclusivo) até esse fechamento (exclusivo, pela regra 4). Os itens dela têm todos o mesmo vencimento.
+6. **Parcelas.** Parcela `i` de um grupo cuja 1ª parcela tem data `d1` → o fechamento mantido `i - 1` posições depois
+   do fechamento de `d1`. Sem histórico, equivale a `invoiceDueMonth(d1, card).addMonths(i - 1)`.
+7. **Datas da fatura.** `invoiceClosingDate`/`invoiceDueDate(M, card, {cycleDate})`: se existe fechamento mantido com
+   `dueMonth == M` → sua data / seu vencimento (independem dos itens). Senão (mês sem fechamento, ex.: fatura só com
+   pagamento antigo) → regra anterior com `card.cycleOn(cycleDate ?? M.firstDay)`.
+8. `purchaseDueDate(d, card)` = vencimento do fechamento da regra 4 → sempre igual ao `dueDate` da fatura que recebe a compra.
+9. **Atalho:** histórico vazio → fórmulas originais (sem gerar sequência).
+10. **Janela de cálculo:** gere fechamentos de `min(mês(d), mês(cycleHistory.first.until)).addMonths(-1)` até
+    `mês(d).addMonths(n + 2)` (`n` = parcelas à frente; 0 para compra simples). A janela começa antes da primeira
+    fronteira, então contém todas as fronteiras anteriores a `d`; dentro de um segmento os `dueMonth` só crescem, logo o
+    descarte dá o mesmo resultado que a sequência completa.
+
+Exemplos (todas as datas de 2026, salvo indicação):
+- Fecha 5/vence 12 → fecha 25/vence 5 a partir de 01/12. Fechamentos: …05/11 (nov), 25/12 (jan/2027), 25/01/2027 (fev).
+  Compra 04/11 → `2026-11`, vence 12/11. Compras 20/11 e 02/12 → `2027-01`, vence 05/01/2027 (fatura de transição 05/11–25/12).
+  Não existe fatura `2026-12`. Parcelado 3x com 1ª em 15/10 → `2026-11`, `2027-01`, `2027-02`.
+  Pagamento com `invoiceKey` `2026-11` continua quitando nov.
+  Pagamento com `invoiceKey` `2026-12` (sem fechamento mantido) → `invoiceMonthForKey` = `2027-01`: abate a fatura de transição.
+- Fecha 5/vence 12 → fecha 20/vence 27 a partir de 15/11. Fechamento 20/11 venceria em nov (= nov do 05/11) → descartado.
+  Compras 04/11 → nov (12/11). Compras 10/11 e 16/11 → `2026-12`, fecha 20/12, vence 27/12 (transição 05/11–20/12).
+  `invoiceDueDate(2026-12)` = 27/12 com ou sem itens.
+- Fecha 25/vence 5 → fecha 5/vence 12 a partir de 01/12. 25/11 → dez (05/12). 05/12 venceria em dez → descartado.
+  Compra 24/11 → `2026-12` (05/12). Compra 28/11 → `2027-01`, fecha 05/01/2027, vence 12/01/2027.
+
+11. **Pagamento (`invoicePayment`) com `invoiceKey` K** → `invoiceMonthForKey(K, card)`: se K tem fechamento mantido, K;
+    senão, `dueMonth` do primeiro fechamento mantido posterior ao fim do mês K-1 (= o primeiro com vencimento > K).
+    Assim o pagamento abate a fatura de transição e não vira fatura só de pagamento. Sem histórico, K.
+
+### 5.2 Fatura — `features/cards/domain/invoice.dart`
+```dart
+enum InvoiceStatus { open, closed, paid, overdue }
+class Invoice {
+  PaymentCard card; YearMonth dueMonth; DateTime closingDate; DateTime dueDate;
+  List<Transaction> items;   // compras/estornos (inclui projetados), ordenados por data
+  int chargesCents; int creditsCents; int paidCents;
+  int get totalCents => chargesCents - creditsCents;
+  int get remainingCents => max(0, totalCents - paidCents);
+  String get id => '${card.id}_${dueMonth.key}';
+  InvoiceStatus statusOn(DateTime today);
+    // remaining == 0 → paid; today > dueDate → overdue; today >= closingDate → closed; senão open
+}
+class InvoiceService {
+  static List<Invoice> build({
+    required PaymentCard card,
+    required Iterable<Transaction> transactions, // todas; filtra por cardId
+    Iterable<Transaction> projected = const [],  // recorrências futuras do cartão
+  }); // agrupa expense(+)/income(-) por invoiceDueMonth; invoicePayment soma em paidCents pelo invoiceMonthForKey(invoiceKey) (§5.1 regra 11); ordena por dueMonth
+  static int usedLimitCents(Iterable<Invoice> invoices, DateTime today);
+    // soma remainingCents das faturas com status != paid (inclui parcelas futuras)
+  static Invoice? currentInvoice(Iterable<Invoice> invoices, DateTime today);
+    // fatura não paga mais antiga (inclusive vencida); se todas pagas, null
+}
+```
+Só cartões `credit` têm faturas.
+Datas da fatura com histórico de ciclo (Fase 6): `closingDate`/`dueDate` = `invoiceClosingDate`/`invoiceDueDate(dueMonth, card, cycleDate: …)`
+pela regra 7 do §5.1. `cycleDate` (maior `t.date` dos itens; sem itens, `dueMonth.firstDay`) só é usado quando o mês não tem fechamento.
+Mês das parcelas: `installmentDueMonth(dataDa1ª, index, card)` (§5.1 regra 6), exposto em `invoice_cycle.dart`:
+```dart
+YearMonth installmentDueMonth(DateTime firstDate, int index, PaymentCard card); // index 1-based
+```
+
+### 5.3 Parcelas — `features/transactions/domain/installments.dart`
+```dart
+List<Transaction> buildInstallments({required Transaction base, required int count, required String groupId});
+  // count >= 1. valor = base.amountCents ~/ count; resto somado à 1ª parcela.
+  // parcela i (1..count): id '${groupId}_$i', date = addMonthsClamped(base.date, i-1),
+  // installmentGroupId = groupId, installmentIndex = i, installmentCount = count.
+  // soma das parcelas == base.amountCents (teste obrigatório)
+```
+
+### 5.4 Recorrência — `features/recurring/domain/recurrence.dart`
+```dart
+List<DateTime> occurrencesBetween(RecurringRule r, DateTime from, DateTime to);
+  // inclusivo; respeita startDate/endDate; monthly: dia de startDate limitado ao mês
+  // (31 → 28/29/30, sem "deslizar"); weekly: start + 7k; yearly: mesmo dia/mês limitado.
+String occurrenceId(RecurringRule r, DateTime date); // '${r.id}_${dateKey(date)}'
+List<Transaction> occurrenceTransactions(
+  RecurringRule r, DateTime from, DateTime to, Set<String> existingIds,
+  {required bool forProjection});
+  // gera Transaction com id = occurrenceId, recurringId = r.id, copia campos.
+  // pula ids em existingIds. r.active == false → [].
+  // status: cardId != null → paid. Conta: forProjection → planned;
+  // materialização (forProjection: false) → paid se date < to && !isBoleto, senão planned
+  // (boleto exige confirmação; ocorrência de hoje fica provisionada).
+```
+No boot e na virada de dia (`materializeRecurring`): materializa ocorrências de
+`max(startDate, materializedUntil + 1 dia)` até **ontem** (`forProjection: false`, `to = ontem + 1 dia`
+para a regra de status → tudo < hoje), grava, e atualiza `materializedUntil = ontem`.
+A ocorrência de hoje em diante aparece só pela projeção. Ocorrências futuras **não** são gravadas: entram na previsão via projeção.
+
+### 5.5 Saldos — `features/accounts/domain/balances.dart`
+```dart
+Map<String, int> accountBalances({
+  required Iterable<Account> accounts,
+  required Iterable<PaymentCard> cards,
+  required Iterable<Transaction> transactions,
+}); // initialBalance + efeitos de transações paid:
+    // income(account) +, expense(account) -, expense/income em cartão de débito → conta do cartão,
+    // transfer: origem -, destino +, invoicePayment: origem -.
+    // cartão de crédito não afeta conta (só via invoicePayment).
+int signedEffectOn(String accountId, Transaction t, Map<String, PaymentCard> cardsById);
+```
+
+### 5.6 Categorias — `features/categories/domain/category_spending.dart`
+```dart
+Map<String?, int> spendingByCategory(Iterable<Transaction> txs, YearMonth month, {bool includePlanned = false});
+  // só expense; por data da compra (cartão incluso); chave null = sem categoria
+class BudgetStatus { TransactionCategory category; int spentCents; int budgetCents; double get ratio; bool get exceeded; }
+List<BudgetStatus> budgetStatuses(Iterable<TransactionCategory> cats, Map<String?, int> spending, {CategoryTree? tree});
+  // só categorias com monthlyBudgetCents != null && > 0, ordenadas por ratio desc
+```
+**Orçamento com subcategorias (Fase 10).** `spending` continua por categoria **própria** (sem agregar). Com `tree`:
+- categoria raiz (inclusive raiz sem filhas): `spentCents = tree.rollUp(spending)[c.id] ?? 0` → **o orçamento do pai cobre o gasto do pai + de todas as filhas**;
+- subcategoria (vínculo válido): `spentCents = spending[c.id] ?? 0` (orçamento próprio, opcional, só do gasto dela).
+Não há regra de soma entre orçamentos (a filha pode ter orçamento sem o pai ter, e a soma das filhas pode passar a do pai). Sem `tree` → comportamento anterior.
+Exemplo: Alimentação (orçamento 100000) com filhas Mercado (orçamento 60000) e Restaurante; gasto direto em Alimentação 10000, Mercado 50000,
+Restaurante 30000 → Alimentação `spent 90000` (ratio 0.9), Mercado `spent 50000` (ratio ≈ 0.83).
+
+### 5.7 Previsão — `features/forecast/domain/forecast.dart`
+```dart
+enum ForecastEventKind { income, expense, boleto, invoice, transfer }
+class ForecastEvent {
+  DateTime date; int amountCents;  // com sinal (+ entra, - sai) do ponto de vista de accountId
+  String description; String? accountId; String? toAccountId;
+  ForecastEventKind kind; String sourceId; bool isProjected; // true = vindo de recorrência
+}
+class ForecastMonth { YearMonth month; int incomeCents; int expenseCents; int invoiceCents; int endBalanceCents; }
+class DailyBalance { DateTime date; int balanceCents; }
+class Forecast {
+  DateTime today; Map<String, int> currentBalances; int currentTotalCents;
+  List<ForecastEvent> events;          // ordenado por data
+  List<ForecastMonth> months;          // mês atual + (months-1) seguintes
+  List<DailyBalance> daily;            // um ponto por dia de today até o fim, saldo consolidado
+  DateTime? firstNegativeDate;         // consolidado
+  Map<String, DateTime> accountNegativeDates;
+  int get lowestBalanceCents;
+}
+class ForecastService {
+  static Forecast compute({
+    required List<Account> accounts, required List<PaymentCard> cards,
+    required List<Transaction> transactions, required List<RecurringRule> recurring,
+    required DateTime today, int months = 6,
+    int minDays = 0, // Fase 6 (T-041): horizonte cobre pelo menos today + minDays
+    Iterable<ForecastEvent> extraEvents = const [], // Fase 11: eventos prontos de fora (dívidas "devo", §5.25)
+  });
+}
+```
+Algoritmo:
+1. `currentBalances` = `accountBalances(...)` (contas não arquivadas); `currentTotal` = soma.
+2. Horizonte: `today` até `end` = o mais tarde entre `YearMonth.fromDate(today).addMonths(months - 1).lastDay` e
+   `DateTime(today.year, today.month, today.day + minDays)`. `months` continua com exatamente `months` entradas
+   (eventos após o último mês entram em `events`/`daily`, mas não em `months`). `minDays = 0` → comportamento anterior.
+3. Eventos:
+   - Transações `planned` de conta (income/expense/transfer, inclusive débito) com data ≤ fim. Atrasadas (data < today) entram **em today**. `isBoleto` → kind `boleto`.
+   - Recorrências: `occurrenceTransactions(r, today, fim, idsExistentes, forProjection: true)`. De conta → evento (`isProjected: true`). De cartão de crédito → vão para `projected` da fatura.
+   - Faturas: para cada cartão de crédito, `InvoiceService.build(card, transactions, projected)`; cada fatura com `remainingCents > 0` e `dueDate ≤ fim` gera evento `invoice` de `-remaining` em `max(dueDate, today)` na conta `card.paymentAccountId` (pode ser `null`: conta só no consolidado).
+   - Extras (Fase 11): cada `e` de `extraEvents` com `dateOnly(e.date) > fim` é ignorado; os demais entram como `ForecastEvent` novo com os
+     mesmos campos e `date = max(dateOnly(e.date), today)` (atrasado cai em hoje). `accountId` é copiado como está (`null` = só no consolidado).
+     `extraEvents` vazio → comportamento anterior.
+4. `transfer` não entra em income/expense mensal e tem efeito zero no consolidado.
+5. `months[i]`: soma por mês de eventos; `endBalanceCents` = saldo consolidado no último dia do mês.
+6. `daily`: saldo consolidado acumulado dia a dia; `firstNegativeDate` = primeiro dia < 0.
+   `accountNegativeDates` análogo por conta.
+Desempenho: O(n) sobre transações por cartão (agrupe por `cardId` uma vez).
+
+### 5.8 Insights de cartão — `features/cards/domain/card_insights.dart` (Fase 5)
+```dart
+class CardPurchaseOption {
+  const CardPurchaseOption({required this.card, required this.dueDate, required this.daysUntilDue, required this.freeLimitCents});
+  final PaymentCard card;
+  final DateTime dueDate;      // purchaseDueDate(today, card)
+  final int daysUntilDue;      // dias corridos today → dueDate (calcule com DateTime.utc para evitar horário de verão)
+  final int freeLimitCents;    // card.limitCents - usado (pode ser <= 0; limite 0 = não informado)
+  bool get hasLimit => freeLimitCents > 0;
+}
+List<CardPurchaseOption> bestCardsToBuy({
+  required Iterable<PaymentCard> cards,
+  required Map<String, int> usedLimitByCard, // ausente → 0
+  required DateTime today,
+});
+  // só kind == credit && !archived. Ordem: hasLimit (true antes), daysUntilDue desc,
+  // freeLimitCents desc, card.name asc.
+
+class InstallmentCommitment {
+  const InstallmentCommitment({required this.month, required this.byCard});
+  final YearMonth month;            // mês de vencimento da fatura
+  final Map<String, int> byCard;    // cardId → centavos; omite cartões com 0
+  int get totalCents;               // soma de byCard
+}
+List<InstallmentCommitment> installmentCommitments({
+  required Iterable<Invoice> invoices, // faturas de todos os cartões de crédito
+  required YearMonth from,
+  int months = 12,
+});
+  // exatamente `months` entradas (from .. from+months-1), inclusive zeradas.
+  // por fatura com dueMonth no intervalo: soma itens com installmentGroupId != null
+  // (expense +, income −) em byCard[invoice.card.id]. Ignora pagamentos e itens sem grupo
+  // (compras à vista e recorrências projetadas não são "compromisso de parcela").
+
+List<PaymentCard> cardsWithoutPaymentAccount(Iterable<PaymentCard> cards, Set<String> activeAccountIds);
+  // !archived && (paymentAccountId == null || !activeAccountIds.contains(paymentAccountId)); mantém ordem de entrada.
+```
+Exemplo (hoje 14/11/2026): A fecha 5/vence 12 → vence 12/12 (28 dias); B fecha 25/vence 5 → 05/12 (21);
+C fecha 20/vence 27 → 27/11 (13). Ordem A, B, C — exceto se A não tiver limite livre (vai para o fim).
+
+### 5.9 Linha do tempo de vencimentos e cobertura — `features/forecast/domain/invoice_timeline.dart` (Fase 5)
+```dart
+class InvoiceDue {
+  const InvoiceDue({required this.invoice, required this.date, required this.amountCents,
+                    this.accountId, this.accountBalanceAfterCents});
+  final Invoice invoice;
+  final DateTime date;                 // data do evento de previsão = max(invoice.dueDate, today)
+  final int amountCents;               // > 0 (remaining previsto)
+  final String? accountId;             // conta de pagamento ativa; null = sem conta (ou arquivada)
+  final int? accountBalanceAfterCents; // saldo previsto da conta ao FIM de `date`; null se accountId null
+  bool get overdue => invoice.dueDate.isBefore(date);
+  bool get hasAccount => accountId != null;
+  bool get uncovered => accountBalanceAfterCents != null && accountBalanceAfterCents! < 0;
+  bool get needsAttention => !hasAccount || uncovered;
+}
+List<InvoiceDue> invoiceTimeline({
+  required Forecast forecast,
+  required Iterable<Invoice> invoices, // para resolver ForecastEvent.sourceId == Invoice.id
+  int days = 60,
+});
+```
+Algoritmo (uma passada, O(eventos)):
+1. `limit = forecast.today + days` (inclusivo). Saldos por conta começam em `forecast.currentBalances`.
+2. Percorre `forecast.events` (já ordenados) agrupados por data; aplica **todos** os eventos do dia às contas
+   (`accountId != null`) e só então emite um `InvoiceDue` por evento `kind == invoice` do dia,
+   com `accountBalanceAfterCents = saldo[accountId]`. Para ao passar de `limit`.
+3. Evento cujo `sourceId` não está em `invoices` é ignorado. Saída na ordem dos eventos.
+Duas faturas no mesmo dia na mesma conta têm o mesmo saldo-após (fim do dia).
+`forecastMonths = 3` com hoje em 31/01 dá horizonte até 31/03 (59 dias): por isso o Ledger chama a previsão com
+`minDays: Ledger.invoiceTimelineDays` (60), garantindo que o limite inclusivo `today + 60` esteja no horizonte (Fase 6, T-041).
+
+### 5.10 Histórico mensal e variação — `features/accounts/domain/monthly_history.dart` (Fase 7)
+Alimenta delta vs. mês anterior e sparklines dos KPIs do Painel (só Modo Ultra).
+```dart
+class MonthSnapshot {
+  const MonthSnapshot({required this.month, required this.endBalanceCents, required this.expenseCents});
+  final YearMonth month;
+  final int endBalanceCents; // saldo consolidado das contas ativas ao fim do mês
+  final int expenseCents;    // despesas pagas do mês (regra de spendingByCategory, sem provisionados)
+}
+List<MonthSnapshot> monthlyHistory({
+  required Iterable<Account> accounts,
+  required Iterable<PaymentCard> cards,
+  required Iterable<Transaction> transactions,
+  required DateTime today,
+  int months = 6,
+}); // ordem cronológica; length == months; último = mês de today
+int expenseUntilDay(Iterable<Transaction> txs, YearMonth month, int day);
+double? deltaRatio(int previous, int current);
+```
+Regras:
+1. Contas ativas = `!archived` (mesma base de `Forecast.currentTotalCents`). Transações provisionadas nunca contam.
+2. `endBalanceCents` de mês passado = soma, nas contas ativas, de `initialBalanceCents` + `signedEffectOn` de toda transação não provisionada com `date <= month.lastDay`.
+   O **último** snapshot (mês atual) usa todas as transações não provisionadas, sem corte por data: fica igual a `Forecast.currentTotalCents` (o KPI "Saldo atual").
+3. `expenseCents` = soma de `spendingByCategory(txs, month).values`; no mês atual, só transações com `date <= today`.
+4. `expenseUntilDay(txs, month, day)`: despesas pagas do mês com `date.day <= min(day, month.daysInMonth)`. Usado para comparar o mês atual com o mesmo período do mês anterior.
+5. `deltaRatio(previous, current)`: `previous == 0` → `null`; senão `(current - previous) / previous.abs()` (ex.: 1000 → 1500 = 0.5; -1000 → -500 = 0.5; 1000 → 0 = -1.0).
+6. Custo O(T × meses) no pior caso; chamado só pelo Ledger (memoizado).
+
+### 5.11 Linha importada e parsers — `features/importing/domain/` (Fase 8)
+Tudo Dart puro. `package:csv` é permitido em `domain/` (é Dart puro).
+```dart
+// imported_line.dart
+class ImportedLine {
+  const ImportedLine({required this.row, required this.date, required this.description,
+    required this.amountCents, this.fitid, this.bankCategory});
+  final int row;             // 1-based: linha do arquivo (CSV) ou ordem do STMTTRN (OFX)
+  final DateTime date;       // dateOnly
+  final String description;  // trim, nunca vazia (vazia → erro da linha)
+  final int amountCents;     // com sinal: + entrada, − saída; nunca 0
+  final String? fitid;       // OFX
+  final String? bankCategory;// CSV, coluna de categoria (trim; vazia → null)
+}
+class ImportLineError { const ImportLineError(this.row, this.message); final int row; final String message; }
+class ImportParseResult { const ImportParseResult(this.lines, this.errors); final List<ImportedLine> lines; final List<ImportLineError> errors; }
+```
+
+**CSV — `csv_import.dart`:**
+```dart
+String decodeText(List<int> bytes);
+  // remove BOM UTF-8; tenta utf8.decode (allowMalformed: false); FormatException → latin1.decode.
+String guessDelimiter(String text);
+  // conta ';' ',' '\t' '|' fora de aspas nas 5 primeiras linhas não vazias; maior contagem vence; empate/nada → ';'
+List<List<String>> readCsv(String text, {required String delimiter});
+  // troca \r\n e \r por \n; CsvToListConverter(fieldDelimiter: delimiter, eol: '\n', shouldParseNumbers: false);
+  // células viram String (toString + trim); remove linhas totalmente vazias do fim.
+int? parseAmountCell(String raw, DecimalMark mark);
+DateTime? parseDateCell(String raw, DateOrder order);
+ImportParseResult parseCsvLines(List<List<String>> rows, ImportProfile profile);
+```
+`parseAmountCell` (sem `double`): trim; remove `R$`, espaços e U+00A0; negativo se começa com `-`, termina com `-`, está entre
+parênteses ou termina com `D` (débito; `C` = crédito, removido); `comma` → remove `.` e troca `,` por `.`; `dot` → remove `,`.
+Partes: inteira só dígitos; fração com 0–2 dígitos (3+ → arredonda meio-para-cima pelo 3º dígito). Inválido/vazio → `null`.
+Exemplos: `('-1.234,56', comma)` → `-123456`; `('1,234.56', dot)` → `123456`; `('(10,00)', comma)` → `-1000`; `('45,9 D', comma)` → `-4590`;
+`('R$ 7', comma)` → `700`; `('12,345', comma)` → `null` (fração com mais de 2 dígitos é inválida); `('abc', comma)` → `null`; `('', dot)` → `null`.
+`parseDateCell`: pega o 1º token antes de espaço ou `T` (descarta hora); separa por `/ . -`; exige 3 partes numéricas;
+ano com 2 dígitos → 2000+aa; valida (dia/mês reais: `DateTime(y, m, d)` com mesmo y/m/d). Inválida → `null`.
+`parseCsvLines`: pula `profile.skipRows` linhas; para cada linha restante (row = índice 1-based no arquivo):
+coluna ausente (linha curta) → erro `'Coluna ausente'`; data inválida → `'Data inválida'`; descrição vazia → `'Descrição vazia'`;
+valor: com `amountColumn`, `parseAmountCell`; com débito/crédito: débito preenchido → `-abs`, crédito → `+abs`, ambos → `crédito − débito`,
+nenhum → `'Valor inválido'`; valor `null` → `'Valor inválido'`; `invertSign` → nega; resultado 0 → `'Valor zero'`.
+Erro não interrompe: a linha vai para `errors` e o resto segue.
+
+**OFX — `ofx_parser.dart`** (SGML 1.x sem tags de fechamento e XML 2.x):
+```dart
+class OfxStatement { const OfxStatement({required this.isCreditCard, this.accountId, required this.result});
+  final bool isCreditCard; final String? accountId; final ImportParseResult result; }
+OfxStatement parseOfx(String text);
+```
+1. Busca sem diferenciar caixa. `isCreditCard` = existe `<CCSTMTRS>`. `accountId` = valor do 1º `<ACCTID>`.
+2. Blocos: de cada `<STMTTRN>` até `</STMTTRN>`, o próximo `<STMTTRN>` ou `</BANKTRANLIST>` (o que vier antes).
+3. Valor de uma tag `X` no bloco = texto após `<X>` até o próximo `<`, trim. Decodifica `&amp; &lt; &gt; &quot; &apos;`.
+4. `DTPOSTED`: 8 primeiros dígitos `yyyyMMdd` (ignora hora e `[-3:BRT]`); inválido → erro `'Data inválida'`.
+5. `TRNAMT`: sinal opcional; se tem `,` e `.`, o último é o decimal; só `,` → decimal vírgula; centavos sem `double`.
+   Inválido → `'Valor inválido'`; 0 → `'Valor zero'`. Sinal do OFX vale como está (negativo = saída, também em cartão).
+6. Descrição: `NAME` e `MEMO` não vazios; se um contém o outro (após `foldText`), usa o mais longo; senão `'NAME MEMO'`. Ambos vazios → `'Descrição vazia'`.
+7. `fitid` = `FITID` (vazio → null). `row` = posição do bloco (1-based). Arquivo sem `<OFX>` → `FormatException('Arquivo OFX inválido')`.
+
+### 5.12 Parcelas em linhas importadas — `features/importing/domain/import_installments.dart` (Fase 8)
+```dart
+typedef InstallmentMark = ({int index, int count});
+InstallmentMark? detectInstallment(String description);
+List<({int index, DateTime date})> importedInstallmentDates({
+  required DateTime lineDate, required int index, required int count,
+  required InstallmentDateMode mode, PaymentCard? card,
+}); // entradas index..count, em ordem; a 1ª é a própria linha importada
+```
+`detectInstallment` (sobre `foldText`), primeiro padrão que casar:
+1. `PARC(ELA)?\.?\s*(\d{1,2})\s*(/|DE)\s*(\d{1,2})` (ex.: "PARC 03/10", "PARCELA 3 DE 10", "PARC.03/10");
+2. `\b(\d{1,2})\s+DE\s+(\d{1,2})\b` (ex.: "03 DE 10");
+3. `(^|\s)(\d{1,2})/(\d{1,2})$` — só no **fim** da descrição e sem `/` antes do 1º número (evita datas "05/11/2026").
+Válido só se `1 <= index <= count`, `2 <= count <= 99`; senão `null`. Ex.: `'LOJA X PARC 03/10'` → (3,10); `'LOJA X 3/10'` → (3,10);
+`'LOJA X 03 DE 10'` → (3,10); `'LOJA X 15/11/2026'` → null; `'LOJA X 11/05'` → null (index > count); `'LOJA X 1/1'` → null (count < 2).
+Risco aceito: "LOJA 05/11" no fim vira parcela 5/11 — o usuário desliga na prévia.
+
+`importedInstallmentDates` (mês de fatura **só** via `invoice_cycle.dart`):
+- `base` = `mode == posting ? lineDate : addMonthsClamped(lineDate, index - 1)`.
+- Sem cartão de crédito (`card == null` ou `card.kind != credit`): `d_i = addMonthsClamped(base, i - index)`.
+- Cartão de crédito:
+  1. `alvo_k = posting ? invoiceDueMonth(lineDate, card) : installmentDueMonth(lineDate, index, card)`;
+  2. `ancora = invoiceClosingDate(alvo_k, card) − 1 dia`;
+  3. para `i` em `index..count`: `alvo_i = installmentDueMonth(ancora, i − index + 1, card)`;
+     `d_i = addMonthsClamped(base, i − index)`; se `invoiceDueMonth(d_i, card) != alvo_i` → `d_i = invoiceClosingDate(alvo_i, card) − 1 dia`.
+  Garante que cada parcela cai na fatura certa mesmo com fechamento em dia 29–31 e com histórico de ciclo
+  (o `InvoiceService` usa a data de cada item quando o grupo não tem a parcela 1).
+Exemplos (teste obrigatório): fecha 5/vence 12, posting, linha 08/11/2026 "PARC 03/10" → 8 datas, 1ª 08/11/2026 (fatura `2026-12`),
+2ª 08/12/2026 (`2027-01`), última 08/06/2027. Purchase, linha 15/09/2026 "PARC 03/10" → 1ª 15/11/2026 (`2026-12`).
+Fecha 31/vence 7, posting, linha 30/01/2027 "PARC 01/03" → 30/01/2027, **27/02/2027** (ajuste), 30/03/2027 (faturas fev, mar, abr de 2027).
+Histórico do §5.1 (fecha 5/vence 12 → fecha 25/vence 5 a partir de 01/12/2026), posting, linha 04/11/2026 "PARC 01/03" →
+faturas `2026-11`, `2027-01`, `2027-02`. Conta corrente, linha 10/01/2027 "3/4" → 10/01/2027, 10/02/2027.
+
+### 5.13 Categorização em cascata — `features/importing/domain/` (Fase 8)
+```dart
+// merchant_dictionary.dart (além de DictionaryEntry)
+List<DictionaryEntry> defaultDictionary(); // a partir de kDefaultDictionary; id = 'dict_' + pattern minúsculo com não-alfanum → '_'
+const List<(String, String)> kDefaultDictionary = [...]; // (pattern em foldText, nome da categoria)
+const Map<String, String> kDictionaryFallbacks = {'COMBUSTIVEL': 'TRANSPORTE'}; // foldText(nome) → foldText(nome)
+String? resolveCategoryByName(String name, Iterable<TransactionCategory> categories);
+  // Fase 10 (subcategorias), em ordem:
+  // 1. Caminho: name contém '›' ou '>' → partes = split por RegExp(r'[›>]') com trim, exatamente 2 não vazias:
+  //    raiz R com foldText(R.name) == foldText(partes[0]) (R.parentId == null) e filha F com F.parentId == R.id e
+  //    foldText(F.name) == foldText(partes[1]) → F.id. Não achou → segue com name = partes[1] (passo 2). Outro nº de partes → passo 2 com name inteiro.
+  // 2. Nome simples: candidatos = categorias com foldText(c.name) == foldText(name). Algum com parentId == null → o 1º deles (ordem de entrada);
+  //    senão exatamente 1 candidato → ele; 2+ subcategorias homônimas (pais diferentes) → ambíguo, segue para o passo 3.
+  // 3. kDictionaryFallbacks[foldText(name)] → repete o passo 2 com o nome do fallback; senão null.
+  // Sem nenhuma subcategoria, o resultado é idêntico ao da Fase 8.
+bool dictionaryPatternMatches(String pattern, String foldedDescription);
+  // contém `pattern` como palavra inteira: posição i com i == 0 ou caractere anterior fora de [A-Z0-9], e depois do padrão
+  // (aceitando um 'S' final opcional de plural) vem fim do texto ou caractere fora de [A-Z]. 'MERCADO' não casa 'MERCADOPAGO';
+  // marcas coladas (HBOMAX, DROGASIL...) entram no dicionário como entradas próprias.
+
+// category_history.dart
+class CategoryHistory {
+  factory CategoryHistory.build(Iterable<Transaction> transactions);
+  ({String categoryId, double share})? exact(String key);
+  ({String categoryId, double score})? similar(String key, {double threshold = 0.5});
+  static const CategoryHistory empty;
+}
+
+// categorizer.dart
+enum SuggestionSource { rule, bank, history, dictionary }
+class CategorizationResult {
+  const CategorizationResult({this.categoryId, this.source, this.confidence = 0, this.ruleId, this.renamedDescription});
+  final String? categoryId; final SuggestionSource? source; final double confidence; // 0..1
+  final String? ruleId;              // regra que deu a categoria
+  final String? renamedDescription;  // da 1ª regra ativa com renameTo
+  final List<String> tags;           // Fase 10: normalizeTags das tags de TODAS as regras ativas que casam, em ordem de prioridade; padrão const []
+  static const none = CategorizationResult();
+}
+class Categorizer {
+  Categorizer({required Iterable<TransactionRule> rules, required Iterable<TransactionCategory> categories,
+    required CategoryHistory history, required Iterable<DictionaryEntry> dictionary});
+  CategorizationResult categorize(String description, {required bool isIncome,
+    String? bankCategory, Map<String, String> bankCategoryMap = const {}});
+}
+String confidenceLabel(double c); // >= 0.8 'alta', >= 0.5 'média', senão 'baixa'
+```
+**Categoria permitida**: existe em `categories` e `kind == (isIncome ? income : expense)`. Sugestão não permitida é ignorada e a cascata segue.
+**Cascata** (para no 1º passo que der categoria permitida):
+1. **Regras** (`compileRules`, §5.14): percorre por prioridade; a 1ª que casa e tem `categoryId` permitido → `rule`, confiança 1.0, `ruleId`.
+   Independente da categoria, `renamedDescription` = `renameTo` da 1ª regra que casa com `renameTo` não vazio.
+2. **Banco** (coluna de categoria do CSV): `bankCategoryMap[foldText(bankCategory)]` permitido → `bank`, 0.9;
+   senão `resolveCategoryByName(bankCategory)` permitido → `bank`, 0.7.
+3. **Histórico** (`key = normalizeDescription(description)`, não vazia): `exact` → `history`, `0.5 + 0.4 × share`;
+   senão `similar` → `history`, `0.6 × score`.
+4. **Dicionário**: entre as entradas que casam (`dictionaryPatternMatches(entry.pattern, foldText(description))`) com categoria
+   resolvida e permitida, vence o `pattern` mais longo (empate: ordem da lista) → `dictionary`, 0.5.
+5. Nada → `categoryId: null, source: null, confidence: 0` (mantendo `renamedDescription` e `tags`).
+`tags` (Fase 10) é calculado no passo 1 independentemente da categoria (como `renamedDescription`) e vale em todos os resultados.
+Construtor pré-compila regras, resolve as categorias do dicionário uma vez e ordena entradas por tamanho desc.
+
+**`CategoryHistory.build`**: considera só `expense`/`income` com `categoryId != null`; `key = normalizeDescription(ruleSubject(t))`;
+chave vazia é ignorada. Por chave: contagem por categoria e data mais recente por categoria. `exact(key)`: categoria mais
+frequente (empate → a de data mais recente; depois id asc), `share = contagem dela / total da chave`; chave ausente → null.
+Índice invertido `token → chaves` (tokens de `descriptionTokens`). `similar(key)`: candidatos = chaves que dividem algum token,
+ignorando tokens presentes em > 500 chaves; avalia no máximo 300 candidatos (tokens mais raros primeiro); melhor
+`jaccard >= threshold` (empate → maior total de ocorrências); devolve a categoria de `exact(candidato)` com `score = jaccard`.
+Custo: build O(T), consulta O(1) + O(candidatos limitados).
+
+**Dicionário embutido** (`kDefaultDictionary`, padrões genéricos; categorias por nome das categorias padrão do seed):
+- Transporte: `UBER`, `99APP`, `99 POP`, `99 TAXI`, `CABIFY`, `ESTACIONAMENTO`, `ESTAPAR`, `PEDAGIO`, `SEM PARAR`, `CONECTCAR`, `VELOE`, `METRO`, `BILHETE UNICO`.
+- Combustível (fallback Transporte): `POSTO`, `COMBUSTIVEL`, `IPIRANGA`, `SHELL`.
+- Alimentação: `IFOOD`, `RAPPI`, `RESTAURANTE`, `LANCHONETE`, `LANCHES`, `PADARIA`, `PANIFICADORA`, `PIZZARIA`, `BURGER`, `MCDONALDS`, `MC DONALDS`, `SUBWAY`, `STARBUCKS`, `CAFE`.
+- Mercado: `SUPERMERCADO`, `MERCADO`, `ATACADAO`, `ASSAI`, `CARREFOUR`, `PAO DE ACUCAR`, `HORTIFRUTI`, `SACOLAO`.
+- Saúde: `FARMACIA`, `DROGA`, `RAIA`, `PANVEL`, `PAGUE MENOS`, `HOSPITAL`, `CLINICA`, `LABORATORIO`, `ODONTO`.
+- Assinaturas: `NETFLIX`, `SPOTIFY`, `DISNEY`, `PRIME VIDEO`, `AMAZON PRIME`, `HBO`, `GLOBOPLAY`, `DEEZER`, `YOUTUBE PREMIUM`, `APPLE.COM`, `PARAMOUNT`, `CRUNCHYROLL`.
+- Compras: `MERCADOLIVRE`, `MERCADO LIVRE`, `AMAZON`, `SHOPEE`, `MAGALU`, `MAGAZINE LUIZA`, `ALIEXPRESS`, `SHEIN`, `AMERICANAS`, `CASAS BAHIA`, `RENNER`, `RIACHUELO`.
+- Contas e serviços: `CLARO`, `VIVO`, `TELEFONICA`, `ENERGIA`, `SANEAMENTO`, `AGUA`, `INTERNET`, `ANUIDADE`, `TARIFA`, `IOF`, `SEGURO`.
+- Moradia: `ALUGUEL`, `CONDOMINIO`, `IPTU`.
+- Educação: `ESCOLA`, `COLEGIO`, `FACULDADE`, `UNIVERSIDADE`, `CURSO`, `UDEMY`, `ALURA`, `LIVRARIA`.
+- Lazer: `CINEMA`, `CINEMARK`, `INGRESSO`, `STEAM`, `PLAYSTATION`, `XBOX`, `TEATRO`.
+- Viagem: `HOTEL`, `POUSADA`, `AIRBNB`, `BOOKING`, `DECOLAR`, `LATAM`, `AZUL LINHAS`, `GOL LINHAS`, `PASSAGEM`.
+- Salário: `SALARIO`, `PROVENTOS`. Rendimentos: `RENDIMENTO`, `DIVIDENDOS`.
+"Mais longo vence" resolve `MERCADO LIVRE` (Compras) × `MERCADO` (Mercado) e `AMAZON PRIME` × `AMAZON`.
+
+### 5.14 Motor de regras — `features/rules/domain/rule_engine.dart` (Fase 8)
+```dart
+String ruleSubject(Transaction t); // t.importedDescription ?? t.description
+bool isValidRulePattern(String pattern, RuleMatchType type); // trim vazio → false; regex: compila sem erro
+class CompiledRule {
+  CompiledRule(this.rule);       // compila a regex uma vez; regex inválida → nunca casa
+  final TransactionRule rule;
+  bool matches(String description);
+  // contains/startsWith: foldText(description) contém / começa com foldText(pattern.trim()); pattern vazio → false
+  // regex: RegExp(pattern, caseSensitive: false).hasMatch(description) (texto original)
+}
+List<CompiledRule> compileRules(Iterable<TransactionRule> rules); // só active; priority asc, empate id asc
+List<TransactionRule> reorderRules(List<TransactionRule> ordered); // priority = índice na lista (0..n-1)
+List<Transaction> matchingTransactions(TransactionRule rule, Iterable<Transaction> txs);
+  // expense/income cujo ruleSubject casa (ignora `active`, para "testar padrão"); ordem de entrada
+List<Transaction> reapplyRules(List<CompiledRule> compiled, Iterable<Transaction> txs, {
+  required Map<String, TransactionCategory> categoriesById, bool overwriteCategory = false});
+```
+`reapplyRules` devolve **só** as transações que mudam (cópias). Só `expense`/`income`. Categoria: 1ª regra que casa com `categoryId`
+existente e de `kind` compatível com o tipo; aplica se `t.categoryId == null || overwriteCategory` e for diferente.
+Descrição: 1ª regra que casa com `renameTo` não vazio; se `t.description != renameTo` → `description = renameTo` e
+`importedDescription = t.importedDescription ?? t.description` (o texto original fica guardado e a regra continua casando).
+Tags (Fase 10): `merged = normalizeTags([...t.tags, ...tags de todas as regras que casam, em ordem])`; se `merged` tem mais itens que `t.tags` →
+`tags = merged` (só acrescenta; tag já presente, mesmo com outra caixa, não conta como mudança). Continua idempotente.
+
+### 5.15 Duplicatas e casamentos — `features/importing/domain/import_matcher.dart` (Fase 8)
+```dart
+enum ImportFlag { fitidDuplicate, probableDuplicate, existingInstallment, sameNameAmount, invoicePaymentLike }
+class ImportMatch {
+  const ImportMatch({this.flags = const {}, this.duplicateOf, this.plannedMatch});
+  final Set<ImportFlag> flags;
+  final Transaction? duplicateOf;  // existente que motivou fitid/probable/existingInstallment
+  final Transaction? plannedMatch; // provisionado a confirmar
+}
+class ImportMatcher {
+  ImportMatcher(Iterable<Transaction> existing); // monta os índices uma vez: O(T)
+  ImportMatch match(ImportedLine line, {String? accountId, String? cardId, InstallmentMark? installment});
+}
+final RegExp kInvoicePaymentPattern; // sobre foldText: \b(PAG(TO|AMENTO)?|PGTO)\s+(DE\s+)?(FATURA|CARTAO)\b|\bPAGAMENTO\s+(RECEBIDO|EFETUADO)\b
+```
+`origem` = `'${accountId ?? ''}|${cardId ?? ''}'`; tipo da linha = `amountCents < 0 ? expense : income`; `valor = abs(amountCents)`.
+Índices (só transações `expense`/`income`): `fitid` por `origem|externalId`; balde `origem|tipo|valor` → lista;
+parcelas `origem|index/count|valor` → lista; `normalizeDescription(ruleSubject)|valor` → contagem (qualquer origem e data).
+O matcher é **com estado**: uma transação existente casa com no máximo uma linha (conjunto de ids consumidos), na ordem do arquivo.
+Precedência (a primeira que casar define `duplicateOf`/`plannedMatch`):
+1. `fitidDuplicate`: `line.fitid != null` e existe `origem|fitid` → flag (consome).
+2. `existingInstallment`: `installment != null` e existe não consumida em `origem|index/count|valor` com `similarDescriptions` → flag (consome).
+3. `probableDuplicate`: no balde, transação **paga** não consumida com `|data − line.date| <= 1 dia` e `similarDescriptions(line.description, ruleSubject(t))` → flag (consome).
+4. Casamento com provisionado: no balde, transação `planned` não consumida com `|data − line.date| <= 5 dias` (descrição não importa: boleto
+   costuma vir com outro texto); escolhe a de menor distância (empate: menor id) → `plannedMatch` (consome). Sem flag.
+Aditivas (não consomem): `sameNameAmount` se nenhuma das 1–3 casou, a chave normalizada não é vazia e o índice de nome+valor tem
+contagem > 0; `invoicePaymentLike` se `kInvoicePaymentPattern` casa com `foldText(line.description)`.
+Linhas iguais dentro do mesmo arquivo **não** são marcadas entre si (dois cafés no mesmo dia são legítimos).
+Custo: O(T) para montar + O(tamanho do balde) por linha. Diferença de dias calculada com `DateTime.utc` (sem horário de verão).
+
+### 5.16 Sessão de prévia e plano de importação — `features/importing/domain/import_session.dart` (Fase 8)
+```dart
+class ImportTarget { const ImportTarget({this.accountId, this.cardId}); final String? accountId, cardId; } // exatamente um
+class ImportRow {
+  final ImportedLine line;
+  final TransactionType type;          // expense (amount < 0) | income
+  final bool include;
+  final String finalDescription;       // renamedDescription da regra ?? line.description
+  final String? categoryId;
+  final CategorizationResult suggestion;
+  final bool categoryEdited;           // usuário escolheu a categoria (recategorize não mexe)
+  final ImportMatch match;
+  final InstallmentMark? installment;
+  final bool createInstallments;
+  bool get confirmsPlanned => match.plannedMatch != null;
+  bool get hasWarning => match.flags.isNotEmpty;
+  ImportRow copyWith({bool? include, Object? categoryId = _keep, bool? categoryEdited, bool? createInstallments,
+    String? finalDescription, CategorizationResult? suggestion});
+}
+class ImportSession {
+  factory ImportSession.build({required List<ImportedLine> lines, required ImportTarget target, PaymentCard? card,
+    required Categorizer categorizer, required ImportMatcher matcher, Map<String, String> bankCategoryMap = const {}});
+  final List<ImportRow> rows;          // ordem do arquivo; imutável
+  ImportSession setInclude(int i, bool value);
+  ImportSession setAllIncluded(bool value);
+  ImportSession setCategory(int i, String? categoryId);      // marca categoryEdited = true
+  ImportSession setCreateInstallments(int i, bool value);    // ignorado se a linha não tem parcela
+  ImportSession recategorize(Categorizer categorizer, {Map<String, String> bankCategoryMap = const {}});
+    // linhas com categoryEdited == false recebem nova sugestão (categoria e finalDescription)
+  List<int> uncategorizedIndices();    // categoryId == null (ordem)
+  ({int create, int confirm, int skipped, int futureInstallments}) get summary;
+}
+class ImportPlan { const ImportPlan({required this.create, required this.update}); final List<Transaction> create, update; }
+ImportPlan buildImportPlan(ImportSession session, {required ImportTarget target, PaymentCard? card,
+  required DateTime today, InstallmentDateMode mode = InstallmentDateMode.posting, String Function() idGenerator = newId});
+  // idGenerator: tear-off de core/utils/id.dart (testes injetam ids determinísticos)
+Map<String, String> learnedBankCategories(ImportSession session);
+  // linhas incluídas com line.bankCategory não vazia e categoryId != null → foldText(bankCategory) → categoryId (última vence)
+```
+**Build**, por linha: tipo pelo sinal; `installment = detectInstallment(line.description)`; `match = matcher.match(...)`;
+`suggestion = categorizer.categorize(line.description, isIncome: tipo == income, bankCategory:, bankCategoryMap:)`;
+`categoryId = plannedMatch?.categoryId ?? suggestion.categoryId`.
+`include` padrão = **false** se `flags` contém `fitidDuplicate`, `probableDuplicate`, `existingInstallment` ou `invoicePaymentLike`; senão true
+(`sameNameAmount` continua marcada: só pede confirmação). `createInstallments` padrão = `installment != null && installment.index < installment.count
+&& !flags.contains(existingInstallment) && plannedMatch == null`.
+`summary`: `create` = incluídas sem `plannedMatch`; `confirm` = incluídas com `plannedMatch`; `skipped` = não incluídas;
+`futureInstallments` = soma de `count − index` das incluídas com `createInstallments`.
+
+**Plano**, por linha incluída (linhas não incluídas não geram nada):
+- `plannedMatch != null` → `update`: `plannedMatch.copyWith(status: paid, date: line.date, externalId: line.fitid ?? plannedMatch.externalId,
+  importedDescription: line.description, categoryId: plannedMatch.categoryId ?? row.categoryId)` (descrição e valor do provisionado ficam).
+- Senão, base: `Transaction(id: idGenerator(), type, amountCents: abs, date: line.date, description: finalDescription, categoryId,
+  accountId/cardId do target, status: line.date > today ? planned : paid, externalId: line.fitid, importedDescription: line.description)`.
+- Com `installment` e `createInstallments`: `groupId = idGenerator()`; para cada `(i, d)` de `importedInstallmentDates(lineDate: line.date,
+  index, count, mode, card)`: id `'${groupId}_$i'`, data `d`, `installmentGroupId/Index/Count` preenchidos, valor = o da linha (cada parcela);
+  `i == index` é a linha importada (status pela regra acima, com `externalId`); `i > index` → `status: planned`, `externalId: null`.
+- Tags (Fase 10): toda transação criada (simples ou parcela do grupo) recebe `tags: row.suggestion.tags`; o `update` de provisionado recebe
+  `tags: normalizeTags([...plannedMatch.tags, ...row.suggestion.tags])`. `recategorize` atualiza `suggestion` (e portanto as tags) das linhas não editadas.
+- Com `installment` e `!createInstallments` → transação simples (sem campos de parcela).
+Gravação (camada de app): `transactions.upsertAll([...plan.create, ...plan.update])` — **um** notify.
+Desempenho (teste obrigatório): 2.000 linhas contra 10.000 transações existentes → `ImportSession.build` + `buildImportPlan` < 2 s em `flutter test`.
+
+### 5.17 Busca de transações — `features/transactions/domain/transaction_search.dart` (Fase 9)
+Usada pela paleta de comandos (Ctrl+K). Dart puro, sobre `core/utils/fuzzy.dart` e `parseMoney`.
+```dart
+class TransactionSearchIndex {
+  TransactionSearchIndex(Iterable<Transaction> transactions);
+    // dobra UMA vez por transação: foldText(description) + foldedWords, e foldText(importedDescription) + words se não nulo
+  List<Transaction> search(String query, {int limit = 20});
+}
+```
+Regras de `search`:
+1. `q = foldText(query)`; `q.length < 2` → `[]`. Tokens = `q.split(' ')` sem vazios.
+2. Token **de valor**: começa com dígito e `parseMoney(token) != null` → `cents = parseMoney(token)!.abs()`.
+3. Por transação e por token: `score = max(fuzzyTokenScore(token, descrição), fuzzyTokenScore(token, importedDescription),
+   4 se o token é de valor e cents == t.amountCents)` (nulos ignorados). Algum token sem score → transação fora. Total = soma.
+4. Ordena por total desc, `date` desc, `id` asc; `take(limit)`.
+5. Tags (Fase 10): o índice também dobra `foldText(t.tags.join(' '))` + `foldedWords` uma vez por transação. Token comum: o score passa a
+   considerar também `fuzzyTokenScore(token, tagsDobradas, palavrasDasTags)`. Token que começa com `#`: `k = token.substring(1)`; `k` vazio →
+   token ignorado; senão score 4 se algum `tagKey(tag)` de `t` começa com `k` (`tagKey`, §5.21), senão a transação sai (o `#` filtra só por tag).
+   Exemplos extras (teste obrigatório; t1 com tags `['Viagem']`, t2 com `['trabalho', 'Viagem SP']`): `search('#viag') == [t2, t1]`
+   (empate de score; t2 é mais recente); `search('#trab') == [t2]`; `search('#') == []` (nenhum token útil); `search('uber #trab') == [t2]`;
+   `search('viagem')` inclui t1 e t2.
+Exemplos (teste obrigatório; t1 `'UBER *TRIP'` 2315 05/11/2026; t2 `'Uber Eats'` 4590 10/11; t3 `'Padaria Pão Bom'` 1250 08/11 com
+`importedDescription 'PADARIA PAO BOM CURITIBA PR'`; t4 `'Mercado Exemplo'` 2315 01/11; t5 `'Netflix'` 5990 03/11):
+`search('uber') == [t2, t1]`; `search('23,15') == [t1, t4]`; `search('uber 23,15') == [t1]`; `search('curitiba') == [t3]`;
+`search('pao') == [t3]`; `search('u') == []`; `search('xyz') == []`; 30 transações `'LOJA n'` → `search('loja').length == 20`.
+Desempenho (teste obrigatório): 10.000 transações → construir o índice + 50 buscas < 1 s em `flutter test`.
+
+### 5.18 Operações em massa e edição inline — `features/transactions/domain/transaction_bulk.dart` (Fase 9)
+Regras financeiras das ações da multi-seleção e das células editáveis (Ultra). Dart puro; a UI só grava o resultado.
+```dart
+typedef BulkResult = ({List<Transaction> changed, int skipped});
+BulkResult bulkRecategorize(Iterable<Transaction> selected, TransactionCategory? category);
+  // Só expense/income. category null = limpar categoria. category.kind income → só income; expense → só expense.
+  // transfer/invoicePayment e kind incompatível → skipped. Já iguais: nem changed nem skipped. changed na ordem de entrada.
+BulkResult bulkConfirmPlanned(Iterable<Transaction> selected, DateTime paidOn);
+  // t.isPlanned → t.copyWith(status: paid, date: dateOnly(paidOn)); demais → skipped. Uma data para todos.
+  // Exceção (revisão da Fase 9): cartão (cardId != null) ou parcela → só status: paid, data mantida (não move a compra de fatura).
+Set<String> installmentGroupsOf(Iterable<Transaction> selected); // installmentGroupId não nulos
+Set<String> bulkDeleteIds(Iterable<Transaction> selected, Iterable<Transaction> all, {required bool wholeGroups});
+  // ids dos selecionados; wholeGroups → + ids de `all` com installmentGroupId ∈ installmentGroupsOf(selected)
+String? commonCategoryId(Iterable<Transaction> selected); // todas com a mesma categoria não nula → ela; senão (ou vazio) null
+bool canEditCategoryInline(Transaction t); // expense ou income
+bool canEditAmountInline(Transaction t);   // !t.isInstallment && (despesa ou receita); transferência e pagamento de fatura → false (revisão da Fase 9)
+int? parseInlineAmount(String input);      // parseMoney(input); null ou <= 0 → null (amountCents é sempre > 0)
+```
+Decisões de domínio:
+- **Valor de parcela não é editável inline.** O formulário já edita uma parcela isolada, com o aviso de grupo; inline mudaria uma parcela sem
+  o usuário ver o grupo. A célula de valor de parcela fica estática.
+- Edição inline de valor também fica desligada com `hideValues` (o campo revelaria o valor).
+- Excluir em massa respeita a regra de parcela (§6.3): se a seleção tem parcelas, o usuário escolhe "só as selecionadas" ou "grupos inteiros".
+  Recorrência materializada apagada não volta (já garantido por `materializedUntil`, §4.5).
+- Toda ação em massa grava com **um** `upsertAll` ou **um** `deleteWhere` (um notify).
+Exemplos (teste obrigatório; categorias `cat_mercado` expense e `cat_salario` income; a despesa sem categoria; b despesa `cat_mercado`;
+c receita sem categoria; d transferência; e/f despesas `planned` em conta; g/h/i parcelas 1/3, 2/3, 3/3 do grupo `g1`):
+`bulkRecategorize([a, b, c, d], cat_mercado)` → changed `[a']` (com `cat_mercado`), skipped 2; `bulkRecategorize([a, b, c], null)` → changed `[b']`
+sem categoria, skipped 0; `bulkRecategorize([c], cat_salario)` → changed `[c']`; `bulkConfirmPlanned([a, e, f], DateTime(2026, 11, 14, 15, 30))`
+→ e/f `paid` em 14/11/2026, skipped 1; `installmentGroupsOf([a, g]) == {'g1'}`; `bulkDeleteIds([a, g], todas, wholeGroups: false) == {a, g}`,
+com `true` → `{a, g, h, i}`; `canEditAmountInline(g) == false`; `canEditCategoryInline(d) == false`; `parseInlineAmount('12,50') == 1250`,
+`('1.234,56') == 123456`, `('R$ 10') == 1000`, `('0')`, `('-5')`, `('abc')` → `null`.
+
+### 5.19 Padrão de regra a partir da seleção — `features/rules/domain/rule_suggestion.dart` (Fase 9)
+```dart
+String suggestRulePattern(Iterable<String> subjects); // subjects = ruleSubject(t) das transações selecionadas
+```
+1. Para cada assunto: `f = foldText(s)`; tokens por `' '`; mantém os tokens até o primeiro que contém dígito ou é `PARC`/`PARCELA`/`PARCELADO`;
+   `k = join(' ')`; `k` vazio → `k = f`.
+2. `p` = maior prefixo comum (por caractere) de todos os `k`.
+3. Se algum `k` é mais longo que `p`, `p` termina em `[A-Z0-9]` e esse `k[p.length]` também é `[A-Z0-9]` (corte no meio de palavra) →
+   remove a sequência final de `[A-Z0-9]` de `p`.
+4. Remove do fim todo caractere fora de `[A-Z0-9]`; `trim`. Lista vazia → `''`.
+Invariante: resultado não vazio é prefixo de `foldText(s)` de **todos** os assuntos → regra `contains` (padrão do form) casa com toda a seleção.
+Exemplos (teste obrigatório): `['UBER *TRIP 8X7Y2 SAO PAULO BR']` → `'UBER *TRIP'`; `['UBER *TRIP 8X7Y2', 'UBER *EATS 123']` → `'UBER'`;
+`['IFOOD*RESTAURANTE X', 'IFOOD*PADARIA']` → `'IFOOD'`; `['LOJA EXEMPLO PARC 03/10', 'LOJA EXEMPLO PARC 04/10']` → `'LOJA EXEMPLO'`;
+`['MERCADO A', 'MERCADINHO B']` → `''`; `['Farmácia São João 0412']` → `'FARMACIA SAO JOAO'`; `['PADARIA PAO', 'PADARIA PAO BOM']` →
+`'PADARIA PAO'`; `['123456']` → `'123456'`; `[]` → `''`.
+
+### 5.20 Subcategorias — `features/categories/domain/category_tree.dart` (Fase 10)
+Dart puro. Índice da hierarquia de 1 nível, construído uma vez (memoizado no Ledger) e consultado em O(1).
+```dart
+const String kCategoryPathSeparator = ' › '; // U+203A com espaços
+class CategoryTree {
+  CategoryTree(Iterable<TransactionCategory> categories);
+  static final CategoryTree empty;                        // CategoryTree(const [])
+  TransactionCategory? byId(String id);
+  String? parentOf(String id);   // id do pai se o vínculo é válido (§4.3); senão null (raiz, órfã ou id desconhecido)
+  String rootOf(String id);      // parentOf(id) ?? id (id desconhecido → ele mesmo)
+  bool isRoot(String id);        // parentOf(id) == null
+  bool hasChildren(String id);
+  List<TransactionCategory> childrenOf(String id);       // filhas válidas, por foldText(name) asc; sem filhas → const []
+  List<TransactionCategory> roots(CategoryKind kind);    // raízes do kind (inclui as de vínculo inválido), por foldText(name) asc
+  List<TransactionCategory> options(CategoryKind kind);  // ordem de dropdown: cada raiz seguida das suas filhas
+  String label(String id);       // filha válida → '${pai.name}$kCategoryPathSeparator${name}'; raiz → name; desconhecido → ''
+  Map<String?, int> rollUp(Map<String?, int> spending);
+    // agrega no pai: para cada (k, v): k == null → soma em null; senão soma em rootOf(k). Chaves de filhas somem; ids desconhecidos
+    // (categoria apagada) ficam como estão. Soma total preservada.
+}
+String? categoryParentError({required String? id, required CategoryKind kind, required String? parentId,
+  required Iterable<TransactionCategory> categories});
+  // null = ok. Ordem: parentId == null → null; parentId == id → 'Uma categoria não pode ser pai dela mesma';
+  // pai inexistente → 'Categoria pai não encontrada'; pai.parentId != null → 'A categoria pai não pode ser uma subcategoria';
+  // pai.kind != kind → 'A categoria pai precisa ser do mesmo tipo'; id != null e alguma categoria tem parentId == id →
+  // 'Esta categoria tem subcategorias e não pode virar subcategoria'.
+```
+Exemplos (teste obrigatório; `ali` Alimentação expense raiz, `mer` Mercado expense pai `ali`, `res` Restaurante expense pai `ali`,
+`tra` Transporte expense raiz, `sal` Salário income raiz, `x` Órfã expense pai `zzz` (inexistente), `y` Neta expense pai `mer`):
+`label('mer') == 'Alimentação › Mercado'`; `label('ali') == 'Alimentação'`; `label('x') == 'Órfã'`; `label('y') == 'Neta'` (pai não é raiz → vínculo
+inválido → raiz); `label('nada') == ''`; `options(expense)` ids `[ali, mer, res, y, x, tra]` (raízes por nome: Alimentação, Neta, Órfã, Transporte;
+`foldText` ignora acento); `rollUp({'mer': 5000, 'res': 3000, 'ali': 1000, 'tra': 200, null: 50, 'apagada': 10})` ==
+`{'ali': 9000, 'tra': 200, null: 50, 'apagada': 10}`; `categoryParentError(id: 'ali', kind: expense, parentId: 'tra', ...)` → erro de "tem subcategorias";
+`(id: 'tra', parentId: 'mer')` → "não pode ser uma subcategoria"; `(id: 'tra', parentId: 'sal')` → "mesmo tipo"; `(id: 'tra', parentId: 'ali')` → null;
+`(id: null, parentId: 'ali')` (nova) → null.
+
+### 5.21 Tags — `features/transactions/domain/tags.dart` (Fase 10)
+Dart puro (usa `foldText`). Tags são texto livre; a chave de comparação ignora caixa e acento.
+```dart
+String? normalizeTag(String raw);
+  // remove ',' e ';'; trim; remove '#' iniciais (um ou mais); espaços internos colapsados em um; trim; vazio → null.
+  // Mantém a grafia digitada ('Viagem SP' continua 'Viagem SP').
+String tagKey(String tag);                      // foldText(tag) — 'viagem', 'Viagem', 'VIÁGEM' → 'VIAGEM'
+List<String> normalizeTags(Iterable<String> raw);
+  // normalizeTag em cada item; descarta null; sem duplicatas por tagKey (fica a 1ª grafia); mantém a ordem de entrada
+List<String> parseTagInput(String input);       // split por ',' ou ';' → normalizeTags
+bool hasAnyTag(Transaction t, Set<String> keys); // keys já em tagKey; keys vazio → true
+List<Transaction> bulkAddTags(Iterable<Transaction> selected, List<String> tags);
+  // t.copyWith(tags: normalizeTags([...t.tags, ...tags])) só nas que ganham alguma tag; ordem de entrada
+List<Transaction> bulkRemoveTags(Iterable<Transaction> selected, List<String> tags);
+  // remove por tagKey; só as que perdem alguma tag; ordem de entrada
+List<({String tag, int count})> tagUsage(Iterable<Transaction> txs);
+  // por tagKey: grafia = a 1ª encontrada na ordem de entrada; count = nº de transações; ordena count desc, depois tagKey asc
+```
+Exemplos (teste obrigatório): `normalizeTag('  #viagem ')` → `'viagem'`; `('##a,b')` → `'ab'`; `('  ')` → null; `('Viagem   SP')` → `'Viagem SP'`;
+`normalizeTags(['Viagem', 'viagem', ' VIÁGEM', 'trabalho', ''])` → `['Viagem', 'trabalho']`; `parseTagInput('viagem, trabalho;  #casa ,')` →
+`['viagem', 'trabalho', 'casa']`; `bulkAddTags([a(tags: ['x']), b(tags: [])], ['X', 'y'])` → `[a(['x', 'y']), b(['X', 'y'])]`;
+`bulkAddTags([a(['x'])], ['X'])` → `[]`; `bulkRemoveTags([a(['x', 'y']), b([])], ['X'])` → `[a(['y'])]`;
+`tagUsage([t(['Viagem']), t(['viagem', 'casa']), t(['Casa'])])` → `[(tag: 'casa', count: 2), (tag: 'Viagem', count: 2)]`
+(grafia = 1ª encontrada; empate de count → `tagKey` asc, `CASA` < `VIAGEM`).
+
+### 5.22 Metas — `features/goals/domain/goal_math.dart` (Fase 10)
+Dart puro. Regras de reserva e aporte (entidade em §4.9).
+```dart
+Map<String, int> reservedByAccount(Iterable<Goal> goals);
+  // só metas !archived; accountId → soma de reservedCents; omite contas com 0
+int availableToReserve({required String accountId, required int accountBalanceCents, required Iterable<Goal> goals});
+  // max(0, accountBalanceCents − (reservedByAccount(goals)[accountId] ?? 0)) — quanto ainda cabe reservar na conta
+String? contributionError({required int amountCents, required int availableCents});
+  // amountCents <= 0 → 'Informe um valor maior que zero'; amountCents > availableCents →
+  // 'Saldo livre na conta: ${formatMoney(availableCents)}'; senão null
+String? withdrawalError({required int amountCents, required Goal goal});
+  // amountCents <= 0 → 'Informe um valor maior que zero'; amountCents > goal.reservedCents →
+  // 'Reservado nesta meta: ${formatMoney(goal.reservedCents)}'; senão null
+String? removeMovementError(Goal goal, String movementId);
+  // goal.withoutMovement(movementId).rawReservedCents < 0 → 'Sem este aporte, as retiradas ficariam maiores que o reservado'; senão null
+int overReservedCents({required int accountBalanceCents, required int reservedCents});
+  // max(0, reservedCents − max(0, accountBalanceCents)) — quanto da reserva não tem saldo por trás
+int? monthlyContributionNeeded(Goal goal, DateTime today);
+  // targetDate == null → null; remainingCents == 0 → 0; months = (td.year − today.year) * 12 + td.month − today.month;
+  // months < 1 → 1 (data neste mês ou já passou: falta tudo agora); resultado = ceil(remainingCents / months) (inteiro: (r + m − 1) ~/ m)
+bool isGoalOverdue(Goal goal, DateTime today); // targetDate != null && dateOnly(today) > targetDate && !reached
+```
+**Regra "reservado nunca passa do saldo da conta":**
+1. Escrita: aporte só é aceito se `amount <= availableToReserve(...)` com o saldo **atual** da conta (`Ledger.accountBalances`, só transações pagas).
+   Retirada só até `reservedCents` da meta. Excluir um movimento é bloqueado se deixaria `rawReservedCents < 0`. Saldo negativo → nada a reservar.
+2. Leitura: o saldo pode cair depois (gastos). Se `reservado da conta > saldo`, a UI mostra aviso `warning` na meta e na conta:
+   "Reserva maior que o saldo da conta: faltam R$ X" (`overReservedCents`). Nada é ajustado automaticamente.
+3. No "posso gastar" (§5.23) a reserva efetiva por conta é limitada ao saldo positivo da conta (não desconta duas vezes o mesmo rombo).
+4. Meta arquivada libera a reserva (não entra em `reservedByAccount`). Meta de conta arquivada continua listada (com aviso "Conta arquivada"),
+   mas não entra no "posso gastar" (a conta não entra).
+Exemplos (teste obrigatório; hoje 15/11/2026): meta alvo 600000, aportes 100000 (01/10) e 50000 (01/11), retirada −30000 (05/11) → `reservedCents 120000`,
+`remainingCents 480000`, `progress 0.2`; data-alvo 15/05/2027 → `monthlyContributionNeeded == 80000` (6 meses); data-alvo 30/11/2026 → 480000;
+data-alvo 10/10/2026 → 480000 e `isGoalOverdue` true; sem data → null; alvo atingido → 0. `availableToReserve` com saldo 200000 e duas metas ativas
+na conta reservando 120000 e 50000 (+ uma arquivada com 999) → 30000; saldo −5000 → 0. `contributionError(amountCents: 30001, availableCents: 30000)`
+→ `'Saldo livre na conta: R$ 300,00'`. `removeMovementError` do aporte de 100000 → null (sobra 50000 − 30000 = 20000);
+do aporte de 50000 → null (sobra 70000); meta só com aporte 10000 e retirada −10000: remover o aporte → erro (sobraria −10000).
+`overReservedCents(accountBalanceCents: 80000, reservedCents: 120000) == 40000`; saldo −1000 e reservado 5000 → 5000.
+
+### 5.23 Posso gastar hoje — `features/forecast/domain/spendable.dart` (Fase 10)
+Prioridade nº 1 do produto. Dart puro; reaproveita os eventos da previsão (§5.7), então faturas, provisionados e recorrências seguem exatamente
+as regras que já valem na Previsão.
+```dart
+class SpendableToday {
+  const SpendableToday({required this.today, required this.untilDate, required this.days, this.nextIncomeDate,
+    this.nextIncomeDescription, required this.balanceCents, required this.invoicesCents, required this.plannedCents,
+    required this.reservedCents, required this.invoiceEvents, required this.plannedEvents});
+  final DateTime today;
+  final DateTime? nextIncomeDate;        // próxima ocorrência de receita recorrente; null = sem recorrência no horizonte
+  final String? nextIncomeDescription;   // descrição da regra que deu a data
+  final DateTime untilDate;              // limite (inclusivo) dos compromissos e data exibida "até dd/mm": nextIncomeDate ?? fim do mês
+  final int days;                        // dias de gasto: com receita, nextIncomeDate − today; sem, fimDoMês − today + 1 (sempre >= 1)
+  final int balanceCents;                // soma dos saldos atuais das contas ativas (forecast.currentBalances)
+  final int invoicesCents;               // >= 0, soma das faturas até untilDate
+  final int plannedCents;                // >= 0, soma dos provisionados/projetados até untilDate
+  final int reservedCents;               // >= 0, reserva efetiva das metas
+  final List<ForecastEvent> invoiceEvents, plannedEvents; // os eventos somados, em ordem de data (para o detalhamento)
+  int get freeCents => balanceCents - invoicesCents - plannedCents - reservedCents; // pode ser <= 0
+  int get perDayCents => freeCents <= 0 ? 0 : freeCents ~/ days;                  // centavos, arredonda para baixo
+  bool get overcommitted => freeCents <= 0;
+}
+SpendableToday spendableToday({
+  required Forecast forecast,                 // Ledger.forecast (horizonte >= hoje + 60 dias)
+  required Iterable<RecurringRule> recurring,
+  required Map<String, Account> accountsById,
+  required Map<String, int> reservedByAccount, // §5.22 (metas ativas)
+  required DateTime horizonEnd,               // ForecastService.horizonEnd(...) — o mesmo fim da previsão
+});
+```
+Regras (todas com datas `dateOnly`; dias por `DateTime.utc`):
+1. `today = forecast.today`.
+2. **Próxima receita**: regras com `active`, `type == income`, `cardId == null`, `accountId != null` e conta existente e `!archived`.
+   `nextIncomeDate` = menor data de `occurrencesBetween(r, today + 1 dia, horizonEnd)` entre elas (a ocorrência de **hoje não conta**: se a receita
+   de hoje já entrou, está no saldo; se não entrou, a conta é conservadora). Empate de data → descrição da 1ª regra na ordem de entrada.
+   Receitas provisionadas avulsas (sem recorrência) não definem a data e nunca somam no "livre".
+3. **untilDate / days**: com `nextIncomeDate` → `untilDate = nextIncomeDate`, `days = nextIncomeDate − today` (o dia da receita não é dia de gasto
+   com o dinheiro de hoje). Sem → `untilDate = YearMonth.fromDate(today).lastDay`, `days = untilDate − today + 1` (último dia do mês → 1).
+4. **Contas**: `balanceCents` = soma de `forecast.currentBalances` das contas não arquivadas **exceto `AccountType.investment`**
+   (dinheiro investido não é para gasto do dia a dia; decisão do usuário/orquestrador). Poupança, corrente, dinheiro e carteira entram;
+   saldo negativo soma negativo. `spendableToday` recebe as contas (ou o conjunto de ids elegíveis) para aplicar o filtro. Pode diferir
+   do KPI "Saldo atual" quando há conta de investimento. Reservas de metas em conta de investimento também ficam fora; faturas e
+   provisionados pagos por conta de investimento continuam entrando (são saídas reais).
+5. **Faturas** (`invoiceEvents`): eventos `kind == invoice` com `date <= untilDate`. O evento já é o **valor em aberto** (`remainingCents`) de
+   fatura não quitada, inclusive recorrências de cartão projetadas, e cai em `max(dueDate, today)` → vencidas entram. Vencimento no próprio dia da
+   receita **entra** (inclusivo).
+6. **Provisionados** (`plannedEvents`): eventos com `amountCents < 0`, `kind` em {`expense`, `boleto`} e `date <= untilDate`: despesas `planned` de
+   conta (inclusive débito; atrasadas já caem em hoje) e ocorrências projetadas de recorrência de despesa de conta. Entradas nunca entram.
+   Transferências (`transfer`) só entram quando saem de conta elegível (regra 4) para conta **não** elegível (investimento, arquivada ou
+   inexistente): o dinheiro sai do conjunto disponível (decisão do orquestrador na revisão da Fase 10). Entre elegíveis, ou vindas de não
+   elegível, ficam fora.
+   Fase 11: as dívidas "devo" com vencimento chegam como eventos `expense` sem conta (§5.25, `debtForecastEvents`) e por isso **entram aqui
+   sem mudança em `spendable.dart`**: "devo" com saldo em aberto e vencimento até `untilDate` (vencida → hoje) reduz o livre. "Me devem" nunca entra.
+7. `invoicesCents` / `plannedCents` = soma de `−amountCents` dos respectivos eventos.
+8. **Reservas**: `reservedCents = Σ por conta em forecast.currentBalances de min(reservedByAccount[id] ?? 0, max(0, saldo))`
+   (conta arquivada ou ausente não entra; reserva acima do saldo não desconta de novo, §5.22 regra 3).
+9. **livre ≤ 0** (`overcommitted`): `perDayCents = 0`; a UI mostra "Sem folga até dd/mm · faltam R$ |livre|" em `danger`.
+Exemplo (teste obrigatório; hoje 15/11/2026; conta A 300000, conta B 50000, conta C arquivada 999999; recorrência "Salário" receita conta A todo dia 5;
+cartão de crédito K1 (paga por A) com fatura em aberto de 80000 vencendo 05/12 e cartão K2 (paga por A) com 120000 vencendo 10/12; boleto provisionado em A 25000 em 20/11; despesa
+provisionada atrasada em B 5000 em 10/11; recorrência de despesa "Aluguel" conta A 150000 todo dia 1; transferência provisionada A→B 10000 em 18/11;
+meta em A reservando 40000):
+`nextIncomeDate = 05/12/2026`, `days = 20`, `untilDate = 05/12/2026`; `balanceCents = 350000`; faturas = só a de 05/12 → 80000 (a de 10/12 fica de fora);
+provisionados = 25000 + 5000 + 150000 (aluguel 01/12) = 180000; reservas 40000 → `freeCents = 350000 − 80000 − 180000 − 40000 = 50000`,
+`perDayCents = 2500`. Sem a recorrência de salário: `untilDate = 30/11/2026`, `days = 16`, faturas 0, provisionados 30000, livre 280000, por dia 17500.
+Com a meta reservando 400000 em A (saldo 300000): reserva efetiva 300000 → livre `350000 − 80000 − 180000 − 300000 = −210000`, `overcommitted`, por dia 0.
+Hoje = 30/11 sem salário → `days == 1`. Salário amanhã (hoje 04/12) → `days == 1`; salário hoje (hoje 05/12) → próxima é 05/01 (hoje não conta).
+Custo: O(eventos + regras de receita × ocorrências no horizonte). Chamado só pelo Ledger (memoizado).
+
+### 5.24 Ativos — `features/net_worth/domain/asset.dart` (Fase 11)
+Dart puro; entidade em §4.10.
+```dart
+String? assetSnapshotError({required int valueCents, required DateTime date, required DateTime today});
+  // em ordem: valueCents < 0 → 'Informe um valor maior ou igual a zero'; dateOnly(date) > dateOnly(today) → 'A data não pode ser no futuro'; senão null
+String? removeSnapshotError(Asset asset, String snapshotId);
+  // o id existe e asset.snapshots.length <= 1 → 'O ativo precisa de pelo menos um valor'; senão null
+Asset closeAsset(Asset asset, {required DateTime date, required String snapshotId});
+  // asset.withSnapshot(AssetSnapshot(id: snapshotId, date: date, valueCents: 0, note: 'Encerrado')).copyWith(archived: true)
+int assetsValueAt(Iterable<Asset> assets, DateTime date); // soma de valueAt(date) de TODOS os ativos (encerrados inclusive)
+```
+Regras:
+1. Valor numa data = último snapshot até ela (sem interpolação). Antes do 1º snapshot o ativo vale 0 (não existia no patrimônio).
+2. Um snapshot por data: atualizar o valor numa data que já tem snapshot substitui o valor (o id novo vence).
+3. Snapshot só com data <= hoje (o patrimônio é histórico, não previsão).
+4. **Encerrar** (vendido, baixado) = snapshot de valor 0 na data + `archived: true`. O histórico anterior continua contando nos meses passados;
+   `archived` só tira o ativo da lista padrão. Reativar = `archived: false` (o snapshot 0 fica; o usuário atualiza o valor).
+5. Excluir um ativo apaga o histórico: os meses passados do gráfico mudam (a UI avisa na confirmação).
+Exemplos (teste obrigatório; hoje 15/11/2026): 'Carro' (`vehicle`) com snapshots 01/08/2026 4000000 e 01/11/2026 3800000 →
+`valueAt(31/07/2026) == 0`, `valueAt(01/08/2026) == 4000000`, `valueAt(31/10/2026) == 4000000`, `valueAt(15/11/2026) == 3800000`, `currentValueCents == 3800000`,
+`lastChangeCents == -200000`; `withSnapshot(AssetSnapshot(id: 'n', date: 01/11/2026, valueCents: 3700000))` → continua com 2 snapshots e `valueAt(15/11) == 3700000`;
+`closeAsset(carro, date: 15/11/2026, snapshotId: 'c')` → `archived`, `valueAt(15/11) == 0`, `valueAt(31/10) == 4000000`. 'Tesouro' (`investment`) com snapshot
+10/10/2026 200000: `assetsValueAt([carro, tesouro], 31/10/2026) == 4200000`, `(30/09/2026) == 4000000`. `assetSnapshotError(valueCents: -1, ...)` → erro de valor;
+`(0, date: 16/11/2026, today: 15/11/2026)` → 'A data não pode ser no futuro'; `(0, date: 15/11/2026, ...)` → null. `removeSnapshotError` com 1 snapshot → erro; com 2 → null.
+
+### 5.25 Devo / me devem — `features/debts/domain/debt_math.dart` (Fase 11)
+Dart puro; entidade em §4.11. Usa `formatMoney`, `foldText` (§3.7), `Transaction` (§4.4) e `ForecastEvent` (§5.7).
+```dart
+String? debtPaymentError({required Debt debt, required int amountCents, required DateTime date, required DateTime today});
+  // em ordem: amountCents <= 0 → 'Informe um valor maior que zero'; amountCents > debt.remainingCents → 'Restante: ${formatMoney(debt.remainingCents)}';
+  // dateOnly(date) > dateOnly(today) → 'A data não pode ser no futuro'; dateOnly(date) < debt.date → 'Data antes do registro da dívida'; senão null
+String debtTransactionDescription(Debt debt);
+  // owedToMe → 'Recebido de {person}'; iOwe → 'Pago a {person}'; com description → + ' · {description}'
+({Debt debt, Transaction transaction}) settleDebt(Debt debt, {required String paymentId, required String transactionId,
+  required int amountCents, required DateTime date, required String accountId, String? categoryId});
+  // transaction = Transaction(id: transactionId, type: owedToMe ? income : expense, amountCents, date, description: debtTransactionDescription(debt),
+  //   accountId: accountId, categoryId: categoryId, status: paid); debt = debt.withPayment(DebtPayment(id: paymentId, date, amountCents, transactionId)).
+  // Não valida (a UI chama debtPaymentError antes).
+({Debt debt, String? transactionId}) undoDebtPayment(Debt debt, String paymentId);
+  // (debt.withoutPayment(paymentId), transactionId do pagamento removido); id inexistente → (debt igual, null)
+bool isDebtOverdue(Debt debt, DateTime today); // dueDate != null && dateOnly(today) > dueDate && !settled
+({int receivableCents, int payableCents}) debtTotalsAt(Iterable<Debt> debts, DateTime date); // soma de remainingAt(date) por direção
+List<ForecastEvent> debtForecastEvents(Iterable<Debt> debts);
+  // só iOwe com dueDate != null e remainingCents > 0 → ForecastEvent(date: dueDate, amountCents: -remainingCents,
+  //   description: 'Devo a {person}' (+ ' · {description}'), kind: ForecastEventKind.expense, sourceId: debt.id, accountId: null)
+class PersonDebtSummary {
+  const PersonDebtSummary({required this.person, required this.receivableCents, required this.payableCents, required this.openCount});
+  final String person; final int receivableCents, payableCents, openCount;
+  int get netCents => receivableCents - payableCents;   // > 0: a pessoa me deve no líquido
+}
+List<PersonDebtSummary> debtsByPerson(Iterable<Debt> debts);
+  // só dívidas com remainingCents > 0, agrupadas por foldText(person); person exibido = o da dívida mais recente do grupo (maior (date, id));
+  // somas de remainingCents por direção; ordem: netCents.abs() desc, depois foldText(person) asc
+List<String> debtPeople(Iterable<Debt> debts);
+  // sugestões do campo Pessoa: todas as dívidas (quitadas inclusive), distintas por foldText(person); grafia da mais recente;
+  // ordem: data da dívida mais recente da pessoa desc (empate: foldText asc)
+```
+Regras:
+1. Registrar a dívida não cria transação nem mexe em saldo. "Me devem" é ativo (a receber) e "devo" é passivo (a pagar) no patrimônio (§5.26).
+2. **Pagamento parcial permitido**, com histórico: vários pagamentos, restante = valor − pagos. `settled` quando o restante chega a 0.
+   Pagamento acima do restante é bloqueado (sem troco nem crédito). Data do pagamento entre a data da dívida e hoje.
+3. **Quitar** = registrar um pagamento (total ou parcial): cria uma transação **paga** na conta escolhida — `income` quando me devem (entra dinheiro),
+   `expense` quando devo (sai) — com categoria opcional, e grava o id dela no pagamento. Patrimônio neutro: conta ± valor, a receber/a pagar ∓ valor.
+4. **Desfazer** = remover o pagamento (grava a dívida **primeiro**) e depois excluir a transação ligada (se ainda existir); se a exclusão falhar, a transação fica órfã e visível, com aviso (revisão da Fase 11). Editar ou excluir essa transação pela tela de Transações
+   **não** altera a dívida (limite conhecido): o histórico de pagamentos no Ultra mostra 'Transação excluída' quando o id não existe mais.
+   **Fase 13:** substituído por §9.12 — excluir a transação remove o pagamento e editar valor/data atualiza o pagamento ('Transação excluída' fica só para ids órfãos de backup).
+5. Editar dívida: valor >= pago; direção travada se há pagamentos. Excluir dívida com pagamentos é bloqueado ('Desfaça os pagamentos antes de excluir').
+6. **Previsão e "posso gastar"** (decisão): "devo" com vencimento e restante > 0 vira evento `expense` **sem conta** no vencimento (vencida → hoje,
+   pelo `extraEvents` de §5.7). Entra no saldo consolidado previsto, nos meses, em "A pagar em 30 dias" e no "posso gastar" (§5.23 regra 6) quando vence
+   até a próxima receita. Sem conta porque a dívida não diz de onde o dinheiro sai: fica só no consolidado (igual a fatura de cartão sem conta).
+   "Devo" sem vencimento só pesa no patrimônio (sem data não há como prever). **"Me devem" nunca entra na previsão nem no "posso gastar"**:
+   dinheiro de terceiros é incerto; contar com ele mostraria folga que pode não existir (mesma postura conservadora das receitas avulsas, §5.23 regra 2).
+7. Pessoa é texto livre; agrupamento e sugestões ignoram maiúsculas, acentos e espaços nas pontas (`foldText` após `trim`).
+Exemplos (teste obrigatório; hoje 15/11/2026):
+- d1 = 'Ana', `owedToMe`, 50000, data 01/10/2026, vencimento 30/11/2026, descrição 'Show'. `debtPaymentError`: 50001 → 'Restante: R$ 500,00'; 0 → 'Informe um valor
+  maior que zero'; 20000 em 16/11 → 'A data não pode ser no futuro'; 20000 em 30/09 → 'Data antes do registro da dívida'; 20000 em 10/11 → null.
+- `settleDebt(d1, paymentId: 'p1', transactionId: 't1', amountCents: 20000, date: 10/11/2026, accountId: 'A')` → transação `income` 20000, 10/11, 'Recebido de Ana · Show',
+  conta 'A', `paid`, sem categoria; dívida `paidCents 20000`, `remainingCents 30000`, `settled` false; `remainingAt(15/11) == 30000`, `remainingAt(31/10) == 50000`,
+  `remainingAt(30/09) == 0`. Segundo pagamento 30000 em 15/11 ('p2') → `settled`, `isDebtOverdue` false. `undoDebtPayment(d1 com p1 e p2, 'p1')` →
+  `remainingCents 20000` e `transactionId 't1'`; `undoDebtPayment(..., 'x')` → dívida igual e `null`.
+- d2 = 'Bruno', `iOwe`, 80000, data 20/09/2026, vencimento 01/12/2026 → evento 01/12 −80000 'Devo a Bruno'. d3 = 'Bruno', `iOwe`, 10000, data 01/11, vencimento 10/11 →
+  evento em 10/11 (a previsão o move para 15/11) e `isDebtOverdue` true. d4 = 'Carla', `iOwe`, 5000, data 05/10, sem vencimento → sem evento.
+  d1 → sem evento (me devem). d6 = 'Dani', `iOwe`, 7000, data 01/08, vencimento 01/12, pago 7000 → sem evento (quitada).
+- `debtTotalsAt([d1 só com p1, d2, d3, d4], 15/11) == (receivableCents: 30000, payableCents: 95000)`; em 30/09 → `(0, 80000)`.
+- `debtsByPerson([d1 só com p1, d2, d3, d4, d6])` → Bruno (a pagar 90000, líquido −90000, 2 em aberto), Ana (a receber 30000, líquido 30000, 1), Carla (a pagar 5000, líquido −5000, 1);
+  Dani fora. Com mais 'ANA ' `iOwe` 10000 em 05/11: um grupo 'ANA' (grafia da mais recente) com a receber 30000, a pagar 10000, líquido 20000, 2 em aberto.
+- `debtPeople([d1, d2, d3, d4, d6])` → `['Bruno', 'Carla', 'Ana', 'Dani']`.
+- Posso gastar (via Ledger): conta A 300000, recorrência de receita 'Salário' em A todo dia 5, d2 (devo 80000, vence 01/12) e d5 = 'Eva' `owedToMe` 50000 vencendo 20/11
+  → `plannedCents == 80000`, `freeCents == 220000`, `days == 20`, `perDayCents == 11000` (d5 não entra).
+
+### 5.26 Patrimônio líquido — `features/net_worth/domain/net_worth.dart` (Fase 11)
+Dart puro. Reusa `monthlyHistory` (§5.10), `assetsValueAt` (§5.24) e `debtTotalsAt` (§5.25).
+```dart
+class NetWorthPoint {
+  const NetWorthPoint({required this.month, required this.date, required this.accountsCents, required this.assetsCents,
+    required this.receivableCents, required this.payableCents, required this.cardDebtCents});
+  final YearMonth month;
+  final DateTime date;          // month.lastDay; no mês de today, today
+  final int accountsCents;      // saldo das contas não arquivadas, todos os tipos (investimento inclusive)
+  final int assetsCents;        // ativos manuais
+  final int receivableCents;    // "me devem" em aberto
+  final int payableCents;       // "devo" em aberto (>= 0)
+  final int cardDebtCents;      // dívida de cartão (>= 0)
+  int get liabilitiesCents => payableCents + cardDebtCents;
+  int get netCents => accountsCents + assetsCents + receivableCents - payableCents - cardDebtCents;
+}
+DateTime cardPurchaseDate(Transaction t);
+  // installmentIndex != null && > 1 → addMonthsClamped(t.date, -(installmentIndex - 1)); senão dateOnly(t.date)
+int cardDebtAt({required Iterable<PaymentCard> cards, required Iterable<Transaction> transactions, required DateTime date,
+  bool allPayments = false});
+List<NetWorthPoint> netWorthHistory({required Iterable<Account> accounts, required Iterable<PaymentCard> cards,
+  required Iterable<Transaction> transactions, required Iterable<Asset> assets, required Iterable<Debt> debts,
+  required DateTime today, int months = 24}); // ordem cronológica; length == months; último = mês de today
+```
+**Dívida de cartão (decisão).** É o **saldo devedor já contratado** nos cartões de crédito: toda compra lançada — **inclusive as parcelas futuras de
+compras já feitas** — menos estornos, menos pagamentos de fatura. Recorrências projetadas (ainda não materializadas) não entram: a assinatura do
+mês que vem ainda não é dívida. Por quê: patrimônio é a foto de ativos − passivos numa data, e a parcela futura de uma compra já feita é um passivo
+contratado. Contar só faturas abertas/fechadas não pagas faria o patrimônio mentir: comprar em 12× de R$ 1.200,00 baixaria só R$ 100,00 hoje e o
+patrimônio "cairia" R$ 100,00 por mês nos 11 meses seguintes sem nada acontecer. Com o saldo devedor total, a compra derruba o patrimônio uma vez,
+no mês da compra, e pagar a fatura é neutro (conta −, dívida −). É o "limite usado" (§5.2) sem as recorrências projetadas.
+`cardDebtAt`, por cartão `kind == credit` (arquivados inclusive; débito fica de fora porque já afeta a conta), soma
+`max(0, compras − estornos − pagamentos)`, com:
+- compras = `amountCents` das `expense` com `cardId` do cartão e `cardPurchaseDate(t) <= date` (status ignorado: lançamento em crédito sempre conta, §4.4);
+- estornos = idem para `income` no cartão;
+- pagamentos = `amountCents` das `invoicePayment` com `cardId` do cartão e (`allPayments` ou `dateOnly(t.date) <= date`).
+`cardPurchaseDate` devolve a data da compra de uma parcela (a parcela i fica gravada i−1 meses depois da compra, §5.3). Com dia clampado
+(31/01 em 3× → 2ª parcela 28/02 → compra calculada 28/01) o erro fica dentro do mesmo mês, irrelevante para pontos de fim de mês.
+`netWorthHistory`:
+1. `hist = monthlyHistory(accounts: accounts, cards: cards, transactions: transactions, today: today, months: months)`; `accountsCents` do ponto i =
+   `hist[i].endBalanceCents` (mês passado: corte no último dia; mês atual: todas as transações pagas, igual a `Forecast.currentTotalCents` — §5.10 regra 2).
+2. `date` = `month.lastDay` para meses passados e `dateOnly(today)` para o último.
+3. `assetsCents = assetsValueAt(assets, date)`; `(receivableCents, payableCents) = debtTotalsAt(debts, date)`.
+4. `cardDebtCents = cardDebtAt(cards, transactions, date: date, allPayments: é o último ponto)` — no mês atual os pagamentos de fatura contam sem
+   corte de data, como as contas (regra 1), para que um pagamento lançado com data futura seja neutro.
+5. Custo O((T + ativos + dívidas) × months). Chamado só pelo Ledger (memoizado; 24 meses).
+Exemplo (teste obrigatório; hoje 15/11/2026, `months: 3` → set, out, nov):
+contas: A (corrente, inicial 100000), Inv (`investment`, inicial 500000), X (arquivada, inicial 999999). Transações: receita paga em A 300000 em 05/10;
+despesa paga em A 50000 em 10/11; despesa provisionada em A 70000 em 20/11 (não conta); receita paga em A 20000 em 10/11 (quitação parcial de d1).
+Cartão K (crédito, fecha 28, vence 5, paga por A): compra 30000 em 05/09; compra de 120000 em 3× em 15/10 (`buildInstallments`: 40000 em 15/10, 15/11, 15/12);
+`invoicePayment` 30000 de A em 05/10 (`invoiceKey '2026-10'`). Ativos: Carro e Tesouro de §5.24. Dívidas: d1 só com p1 e d2 de §5.25.
+- set (30/09): contas 600000; ativos 4000000; a receber 0 (d1 é de 01/10); a pagar 80000; cartão 30000 → **líquido 4490000**.
+- out (31/10): contas 870000 (A 100000 + 300000 − 30000; Inv 500000); ativos 4200000; a receber 50000; a pagar 80000; cartão 30000 + 120000 − 30000 = 120000
+  → **líquido 4920000**.
+- nov (15/11): contas 840000 (A 340000; Inv 500000) == `Forecast.currentTotalCents`; ativos 4000000; a receber 30000; a pagar 80000; cartão 120000 → **líquido 4670000**.
+  `deltaRatio(4920000, 4670000)` ≈ −0,0508.
+Variações: estorno de 10000 no cartão K em 12/11 → cartão de nov 110000; `invoicePayment` de 40000 de A com data 20/11 → nov: cartão 80000 e contas 800000,
+líquido igual (4670000); pagamento de 50000 contra dívida de 30000 → cartão 0 (nunca negativo); `cardPurchaseDate` da 2ª parcela de compra de 31/01/2026 em 3× → 28/01/2026.
+
+### 5.27 Relatórios: filtros, período e escopo — `features/reports/domain/report_filter.dart` (Fase 12)
+Dart puro. Base de todos os relatórios (§5.28–5.31). Relatórios leem só **transações gravadas** (`transactions.all`): ocorrências projetadas de
+recorrência (ainda não materializadas) nunca entram. Dinheiro em centavos `int`; razões (`double?`) só para exibir percentuais.
+```dart
+enum ReportKind { categoryComparison, trend, pivot, heatmap, topMerchants, fixedVariable, netWorth } // ordem da lista no Ultra
+const List<ReportKind> kUltraReports = ReportKind.values;
+const List<ReportKind> kSimpleReports = [ReportKind.trend, ReportKind.topMerchants, ReportKind.categoryComparison];
+String reportKindLabel(ReportKind k);
+  // 'Comparativo por categoria', 'Tendência', 'Categoria × mês', 'Gasto por dia', 'Top estabelecimentos', 'Fixo × variável', 'Evolução do patrimônio'
+String reportKindSlug(ReportKind k);
+  // 'comparativo-categorias', 'tendencia', 'categoria-mes', 'gasto-por-dia', 'estabelecimentos', 'fixo-variavel', 'patrimonio'
+enum ReportPeriodPreset { last3, last6, last12, thisYear, lastYear, custom }
+String reportPeriodLabel(ReportPeriodPreset p); // '3 meses', '6 meses', '12 meses', 'Ano atual', 'Ano anterior', 'Personalizado'
+enum ReportFlow { expense, income }
+const int kReportMaxMonths = 60;
+class ReportFilter {
+  const ReportFilter({this.preset = ReportPeriodPreset.last12, this.customFrom, this.customTo,
+    this.accountIds = const {}, this.cardIds = const {}, this.categoryIds = const {}, this.tagKeys = const {},
+    this.flow = ReportFlow.expense, this.includePlanned = false});
+  final ReportPeriodPreset preset;
+  final YearMonth? customFrom, customTo;     // só valem com preset custom
+  final Set<String> accountIds, cardIds;     // vazios = todas as contas e cartões
+  final Set<String> categoryIds;             // vazio = todas; raiz selecionada inclui as filhas
+  final Set<String> tagKeys;                 // já em tagKey (§5.21); vazio = sem filtro; "tem alguma" (hasAnyTag)
+  final ReportFlow flow;                     // despesas (padrão) ou receitas
+  final bool includePlanned;                 // padrão false
+  ReportFilter copyWith({...});              // customFrom/customTo anuláveis com sentinela _keep (§4)
+  ReportFilter get periodOnly;               // mesmo preset/customFrom/customTo; resto no padrão (Modo Simples)
+  bool get hasScopeFilters;                  // algum set não vazio || flow != expense || includePlanned
+  // == e hashCode por conteúdo: sets comparados como conjuntos (ordem de inserção não importa; hash com Object.hashAllUnordered)
+}
+typedef ReportRange = ({YearMonth from, YearMonth to});
+ReportRange resolveReportRange(ReportFilter f, DateTime today);
+List<YearMonth> monthsOf(ReportRange r);     // from..to inclusive, ordem cronológica
+ReportFlow? reportFlowOf(Transaction t);
+  // expense (conta, cartão de crédito ou débito) → expense; income com accountId != null → income;
+  // income em cartão (estorno), transfer e invoicePayment → null (fora de todos os relatórios)
+bool matchesReportScope(Transaction t, ReportFilter f, CategoryTree tree);
+  // ignora período e flow. true se TODAS: (!t.isPlanned || f.includePlanned);
+  // contas/cartões: os dois sets vazios, ou f.accountIds.contains(t.accountId), ou f.cardIds.contains(t.cardId);
+  // categorias: set vazio, ou (t.categoryId != null && (contains(t.categoryId) || contains(tree.rootOf(t.categoryId!))));
+  // tags: hasAnyTag(t, f.tagKeys)
+int roundDiv(int a, int b);                  // b > 0; divisão inteira arredondada meio-para-longe-do-zero
+String reportCategoryLabel(String? id, CategoryTree tree, {bool isDirect = false});
+  // null → 'Sem categoria'; tree.label(id) vazio → 'Categoria removida'; isDirect → '{label} › (sem subcategoria)'; senão tree.label(id)
+List<String> ignoredFilters(ReportKind k, ReportFilter f);
+  // rótulos dos filtros ATIVOS que o relatório não usa (tabela abaixo), na ordem fixa:
+  // 'contas e cartões', 'categorias', 'tags', 'tipo', 'provisionados'. Período nunca entra.
+```
+`resolveReportRange` (cur = `YearMonth.fromDate(today)`): `last3` → (cur−2, cur); `last6` → (cur−5, cur); `last12` → (cur−11, cur);
+`thisYear` → (jan do ano de cur, cur); `lastYear` → (jan, dez do ano anterior); `custom` → `from = customFrom ?? cur−11`, `to = customTo ?? cur`;
+`from > to` → troca; mais de `kReportMaxMonths` meses → `from = to − 59`. Meses futuros são permitidos (só têm provisionados).
+`roundDiv`: `a >= 0` → `(2a + b) ~/ (2b)`; senão `−((−2a + b) ~/ (2b))`.
+
+Filtros por relatório ("sim" = respeita; os "não" ativos aparecem em `ignoredFilters`):
+
+| Relatório | Período | Contas/cartões | Categorias | Tags | Tipo | Provisionados |
+|---|---|---|---|---|---|---|
+| Comparativo por categoria | mês de referência = `range.to` (+ meses anteriores) | sim | sim | sim | sim | sim |
+| Tendência | sim | sim | sim | sim | não (sempre receitas e despesas) | sim |
+| Categoria × mês (pivot) | sim | sim | sim | sim | sim | sim |
+| Gasto por dia | sim | sim | sim | sim | não (sempre despesas) | sim |
+| Top estabelecimentos | sim | sim | sim | sim | sim | sim |
+| Fixo × variável | sim | sim | sim | sim | não (sempre despesas) | sim |
+| Evolução do patrimônio | sim (∩ 24 meses do Ledger) | não | não | não | não | não |
+
+Decisões: estorno (receita em cartão) fica fora, como em `spendingByCategory` (§5.6), para os números baterem com o Painel e Categorias.
+Despesa de cartão de crédito conta pela data da compra/parcela (`t.date`), como em §5.6. Quitação de dívida (§5.25) é receita/despesa comum e entra.
+Exemplos (teste obrigatório; hoje 15/11/2026): `last3` → 2026-09..2026-11; `last12` → 2025-12..2026-11; `thisYear` → 2026-01..2026-11;
+`lastYear` → 2025-01..2025-12; `custom(2026-05, 2026-02)` → 2026-02..2026-05; `custom(2020-01, 2026-11)` → 2021-12..2026-11 (60 meses);
+`custom` sem datas → igual a `last12`; `monthsOf(2025-11..2026-02)` → [2025-11, 2025-12, 2026-01, 2026-02].
+`roundDiv(155000, 3) == 51667`; `roundDiv(5, 2) == 3`; `roundDiv(4, 3) == 1`; `roundDiv(-1, 2) == -1`; `roundDiv(-11, 2) == -6`; `roundDiv(0, 7) == 0`.
+`reportFlowOf`: despesa em conta, em cartão de crédito e em cartão de débito → expense; receita em conta → income; receita em cartão → null; transfer → null; invoicePayment → null.
+`matchesReportScope` (árvore de §5.20; t = despesa paga na conta A, categoria `mer`, tags ['Viagem']): filtro padrão → true; `categoryIds {ali}` → true;
+`{mer}` → true; `{res}` → false; `{tra}` → false; `tagKeys {VIAGEM}` → true; `{CASA}` → false; `accountIds {A}` → true; `{B}` → false; só `cardIds {K}` → false;
+`accountIds {B}` + `cardIds {K}` com t no cartão K (sem conta) → true; t provisionada → false, com `includePlanned` → true; t sem categoria com `categoryIds {ali}` → false.
+`ReportFilter(accountIds: {'a', 'b'}) == ReportFilter(accountIds: {'b', 'a'})` e mesmo `hashCode`; `copyWith(customFrom: null)` limpa; `periodOnly` de um filtro com
+`preset custom`, datas, `cardIds {K}`, `flow income` e `includePlanned` → só preset e datas mantidos, `hasScopeFilters == false`.
+`reportCategoryLabel(null, ...)` → 'Sem categoria'; `('mer')` → 'Alimentação › Mercado'; `('ali', isDirect: true)` → 'Alimentação › (sem subcategoria)'; `('apagada')` → 'Categoria removida'.
+`ignoredFilters(trend, ReportFilter(flow: income))` → ['tipo']; `(trend, padrão)` → []; `(topMerchants, ReportFilter(flow: income))` → [];
+`(netWorth, ReportFilter(cardIds: {K}, tagKeys: {VIAGEM}, includePlanned: true))` → ['contas e cartões', 'tags', 'provisionados'].
+
+**Decisões da revisão da Fase 12 (valem para §5.28–5.31):**
+- Mês corrente "até hoje": transações **não provisionadas** com data > `today` ficam fora da matriz, da tendência, do fixo × variável e
+  dos estabelecimentos (mesmo critério do Painel/`monthlyHistory` e do heatmap). Parcelas futuras já lançadas não inflam o mês.
+- Categorias × fluxo: na Tendência, `categoryIds` só restringe o lado do fluxo daquelas categorias e `ignoredFilters(trend)` cita
+  'categorias'; no heatmap e no fixo × variável (só despesa), `flow == income` faz ignorar `flow` e `categoryIds`, citados no aviso.
+- CSV exporta valores reais mesmo com valores ocultos (ação explícita; o SnackBar diz "valores reais").
+
+### 5.28 Comparativo por categoria — `features/reports/domain/category_reports.dart` (Fase 12)
+Dart puro. A matriz mês × categoria também alimenta o pivot (§5.29): calculada uma vez por filtro (cache no `ReportsController`, §6.4).
+```dart
+typedef MonthCategoryTotals = Map<YearMonth, Map<String?, int>>;
+MonthCategoryTotals monthlyCategoryTotals(Iterable<Transaction> txs, ReportFilter f,
+  {required YearMonth from, required YearMonth to, required CategoryTree tree});
+  // UMA passada: reportFlowOf(t) == f.flow && matchesReportScope(t, f, tree) && from <= mês de t.date <= to;
+  // soma amountCents em [mês][t.categoryId] — categoria PRÓPRIA, sem rollUp. Mês sem valor fica ausente.
+class CategoryComparisonRow {
+  const CategoryComparisonRow({required this.categoryId, this.isDirect = false, required this.currentCents,
+    required this.previousCents, required this.averageCents, this.children = const []});
+  final String? categoryId;      // raiz (ou null = Sem categoria); no drill-down: filha, ou o próprio pai com isDirect
+  final bool isDirect;           // linha "(sem subcategoria)": lançado direto no pai
+  final int currentCents, previousCents, averageCents;
+  final List<CategoryComparisonRow> children; // só em raiz com filhas; senão const []
+  int get deltaCents => currentCents - previousCents;
+  double? get changeRatio => deltaRatio(previousCents, currentCents);        // §5.10
+  double? get averageChangeRatio => deltaRatio(averageCents, currentCents);
+}
+class CategoryComparison {
+  const CategoryComparison({required this.month, required this.averageMonths, required this.rows, required this.total});
+  final YearMonth month; final int averageMonths;
+  final List<CategoryComparisonRow> rows; // raízes
+  final CategoryComparisonRow total;       // categoryId null, sem children: somas das raízes; averageCents = roundDiv(soma das somas, n)
+}
+CategoryComparison categoryComparison(MonthCategoryTotals totals,
+  {required YearMonth month, required int averageMonths, required CategoryTree tree});
+```
+Regras:
+1. `current` = mês `month`; `previous` = `month − 1`; `average` = `roundDiv(soma de month−1 .. month−averageMonths, averageMonths)` (meses sem valor contam como 0).
+   `totals` precisa cobrir `month − averageMonths .. month` (o controller garante, §6.4).
+2. Raiz = `tree.rootOf(categoryId)` (`null` fica `null`). Uma raiz entra se current, previous ou a soma da média ≠ 0.
+3. Raiz com filhas (`tree.hasChildren`): `children` = uma linha por filha com algum valor + a linha `isDirect` (id do pai) se o pai tem valor próprio.
+4. Ordem (raízes e children): `currentCents` desc, `previousCents` desc, `foldText(reportCategoryLabel)` asc; `null` (Sem categoria) sempre por último; a linha `isDirect` sempre por último entre as filhas.
+Exemplo (teste obrigatório; árvore de §5.20; `month` 2026-11, `averageMonths` 3; despesas pagas por mês e categoria própria):
+ago: `mer` 30000, `tra` 10000 · set: `mer` 40000, `res` 10000, `tra` 10000 · out: `mer` 50000, `res` 20000, `ali` 5000, `tra` 20000 ·
+nov: `mer` 60000, `res` 15000, `tra` 5000, sem categoria 3000. Ignorados em nov: receita 500000 em conta (categoria `sal`), transferência 100000, `invoicePayment` 50000,
+estorno de 1000 no cartão (categoria `tra`), despesa provisionada `mer` 99999.
+- `ali`: current 75000, previous 75000, average 51667 (155000/3), delta 0, `changeRatio` 0.0, `averageChangeRatio` ≈ 0,4516.
+  children: `mer` (60000, 50000, 40000, delta 10000, 0.2), `res` (15000, 20000, 10000, −5000, −0.25), direta `ali` (0, 5000, 1667, −5000, −1.0) — nessa ordem.
+- `tra`: (5000, 20000, 13333, −15000, −0.75), sem children.
+- `null`: (3000, 0, 0), `changeRatio` null.
+- Ordem das raízes: `ali`, `tra`, `null`. `total`: (83000, 95000, 65000).
+Variações: `includePlanned: true` → `mer` current 159999 e `ali` current 174999; `averageMonths: 6` → `ali` average 25833 (155000/6);
+`categoryIds {tra}` → só a linha `tra`; `flow: income` → só a linha `sal` (current 500000, previous 0, average 0).
+
+### 5.29 Pivot categoria × mês — `features/reports/domain/category_pivot.dart` (Fase 12)
+```dart
+class PivotRow {
+  const PivotRow({required this.categoryId, this.isDirect = false, required this.cells, required this.totalCents, this.children = const []});
+  final String? categoryId; final bool isDirect;
+  final List<int> cells;          // um valor por mês, na ordem de CategoryPivot.months
+  final int totalCents;           // soma de cells
+  final List<PivotRow> children;  // mesma regra 3 de §5.28
+}
+class CategoryPivot {
+  const CategoryPivot({required this.months, required this.rows, required this.columnTotals, required this.grandTotalCents, required this.maxCellCents});
+  final List<YearMonth> months; final List<PivotRow> rows;  // raízes
+  final List<int> columnTotals;   // soma das raízes por mês
+  final int grandTotalCents;      // soma de columnTotals
+  final int maxCellCents;         // maior célula entre as RAÍZES (0 se vazio); intensidade do fundo da célula na UI
+}
+CategoryPivot categoryPivot(MonthCategoryTotals totals, {required List<YearMonth> months, required CategoryTree tree});
+  // raízes por tree.rootOf; entra a raiz (e a filha / linha direta) com totalCents != 0. Ordem padrão: totalCents desc, label asc; null por último.
+enum PivotSortKey { label, total, month }
+List<PivotRow> sortPivotRows(List<PivotRow> rows, {required PivotSortKey key, int monthIndex = 0, required bool ascending, required CategoryTree tree});
+  // ordena raízes e children (lista nova); empate → foldText(reportCategoryLabel) asc; null sempre por último; isDirect sempre por último entre as filhas
+```
+Exemplo (teste obrigatório; mesmos dados de §5.28, `months` ago..nov 2026): `ali` cells [30000, 50000, 75000, 75000] total 230000, children `mer`
+[30000, 40000, 50000, 60000] 180000, `res` [0, 10000, 20000, 15000] 45000, direta [0, 0, 5000, 0] 5000; `tra` [10000, 10000, 20000, 5000] 45000;
+`null` [0, 0, 0, 3000] 3000. Ordem padrão `ali`, `tra`, `null`. `columnTotals` [40000, 60000, 95000, 83000]; `grandTotalCents` 278000; `maxCellCents` 75000.
+`sortPivotRows(key: month, monthIndex: 0, ascending: false)` → `ali`, `tra`, `null`; `(key: total, ascending: true)` → `tra` (45000), `ali`, `null`;
+`(key: label, ascending: false)` → `tra`, `ali`, `null`; children de `ali` com `(key: total, ascending: true)` → `res`, `mer`, direta.
+`months` sem dados → `rows` vazio, `columnTotals` zeros, `grandTotalCents` 0.
+
+### 5.30 Tendência e fixo × variável — `features/reports/domain/monthly_flow.dart` (Fase 12)
+```dart
+class TrendPoint {
+  const TrendPoint({required this.month, required this.incomeCents, required this.expenseCents});
+  final YearMonth month; final int incomeCents; final int expenseCents;
+  int get balanceCents => incomeCents - expenseCents;   // saldo do mês
+}
+List<TrendPoint> monthlyTrend(Iterable<Transaction> txs, ReportFilter f, {required List<YearMonth> months, required CategoryTree tree});
+  // ignora f.flow; um ponto por mês de months (zeros inclusos); income/expense por reportFlowOf; matchesReportScope
+List<int?> movingAverage(List<int> values, {int window = 3});
+  // mesmo tamanho; i < window − 1 → null; senão roundDiv(soma de values[i−window+1..i], window)
+class FixedVariableMonth {
+  const FixedVariableMonth({required this.month, required this.recurringCents, required this.installmentCents, required this.variableCents});
+  final YearMonth month; final int recurringCents; final int installmentCents; final int variableCents;
+  int get fixedCents => recurringCents + installmentCents;
+  int get totalCents => fixedCents + variableCents;
+  double? get fixedRatio => totalCents == 0 ? null : fixedCents / totalCents;
+}
+List<FixedVariableMonth> fixedVariableByMonth(Iterable<Transaction> txs, ReportFilter f, {required List<YearMonth> months, required CategoryTree tree});
+  // só reportFlowOf == expense (ignora f.flow); matchesReportScope; um item por mês.
+  // t.recurringId != null → recorrente; senão t.installmentGroupId != null → parcela; senão variável
+```
+Exemplo tendência (teste obrigatório; `months` set..nov 2026): set: receita em conta 500000, despesa 60000 · out: receita 500000, despesa no cartão K 95000,
+transferência A→B 100000, `invoicePayment` 50000 · nov: receita 520000, despesa 83000, estorno 1000 no cartão K, despesa provisionada 99999 em 20/11.
+→ set (500000, 60000, saldo 440000), out (500000, 95000, 405000), nov (520000, 83000, 437000). `includePlanned` → nov despesa 182999, saldo 337001.
+`cardIds {K}` → set (0, 0), out (0, 95000), nov (0, 0). `ReportFilter(flow: income)` → igual ao padrão (flow ignorado).
+`movingAverage([440000, 405000, 437000])` → [null, null, 427333]; `movingAverage([5, -6, -5], window: 2)` → [null, -1, -6]; `movingAverage([])` → [].
+Exemplo fixo × variável (teste obrigatório; `months` out..nov 2026): out: 'Aluguel' 150000 (`recurringId` 'rent'), 'Streaming' 4000 no cartão (`recurringId` 'st'),
+'Mercado' 46000; `buildInstallments` de 'LOJA EXEMPLO' 60000 em 3× a partir de 20/10 (20000 em 20/10, 20/11, 20/12); nov: Aluguel 150000 e Streaming 4000
+(recorrentes), 'Mercado' 26000, receita 500000 com `recurringId` (ignorada).
+→ out: recorrentes 154000, parcelas 20000, variável 46000, fixo 174000, total 220000, `fixedRatio` ≈ 0,7909; nov: 154000, 20000, 26000, 174000, 200000, 0,87.
+Mês sem despesas → todos 0 e `fixedRatio` null. Uma parcela com `recurringId` também preenchido conta como recorrente.
+
+### 5.31 Gasto por dia e top estabelecimentos — `features/reports/domain/spending_heatmap.dart`, `merchant_report.dart` (Fase 12)
+```dart
+// spending_heatmap.dart
+class DaySpending { const DaySpending({required this.date, required this.cents, required this.count});
+  final DateTime date; final int cents; final int count; }   // count = nº de transações no dia
+class SpendingHeatmap {
+  const SpendingHeatmap({required this.from, required this.to, required this.days, required this.thresholds});
+  final DateTime from, to;                   // dateOnly, inclusivos
+  final Map<DateTime, DaySpending> days;     // chave dateOnly; só dias com gasto
+  final List<int> thresholds;                // [t1, t2, t3]; [] se não há dias
+  int levelOf(int cents);                    // <= 0 → 0; <= t1 → 1; <= t2 → 2; <= t3 → 3; senão 4
+  DaySpending? get maxDay;                   // maior cents; empate → data mais antiga; null se vazio
+  int get totalCents; int get activeDays;    // soma e nº de dias com gasto
+}
+SpendingHeatmap spendingHeatmap(Iterable<Transaction> txs, ReportFilter f, {required DateTime from, required DateTime to, required CategoryTree tree});
+  // só reportFlowOf == expense (ignora f.flow); matchesReportScope; from <= dateOnly(t.date) <= to
+// merchant_report.dart
+class MerchantTotal {
+  const MerchantTotal({required this.key, required this.label, required this.totalCents, required this.purchaseCount,
+    required this.lastDate, required this.categoryId});
+  final String key;            // chave de agrupamento
+  final String label;          // t.description da transação mais recente do grupo
+  final int totalCents;
+  final int purchaseCount;     // compras distintas: parcelas do mesmo installmentGroupId contam 1
+  final DateTime lastDate;
+  final String? categoryId;    // da transação mais recente
+  int get averageCents => roundDiv(totalCents, purchaseCount); // ticket médio
+}
+String merchantKey(Transaction t);
+  // k = normalizeDescription(ruleSubject(t)) (§3.7; ruleSubject = importedDescription ?? description); k vazio → foldText(t.description)
+List<MerchantTotal> topMerchants(Iterable<Transaction> txs, ReportFilter f, {required YearMonth from, required YearMonth to, required CategoryTree tree});
+  // reportFlowOf == f.flow; matchesReportScope; mês de t.date em [from, to]. Ordem: totalCents desc, purchaseCount desc, key asc.
+  // Desempenho: memoriza merchantKey por texto bruto (ruleSubject) dentro da chamada (Map local): normalizar é o passo caro.
+```
+Limiares por quantil: `v` = cents dos dias com gasto em ordem asc, `n = v.length`; `t_k = v[((n − 1) * k) ~/ 4]` para k = 1, 2, 3.
+"Mais recente" do grupo de estabelecimento: maior `date`; empate → maior `id`.
+Exemplo heatmap (teste obrigatório; `from` 01/11/2026, `to` 30/11/2026): despesas de 1000 (01/11), 2000 (02/11), 1500 + 1500 (03/11, duas), 4000 (04/11),
+5000 (05/11), 6000 (06/11), 7000 (07/11), 8000 (08/11); receita 9000 em 09/11 (fora); despesa 50000 em 31/10 (fora do período).
+→ 8 dias; `days[03/11]` = (3000, count 2); `thresholds` [2000, 4000, 6000]; `levelOf`: 0 → 0, 1000 → 1, 2000 → 1, 2500 → 2, 4000 → 2, 6000 → 3, 7000 → 4;
+`maxDay` 08/11 (8000); `totalCents` 36000; `activeDays` 8. Um único dia com 500 → `thresholds` [500, 500, 500] e `levelOf(500) == 1`. Sem despesas → `days` vazio,
+`thresholds` [], `maxDay` null, `totalCents` 0 (`levelOf` com `thresholds` vazio: `<= 0` → 0, senão 4).
+Exemplo estabelecimentos (teste obrigatório; período 2026-09..2026-11):
+'Uber' com `importedDescription` 'UBER *TRIP 8X7Y2 SAO PAULO BR' 2500 em 10/09; 'Uber' com 'UBER *TRIP 1A2B3 SAO PAULO BR' 3500 em 20/10; 'Uber Trip' manual 1500 em 05/11;
+'IFOOD*RESTAURANTE 12/09' 4000 em 12/09; 'iFood*Restaurante 12/11' 6000 em 12/11; `buildInstallments` de 'LOJA EXEMPLO' 30000 em 3× a partir de 20/09
+(10000 em 20/09, 20/10, 20/11); '123456' 700 em 01/10; receita 'Salário' 500000 (fora com flow expense).
+→ ordem e valores: 'LOJA EXEMPLO' (total 30000, compras 1, ticket 30000, última 20/11); 'IFOOD RESTAURANTE' (10000, 2, 5000, 12/11, label 'iFood*Restaurante 12/11');
+'UBER TRIP' (7500, 3, 2500, 05/11, label 'Uber Trip'); '123456' (700, 1, 700). Período 2026-10..2026-11 → 'LOJA EXEMPLO' (20000, 1), 'IFOOD RESTAURANTE' (6000, 1),
+'UBER TRIP' (5000, 2), '123456' (700, 1). `flow: income` → só 'SALARIO' (500000, 1).
+
+### 5.32 CSV dos relatórios e desempenho — `features/reports/domain/report_csv.dart` (Fase 12)
+Dart puro (`package:csv`, já permitido). Mesmo formato do CSV de transações (§3.5): separador `;`, vírgula decimal, sem "R$", texto protegido por `csvText`,
+datas `formatDate`, meses `formatMonth`, percentuais `formatPercent` (null → ''). O BOM UTF-8 é acrescentado na gravação (UI). O CSV exporta os valores reais
+mesmo com `hideValues` (exportar é ação explícita). Ordem das linhas = ordem padrão do domínio (a ordenação por clique na tabela é só visual).
+```dart
+String reportCsv(List<List<String>> rows);   // const ListToCsvConverter(fieldDelimiter: ';').convert(rows)
+List<List<String>> comparisonCsvRows(CategoryComparison c, {required CategoryTree tree, required bool includeChildren});
+  // ['Categoria', formatMonth(month), formatMonth(month − 1), 'Média {n} meses', 'Variação', 'Variação %', 'Vs. média %'];
+  // raízes com reportCategoryLabel; includeChildren → filhas logo abaixo do pai (rótulo completo 'Pai › Filha' / 'Pai › (sem subcategoria)'); última linha 'Total'
+List<List<String>> trendCsvRows(List<TrendPoint> points, {required List<int?> expenseAverage, required List<int?> balanceAverage});
+  // ['Mês', 'Receitas', 'Despesas', 'Saldo do mês', 'Média 3m despesas', 'Média 3m saldo'] (null → ''); última linha 'Total' (somas; médias '')
+List<List<String>> pivotCsvRows(CategoryPivot p, {required CategoryTree tree});
+  // ['Categoria', ...formatMonth de cada mês, 'Total']; raiz seguida das filhas (rótulo completo); última linha 'Total' com columnTotals e grandTotalCents
+List<List<String>> heatmapCsvRows(SpendingHeatmap h);   // ['Data', 'Total', 'Transações']; dias com gasto em ordem asc
+List<List<String>> merchantsCsvRows(List<MerchantTotal> list, {required CategoryTree tree});
+  // ['Estabelecimento', 'Chave', 'Total', 'Compras', 'Ticket médio', 'Última compra', 'Categoria'] (categoria por reportCategoryLabel)
+List<List<String>> fixedVariableCsvRows(List<FixedVariableMonth> months);
+  // ['Mês', 'Recorrentes', 'Parcelas', 'Fixo', 'Variável', 'Total', '% fixo']; última linha 'Total' (somas; % = fixo total / total)
+List<List<String>> netWorthCsvRows(List<NetWorthPoint> points);
+  // ['Mês', 'Data', 'Contas', 'Ativos', 'A receber', 'A pagar', 'Dívida de cartão', 'Patrimônio líquido'] (passivos positivos, como no tipo)
+```
+Exemplos (teste obrigatório, dados de §5.28–5.31): linha `ali` do comparativo → `['Alimentação', '750,00', '750,00', '516,67', '0,00', '0,0%', '45,2%']`;
+linha `null` → `['Sem categoria', '30,00', '0,00', '0,00', '30,00', '', '']`; `includeChildren` → depois de `ali`: 'Alimentação › Mercado', 'Alimentação › Restaurante',
+'Alimentação › (sem subcategoria)'; Total → `['Total', '830,00', '950,00', '650,00', '-120,00', '-12,6%', '27,7%']`.
+`reportCsv` da tendência começa com `'Mês;Receitas;Despesas;Saldo do mês;Média 3m despesas;Média 3m saldo\r\nset/2026;5000,00;600,00;4400,00;;\r\n'`
+(terminador de linha padrão do `ListToCsvConverter`: `\r\n`). Pivot: linha Total `['Total', '400,00', '600,00', '950,00', '830,00', '2780,00']`.
+Heatmap: `['03/11/2026', '30,00', '2']`. Estabelecimentos (transações sem categoria): `['iFood*Restaurante 12/11', 'IFOOD RESTAURANTE', '100,00', '2', '50,00', '12/11/2026', 'Sem categoria']`.
+Estabelecimento com descrição '=1+1' → primeira coluna `"'=1+1"`.
+
+**Desempenho (teste obrigatório, `test/features/reports/reports_performance_test.dart`).** Base sintética determinística (`Random(42)`), hoje 15/11/2026:
+20.000 transações espalhadas em 24 meses (2024-12..2026-11), 90% despesas e 10% receitas em conta; 5 contas, 8 cartões de crédito; 10 categorias raiz de despesa com
+3 filhas cada (40 de despesa) + 2 de receita; 600 descrições brutas distintas (ex.: 'LOJA {i} {código de 5 caracteres com dígito}'), 30% com `importedDescription`;
+30% com a tag 'viagem'; 10% com `recurringId`; 10% parcelas (`installmentGroupId` de grupos de 3); 5% provisionadas. Filtros: (a) `custom` 2024-12..2026-11 sem escopo e
+(b) o mesmo período com `cardIds` de 4 cartões, `categoryIds` de 5 raízes, `tagKeys {VIAGEM}` e `includePlanned`. Para cada filtro, cronometrar (Stopwatch, uma chamada,
+sem aquecimento) cada relatório: `monthlyCategoryTotals` + `categoryComparison`; `categoryPivot` (sobre a mesma matriz); `monthlyTrend` + 2× `movingAverage`;
+`spendingHeatmap` (731 dias); `topMerchants`; `fixedVariableByMonth`; e `reportCsv` de `pivotCsvRows` e de `merchantsCsvRows`. Cada um **< 300 ms**.
+
+## 6. Camada de app
+
+### 6.1 `app/app_scope.dart`
+```dart
+class AppServices {
+  final CollectionRepository<Account> accounts;
+  final CollectionRepository<PaymentCard> cards;
+  final CollectionRepository<TransactionCategory> categories;
+  final CollectionRepository<Transaction> transactions;
+  final CollectionRepository<RecurringRule> recurring;
+  final SettingsController settings;
+  final Ledger ledger;
+  DateTime Function() clock; // padrão DateTime.now; testes injetam
+  // Fase 8 (obrigatórios no construtor; só o bootstrap constrói AppServices):
+  final CollectionRepository<TransactionRule> rules;
+  final CollectionRepository<ImportProfile> importProfiles;
+  final CollectionRepository<DictionaryEntry> dictionary;
+  // Fase 10 (obrigatório no construtor):
+  final CollectionRepository<Goal> goals;     // box fm_goals
+  // Fase 11 (obrigatórios no construtor):
+  final CollectionRepository<Asset> assets;   // box fm_assets
+  final CollectionRepository<Debt> debts;     // box fm_debts
+  // Fase 13 (§9.14): importBatches (fm_import_batches), uiState (fm_ui_state), journal, debtSync, restoredFromJournal
+}
+class AppScope extends InheritedWidget {
+  static AppServices of(BuildContext context); // dependOn não é necessário (serviços são estáveis)
+}
+```
+
+### 6.2 `app/ledger.dart`
+```dart
+class Ledger extends ChangeNotifier {
+  Ledger({repos..., settings, clock}); // escuta todos os repos e settings; notifica em mudança
+  DateTime get today;
+  Map<String, int> get accountBalances;
+  Map<String, PaymentCard> get cardsById; Map<String, Account> get accountsById;
+  Map<String, TransactionCategory> get categoriesById;
+  List<Invoice> invoicesFor(String cardId);   // inclui projeção de recorrências
+  int usedLimitFor(String cardId);
+  Invoice? currentInvoiceFor(String cardId);
+  static const int invoiceTimelineDays = 60;
+  Forecast get forecast;                      // months: settings.forecastMonths, minDays: invoiceTimelineDays
+  Map<String?, int> spendingFor(YearMonth m);
+  List<Transaction> upcoming({int days = 30}); // planned + ocorrências projetadas no período, ordenado
+  // Fase 5 (memoizados como os demais):
+  List<InvoiceDue> get invoiceTimeline;            // invoiceTimeline(forecast, faturas de todos os cartões de crédito, days: 60)
+  List<CardPurchaseOption> get bestCardsToday;     // bestCardsToBuy(cards.all, {id: usedLimitFor(id)}, today)
+  List<InstallmentCommitment> get installmentCommitments; // from: mês atual.next(), months: 12
+  List<PaymentCard> get cardsWithoutPaymentAccount; // ids ativos = contas !archived
+  // Fase 7 (memoizados como os demais):
+  List<MonthSnapshot> get monthlyHistory;          // monthlyHistory(..., today: today, months: 6)
+  ({int current, int previous}) get expenseMonthToDate;
+    // current = monthlyHistory.last.expenseCents; previous = expenseUntilDay(transactions, mês anterior, today.day)
+  // Fase 8:
+  Ledger({..., CollectionRepository<TransactionRule>? rules, CollectionRepository<DictionaryEntry>? dictionary});
+    // opcionais (testes que constroem Ledger direto seguem válidos); null = lista vazia; quando presentes entram em _sources
+  Categorizer get categorizer;
+    // Categorizer(rules: rules?.all ?? [], categories: categories.all,
+    //   history: CategoryHistory.build(transactions.all), dictionary: dictionary?.all ?? []) — memoizado
+  // Fase 10 (memoizados como os demais; zerados em _clearCache):
+  Ledger({..., CollectionRepository<Goal>? goals}); // opcional como rules/dictionary; null = []; presente entra em _sources
+  CategoryTree get categoryTree;                     // CategoryTree(categories.all)
+  Map<String?, int> rolledSpendingFor(YearMonth m);  // categoryTree.rollUp(spendingFor(m)); memo por mês
+  Map<String, int> get reservedByAccount;            // goal_math.reservedByAccount(goals?.all ?? [])
+  SpendableToday get spendableToday;
+    // spendableToday(forecast: forecast, recurring: recurring.all, accountsById: accountsById, reservedByAccount: reservedByAccount,
+    //   horizonEnd: ForecastService.horizonEnd(today: today, months: settings.value.forecastMonths, minDays: invoiceTimelineDays))
+  List<String> get allTags;                          // tagUsage(transactions.all).map((u) => u.tag) — mais usadas primeiro
+  // Fase 11 (memoizados como os demais; zerados em _clearCache):
+  Ledger({..., CollectionRepository<Asset>? assets, CollectionRepository<Debt>? debts});
+    // opcionais como goals; null = []; presentes entram em _sources
+  Forecast get forecast;                             // + extraEvents: debtForecastEvents(debts?.all ?? const []) (§5.25 regra 6)
+  static const int netWorthMonths = 24;
+  List<NetWorthPoint> get netWorthHistory;
+    // netWorthHistory(accounts: accounts.all, cards: cards.all, transactions: transactions.all, assets: assets?.all ?? [],
+    //   debts: debts?.all ?? [], today: today, months: netWorthMonths); last = patrimônio de hoje
+  List<PersonDebtSummary> get debtsByPerson;         // debt_math.debtsByPerson(debts?.all ?? [])
+  List<String> get debtPeople;                       // debt_math.debtPeople(debts?.all ?? [])
+}
+```
+Cada getter é preguiçoso e memoizado; o cache inteiro é invalidado quando qualquer repo/settings notifica
+**ou quando `today` muda** (virada de dia: invalida, roda `materializeRecurring` e notifica).
+`upcoming` lista só **saídas** (despesas/boletos provisionados e projetados de conta).
+
+### 6.3 Ações de escrita (em `features/*/presentation/*_actions.dart` ou no próprio form)
+- Salvar compra parcelada: `buildInstallments` e `transactions.upsertAll`.
+- Excluir parcela: perguntar "só esta" / "todas do grupo" (`deleteWhere` por `installmentGroupId`).
+- Pagar fatura: cria `Transaction(type: invoicePayment, accountId, cardId, invoiceKey, amount = remaining (editável), date = hoje, status: paid)`.
+- Confirmar provisionado: `status → paid` (data editável).
+- Excluir conta/cartão com transações: só arquivar (`archived = true`).
+- Importar (Fase 8, `features/importing/presentation/import_flow.dart`): monta `ImportSession` com `ledger.categorizer` e
+  `ImportMatcher(transactions.all)`, abre a prévia e grava o `ImportPlan` com **um** `transactions.upsertAll`. Se o perfil é salvo,
+  `importProfiles.upsert(profile.learnBankCategories(learnedBankCategories(session)))`.
+- Reaplicar regras (Fase 8): `transactions.upsertAll(reapplyRules(compileRules(rules.all), transactions.all, categoriesById: ..., overwriteCategory: ...))`.
+- Reordenar regras: `rules.upsertAll(reorderRules(novaOrdem))`.
+- Ações em massa (Fase 9, `transactions_page.dart`, sobre a seleção visível — §5.18):
+  recategorizar → `transactions.upsertAll(bulkRecategorize(sel, cat).changed)`;
+  confirmar pagamento → `transactions.upsertAll(bulkConfirmPlanned(sel, data).changed)`;
+  excluir → `ids = bulkDeleteIds(sel, transactions.all, wholeGroups: ...)`; `transactions.deleteWhere((t) => ids.contains(t.id))`;
+  criar regra → `showRuleForm(context, initialPattern: suggestRulePattern(sel.map(ruleSubject)), initialCategoryId: commonCategoryId(sel),
+  sampleDescription: ruleSubject(sel.first))`; regra devolvida → `transactions.upsertAll(reapplyRules(compileRules([regra]), sel,
+  categoriesById: ledger.categoriesById, overwriteCategory: true))` (a seleção passa a seguir a regra na hora).
+- Edição inline (Fase 9): categoria → `transactions.upsert(t.copyWith(categoryId: v))`; valor → `transactions.upsert(t.copyWith(amountCents: v))`
+  com `v = parseInlineAmount(texto)` e só se `canEditAmountInline(t)` e `!hideValues`.
+- Tags em massa (Fase 10): `r = showBulkTagsDialog(...)`; `r.remove` → `transactions.upsertAll(bulkRemoveTags(sel, r.tags))`, senão
+  `transactions.upsertAll(bulkAddTags(sel, r.tags))` (um notify). SnackBar `'Tags atualizadas em {n} transações'`; mantém a seleção.
+- Metas (Fase 10, `features/goals/presentation/`): criar/editar → `goals.upsert(goal)`; aporte/retirada → valida com `contributionError`/`withdrawalError`
+  (saldo de `ledger.accountBalances[goal.accountId] ?? 0`, metas de `goals.all`) e grava `goals.upsert(goal.withMovement(GoalMovement(id: newId(), ...)))`;
+  excluir movimento → `removeMovementError` e `goals.upsert(goal.withoutMovement(id))`; arquivar/desarquivar → `goals.upsert(goal.copyWith(archived: ...))`;
+  excluir meta → `confirmDialog` ("A reserva de R$ X volta a ficar livre.") e `goals.delete(id)`. Nenhuma ação de meta cria transação.
+- Excluir conta (Fase 10): conta com metas (arquivadas ou não) entra no `inUse` de `accounts_page.dart` — só arquivar; SnackBar passa a
+  'Conta usada por lançamentos, cartões, recorrências ou metas. Arquive em vez de excluir.'
+- Ativos (Fase 11, `features/net_worth/presentation/asset_dialogs.dart`): criar → `assets.upsert(Asset(id: newId(), name, kind,
+  snapshots: [AssetSnapshot(id: newId(), date, valueCents)]))`; editar nome/tipo → `assets.upsert(asset.copyWith(...))`; atualizar valor →
+  `assetSnapshotError` e `assets.upsert(asset.withSnapshot(AssetSnapshot(id: newId(), ...)))`; remover snapshot → `removeSnapshotError` e
+  `assets.upsert(asset.withoutSnapshot(id))`; encerrar → `confirmDialog` ('Encerrar ativo?', 'O valor passa a R$ 0,00 a partir de hoje. O histórico é mantido.')
+  e `assets.upsert(closeAsset(asset, date: ledger.today, snapshotId: newId()))`; reativar → `assets.upsert(asset.copyWith(archived: false))`;
+  excluir → `confirmDialog` ('Excluir ativo?', 'O histórico de valores será apagado e o patrimônio dos meses passados muda.') e `assets.delete(id)`.
+  Nenhuma ação de ativo cria transação.
+- Dívidas (Fase 11, `features/debts/presentation/debt_dialogs.dart`): criar/editar → `debts.upsert(debt)`. Quitar → `debtPaymentError` (hoje = `ledger.today`);
+  `r = settleDebt(debt, paymentId: newId(), transactionId: newId(), ...)`; `await transactions.upsert(r.transaction)`; depois `await debts.upsert(r.debt)` —
+  se esta falhar, `await transactions.delete(r.transaction.id)` (compensação) e SnackBar 'Não foi possível registrar o pagamento.'. Sucesso: SnackBar
+  'Dívida quitada · transação criada em {conta}' (`r.debt.settled`) ou 'Pagamento registrado · transação criada em {conta}'.
+  Desfazer pagamento → `confirmDialog` ('Desfazer pagamento?', 'O pagamento de R$ X de dd/mm sai do histórico e a transação ligada é excluída.');
+  `r = undoDebtPayment(debt, id)`; se `r.transactionId` existe em `transactions` → `await transactions.delete(r.transactionId!)`; depois `await debts.upsert(r.debt)`.
+  Excluir dívida → com pagamentos: SnackBar 'Desfaça os pagamentos antes de excluir' (nada muda); sem: `confirmDialog` e `debts.delete(id)`.
+- Excluir categoria (Fase 10): com filhas → bloqueado com SnackBar 'Mova ou exclua as subcategorias antes'. Limpar a categoria dos dependentes usa
+  `t.copyWith(categoryId: null)` (preserva `tags`, `externalId`, `importedDescription`).
+
+### 6.4 Relatórios: `features/reports/presentation/reports_controller.dart` (Fase 12)
+Cache dos relatórios por filtro. Fica fora do `Ledger` (os relatórios dependem de um filtro que é estado de tela, não do app) e não muda `ledger.dart`.
+O `HomeShell` cria **um** controller (preguiçoso, no primeiro acesso à página ou comando de relatório) e o descarta no `dispose`: filtro e relatório
+selecionado sobrevivem à troca de página; **Fase 13:** persistidos entre execuções em `fm_ui_state` (§9.8) e patrimônio cobre o período do relatório (§9.9).
+```dart
+class ReportsController extends ChangeNotifier {
+  ReportsController(this.services);           // services.ledger.addListener(_onLedgerChanged)
+  final AppServices services;
+  ReportFilter get filter; set filter(ReportFilter v);   // igual (==) → nada; senão limpa o cache e notifica
+  ReportKind get selected; set selected(ReportKind v);   // padrão trend; notifica (não limpa cache)
+  int get averageMonths; set averageMonths(int v);       // 3 (padrão) ou 6; outro valor → ignora; limpa só o comparativo
+  bool get ultra;                              // services.settings.value.mode == AppMode.ultra
+  List<ReportKind> get available;              // ultra ? kUltraReports : kSimpleReports
+  ReportKind get current;                      // available.contains(selected) ? selected : available.first
+  ReportFilter get effectiveFilter;            // ultra ? filter : filter.periodOnly
+  ReportRange get range;                       // resolveReportRange(effectiveFilter, services.ledger.today)
+  CategoryComparison get comparison;           // month: range.to; averageMonths: ultra ? averageMonths : 3
+  CategoryPivot get pivot;                     // months: monthsOf(range)
+  List<TrendPoint> get trend;
+  List<int?> get expenseAverage;               // movingAverage(despesas de trend)
+  List<int?> get balanceAverage;               // movingAverage(saldos de trend)
+  SpendingHeatmap get heatmap;                 // from: range.from.firstDay; to: includePlanned ? range.to.lastDay : min(range.to.lastDay, today)
+  List<MerchantTotal> get merchants;
+  List<FixedVariableMonth> get fixedVariable;
+  List<NetWorthPoint> get netWorth;            // ledger.netWorthHistory com range.from <= month <= range.to (lista nova, sem recálculo)
+  List<String> ignoredFor(ReportKind k);       // ignoredFilters(k, effectiveFilter)
+  String csvFor(ReportKind k);                 // reportCsv(<k>CsvRows(...)); comparativo com includeChildren: ultra
+  String csvFileName(ReportKind k);            // 'finme-{slug}-{from.key}_{to.key}.csv'; comparativo: 'finme-{slug}-{to.key}.csv'
+}
+```
+Regras:
+1. Entradas: `services.transactions.all`, `services.ledger.categoryTree`, `services.ledger.today`, `services.ledger.netWorthHistory` (§6.2, Fase 11).
+2. Cada getter é preguiçoso e memoizado em campo privado. A matriz `MonthCategoryTotals` é calculada uma vez sobre
+   `[min(range.from, range.to − 6), range.to]` e serve o comparativo (com 3 ou 6 meses) e o pivot.
+3. Cache inteiro zerado quando o `Ledger` notifica (qualquer repositório, configurações — inclusive troca de modo — ou virada de dia) e quando `filter` muda;
+   depois `notifyListeners()`. `dispose` remove o listener do `Ledger`.
+4. A UI lê só do controller (`ListenableBuilder(listenable: controller)`); nada de relatório é calculado em `build`. Views podem somar as linhas já agregadas
+   (totais de até 60 meses) e ordenar listas.
+
+## 7. UI
+
+Visual conforme `CLAUDE.md` (paleta, tipografia, espaçamento) e `docs/V3_DIRECTION.md`. Tom: sóbrio, entre sério e wabi-sabi. Cores via `context.colors` (extensão em `core/theme/app_colors.dart`).
+
+### 7.1 Tema — `lib/core/theme/`
+- `app_colors.dart`: `class AppColors extends ThemeExtension<AppColors>` com tokens `background, surface, sidebar, primary, primarySubtle, textPrimary, textSecondary, chartBar, warning, danger, success, border` + `AppColors.light`/`AppColors.dark` (valores do CLAUDE.md; `success` = `#43A047`/`#66BB6A`; `border` = textSecondary α 0.15) + `extension AppColorsX on BuildContext { AppColors get colors; }`.
+  Neutros quentes (Fase 7): claro `background #F6F5F2`, `surface #FFFFFF`, `sidebar #ECEAE5`; escuro `background #161514`, `surface #1F1E1C`, `sidebar #2A2826`. Primário, status e texto inalterados.
+- `app_spacing.dart`: `AppSpace.xs=4, sm=8, md=12, lg=16, xl=24, xxl=32`; `AppRadius.card=8, chip=4` (+ `BorderRadius` prontos);
+  `abstract final class AppMotion { static const fast = Duration(milliseconds: 150); static const normal = Duration(milliseconds: 200); static const curve = Curves.easeOutCubic; }` (Fase 7). Toda microanimação usa esses valores.
+- `app_palettes.dart`: `const List<int> kEntityColors` (10 cores ARGB para contas/cartões/categorias) e `const List<int> kCategoryIcons` (codepoints de `Icons.*` comuns — use `Icons.x.codePoint`). Única exceção permitida a valores fixos.
+- `app_text.dart` (Fase 7):
+  ```dart
+  abstract final class AppFonts { static const sans = 'IBMPlexSans'; static const serif = 'SourceSerif4'; }
+  abstract final class AppText {
+    static const tabularFigures = [FontFeature.tabularFigures()];
+    static TextStyle tabular(TextStyle style);           // style.copyWith(fontFeatures: tabularFigures)
+    static TextStyle screenTitle(BuildContext context);  // textTheme.titleLarge (serif, 20, w600)
+    static TextStyle kpi(BuildContext context);          // serif, 22, w600, textPrimary, tabular
+  }
+  ```
+- `app_theme.dart`: `ThemeData AppTheme.light()` / `AppTheme.dark()` — Material 3, `fontFamily: AppFonts.sans`, `extensions: [AppColors.x]`, `scaffoldBackgroundColor`, `cardTheme` (radius 8, elevation 0, borda), `inputDecorationTheme` (outline, dense), `dividerTheme`, `textTheme` (títulos 20 w600 **serif** em `titleLarge`; seções 14 w600, corpo 13, apoio 12, badge 11 em sans), `tooltipTheme` (fundo `surface`, borda `border`, texto `textPrimary` 12, radius 4, `waitDuration` 300 ms).
+- Fontes (Fase 7): `assets/fonts/` com IBM Plex Sans (Regular 400, Medium 500, SemiBold 600) e Source Serif 4 (Regular 400, Semibold 600), licença OFL (`OFL-*.txt` no mesmo diretório). Declaradas em `pubspec.yaml` (`flutter: fonts:`), famílias `IBMPlexSans` e `SourceSerif4`. Não é dependência nova (asset).
+
+### 7.2 Widgets compartilhados — `lib/core/widgets/`
+`MoneyText(int cents, {style, signed, colorBySign})` (respeita `hideValues`; algarismos tabulares), `SectionCard(title, trailing, child)`,
+`EmptyState(icon, message, action?)`, `LimitBar(used, limit)` (cor muda: <70% primary, <90% warning, ≥90% danger; Fase 7: `Tooltip` "Usado R$ X de R$ Y (Z%)"),
+`StatusBadge(label, color)`, `MonthSelector(value, onChanged)`, `MoneyField(controller, label)`,
+`DateField(value, onChanged, label)`, `confirmDialog(context, title, message) → Future<bool>`,
+`PlannedMarker` (ícone relógio + itálico para provisionados), `KpiTile(label, cents, color?, caption?, trend?)` (valor em `AppText.kpi`; Fase 7: `Widget? trend` abaixo do valor; troca de valor com `AnimatedSwitcher` fade `AppMotion.fast`).
+
+Fase 7 (arquivos novos, exportados por `widgets.dart`):
+- `trend.dart`: `DeltaBadge({required double? ratio, bool higherIsBetter = true})` → "▲ 12,3%" / "▼ 5,0%" (11 px w500, tabular); cor `success` se a variação é boa, `danger` se ruim, `textSecondary` se `ratio == 0`; `ratio == null` → `SizedBox.shrink()`. `Tooltip` "vs. mês anterior".
+  `Sparkline({required List<int> values, double width = 80, double height = 24, Color? color})` → `LineChart` do fl_chart sem eixos, grade, borda, pontos e toque; `color ?? colors.primary`; menos de 2 valores → `SizedBox(width, height)`.
+- `bank_avatar.dart`: `BankAvatar({required String bankName, double size = 24})` → quadrado `AppRadius.chip` com fundo `Color(kEntityColors[bankColorIndex(name)])` α 0.18 e iniciais na cor cheia (11 px w600). Nome vazio → "?" com `textSecondary`. Funções públicas puras: `String bankInitials(String name)` (trim; 2+ palavras → 1ª letra das 2 primeiras; 1 palavra → 2 primeiras letras; maiúsculas; vazio → "?") e `int bankColorIndex(String name)` (hash estável: `h = (h * 31 + codeUnit) & 0x7fffffff` sobre `name.trim().toLowerCase()`, `% kEntityColors.length`). Nunca logo real.
+- `skeleton.dart`: `SkeletonBox({double? width, required double height})` (retângulo `textSecondary` α 0.12, `AppRadius.chip`) e `SkeletonPulse({required Widget child})` (opacidade 0.5↔1.0 em loop de 900 ms). `SkeletonList({int rows = 6})` = coluna de `SkeletonBox` dentro de um `SkeletonPulse`.
+- `sortable_header.dart`: `SortableHeaderLabel({required String label, required bool active, required bool ascending, required VoidCallback? onTap, bool alignEnd = false})` → texto do cabeçalho (12 px w600 `textSecondary`; ativo → `textPrimary`) + seta `Icons.arrow_upward` 14 px visível só se `active`, girada 180° quando `!ascending` (`AnimatedRotation` `AppMotion.fast`). `onTap == null` → não clicável.
+
+### 7.3 Shell e telas
+`HomeShell`: só desktop, sempre com sidebar (`colors.sidebar`). Largura ≥ 900 → sidebar 220px com itens ícone+rótulo, item ativo com `primarySubtle`, rodapé com toggle "Modo: Simples/Ultra"; Ultra mostra badge de contagem (faturas vencidas/pendências). < 900 → sidebar colapsada de 64px só com ícones (rótulo em `Tooltip`; badge vira ponto `danger` 8px; rodapé vira `IconButton` de modo com tooltip "Modo: Simples/Ultra"). Largura animada com `AnimatedContainer` (`AppMotion.normal`). Sem `Drawer` nem `AppBar`.
+Páginas (índice): 0 Painel, 1 Previsão, 2 Cartões, 3 Contas, 4 Transações, 5 Importar (Fase 8), 6 Recorrentes, 7 Categorias, 8 Ajustes,
+9 Patrimônio (Fase 11; na sidebar aparece logo depois de Contas, sem atalho numérico — ver "Patrimônio e devo/me devem (Fase 11)"),
+10 Relatórios (Fase 12; na sidebar entre Categorias e Ajustes, sem atalho numérico — ver "Relatórios (Fase 12)").
+Botão global "Nova transação" (FAB / botão no cabeçalho).
+
+| Tela | Simples | Ultra |
+|---|---|---|
+| Painel | KPIs (saldo atual, a pagar 30 dias, fim do mês previsto), próximas faturas (valor), próximos vencimentos | + barra de limite, gráfico de barras por categoria, alerta de saldo negativo detalhado por conta |
+| Previsão | cards por mês (entradas, saídas, faturas, saldo final) | + gráfico de linha do saldo diário, tabela de eventos filtrável por conta/tipo |
+| Cartões | lista por banco, fatura atual | + limite usado/total, badge "N assinaturas", detalhe com faturas passadas/futuras e itens |
+| Contas | saldo atual | + saldo previsto fim do mês, transferência |
+| Transações | 3 colunas (data, descrição, valor), filtro por mês | 5+ colunas, filtros banco/cartão/conta/categoria/tipo, busca, toggle provisionados, rodapé com totais |
+| Recorrentes | lista e total mensal | + separação assinaturas, custo anual |
+| Categorias | lista | + orçamento e barra de consumo do mês |
+| Ajustes | modo, tema, ocultar valores | + horizonte de previsão, backup JSON (exportar/importar), CSV, apagar dados |
+
+Linhas provisionadas: itálico + `PlannedMarker` + fundo `warning` α 0.08. Passadas: `textSecondary`.
+
+#### Previsibilidade avançada (Fase 5)
+| Recurso | Onde | Simples | Ultra |
+|---|---|---|---|
+| Cobertura de faturas (§5.9 `needsAttention`) | Painel | 1 banner (cor `danger`): "N faturas nos próximos 60 dias sem saldo previsto na conta de pagamento" + a mais próxima (cartão, data). Oculto se N = 0 | `SectionCard` "Cobertura de faturas": linha por fatura com data, cartão, conta (ou "Sem conta de pagamento" em `warning`), valor, saldo após (`danger`) |
+| Linha do tempo de vencimentos (60 dias) | Previsão | — | `SectionCard` "Vencimentos (60 dias)": agrupado por dia; linha = cartão, conta, valor, saldo previsto da conta após; badge "Vencida" (overdue), saldo < 0 em `danger` |
+| Compromisso de parcelas M+1..M+12 | Previsão | — | `SectionCard` "Parcelas já comprometidas": tabela meses × (Total + 1 coluna por cartão com algum valor), rolagem horizontal |
+| Melhor cartão para comprar hoje (§5.8) | Cartões (topo) | 1 linha: "Melhor para comprar hoje: {cartão} — fatura vence em N dias ({dd/mm})" (1º com `hasLimit`; oculto se nenhum) | `SectionCard` com tabela: cartão, banco, vencimento, dias, limite livre (`danger` se ≤ 0) |
+| Cartão sem conta de pagamento | Cartões (`CardTile`) | badge `warning` "Sem conta de pagamento" | idem |
+| Mudança de ciclo com vigência (§4.2) | Form de cartão | ao editar fechamento/vencimento de cartão de crédito **com transações**, pergunta "Vale a partir de" (padrão hoje) e salva via `withCycleChange` | idem |
+
+#### Identidade visual e polimento (Fase 7)
+| Recurso | Onde | Simples | Ultra |
+|---|---|---|---|
+| Fontes e paleta quente (§7.1) | App inteiro | sim | sim |
+| Delta vs. mês anterior + sparkline 6 meses (§5.10) | Painel, KPI "Saldo atual": delta `deltaRatio(history[n-2].endBalanceCents, history.last.endBalanceCents)`, `higherIsBetter: true`; sparkline = `endBalanceCents` | — | sim |
+| KPI "Gasto no mês" | Painel (5º KPI): valor `expenseMonthToDate.current`, caption "até hoje"; delta `deltaRatio(previous, current)` com `higherIsBetter: false`; sparkline = `expenseCents` dos 6 meses | — | sim |
+| Avatar de banco | Cabeçalho de banco em Cartões e Contas | — | sim |
+| Cabeçalho ordenável (fixo) | Transações: Data, Descrição, Conta/Cartão, Categoria, Valor; clique alterna asc/desc; padrão Data desc | — (cabeçalho estático) | sim |
+| Estado vazio com ação | Transações ("Nova transação"; Ultra com filtro ativo: "Limpar filtros"), Recorrentes ("Nova recorrência"), Categorias ("Nova categoria") | sim | sim |
+| Tooltip rico | Gráfico de saldo diário (data, saldo, entradas e saídas do dia, nº de eventos); `LimitBar` | — (gráfico só Ultra) | sim |
+| Skeleton de boot | `main.dart` mostra `BootScreen` enquanto `bootstrap()` roda | sim | sim |
+| Microanimações 150–200 ms | Sidebar (item ativo e colapso), seta de ordenação, troca de valor do KPI | sim | sim |
+
+Dados de delta/sparkline vêm de `Ledger.monthlyHistory` / `Ledger.expenseMonthToDate` (memoizados), nunca calculados em `build`.
+
+#### Importação, regras e categorização (Fase 8)
+Decisões de navegação: **Importar** é item da sidebar (índice 5, `Icons.upload_file`, nos dois modos) e botão "Importar" no cabeçalho
+de Transações (abre o fluxo direto). **Regras** e **Dicionário** são seções da página Importar, visíveis só no Ultra
+(no Simples a página mostra só "Importar arquivo" e os perfis). Total de 9 páginas: cabe nos atalhos 1–9 da Fase 9.
+Arquivos em `features/importing/presentation/` (`import_page.dart`, `import_flow.dart`, `import_mapping_dialog.dart`,
+`import_preview_page.dart`, `import_preview_row.dart`, `dictionary_section.dart`) e `features/rules/presentation/`
+(`rules_section.dart`, `rule_form.dart`).
+
+| Recurso | Onde | Simples | Ultra |
+|---|---|---|---|
+| Página Importar | sidebar índice 5 | `PageHeader('Importar')` + botão "Importar arquivo"; `SectionCard` "Perfis salvos" (nome, destino com `BankAvatar` só no Ultra, formato, botões "Importar" (1 clique), editar, excluir); `EmptyState` com ação "Importar arquivo" | + `SectionCard` "Regras" e `SectionCard` "Dicionário de estabelecimentos" |
+| Fluxo | `startImport(context, {profile, pickFile})` | arquivo (`file_selector`, `.csv/.ofx/.txt`) → CSV: assistente de mapeamento; OFX: diálogo de destino → prévia → grava | idem |
+| Assistente CSV | `showImportMappingDialog` | separador, linhas a pular, amostra (8 linhas, cabeçalho = linha `skipRows−1`), colunas data/descrição/valor ou débito+crédito/categoria, formato de data, decimal, inverter sinal, data das parcelas, destino, "Salvar como perfil" + nome; prévia de 5 linhas interpretadas (ou erro) | idem |
+| Prévia | `showImportPreview` (tela cheia) | colunas: incluir, data, descrição final, valor (`MoneyText` com sinal), categoria (dropdown), 1 ícone de alerta com tooltip; rodapé com resumo e "Importar N" | + descrição original → final, origem da sugestão (Regra/Banco/Histórico/Dicionário) + confiança (alta/média/baixa), ícones por flag, chip de parcela "3/10" com checkbox "criar futuras", filtro "Só sem categoria", marcar/desmarcar todas, menu "Criar regra a partir desta linha" |
+| Regras | seção da página Importar | — | lista reordenável (arrastar = prioridade), switch ativa, padrão, tipo, → categoria, renomear; "Nova regra"; "Reaplicar às transações" com prévia "N transações mudam (X categoria, Y descrição)" e opção "Sobrescrever categorias já definidas" |
+| Form de regra | `showRuleForm` | — | padrão, tipo (Contém/Começa com/Regex), categoria, renomear para, ativa; botão "Testar padrão" (contagem + até 5 descrições existentes que casam; com `sampleDescription`, mostra se casa com a linha) |
+| Dicionário | seção da página Importar | — | lista densa padrão → categoria (badge `warning` "Categoria não encontrada" se não resolve), novo/editar/excluir, "Restaurar padrão" (confirmação) |
+| Sugestão no lançamento manual | `transaction_form.dart` | ao digitar a descrição de nova despesa/receita, se o usuário ainda não escolheu categoria, aplica `ledger.categorizer` e mostra `helperText` "Sugerida por regra" / "Sugerida pelo banco" / "Sugerida pelo histórico" / "Sugerida pelo dicionário" | idem |
+
+Visual da prévia (segue a Fase 7): linhas com `itemExtent` (40 Ultra, 48 Simples) em `ListView.builder`; cabeçalho com
+`SortableHeaderLabel(onTap: null)` (estático); valores tabulares; ícones de flag: `fitidDuplicate`/`probableDuplicate`
+`Icons.content_copy` (`danger`/`warning`), `existingInstallment` `Icons.layers` (`warning`), `sameNameAmount` `Icons.repeat`
+(`textSecondary`), `invoicePaymentLike` `Icons.credit_score` (`warning`), casamento com provisionado `Icons.event_available` (`primary`)
+com tooltip "Confirma provisionado {descrição} de {dd/mm}". Linha desmarcada: texto `textSecondary`. Ultra rola na horizontal
+abaixo de 1100 px. Sem cálculo em `build`: a sessão já traz tudo; filtros só selecionam índices.
+
+#### Produtividade (Fase 9)
+Sem dependência nova: `Shortcuts`/`Actions`/`CallbackShortcuts`/`Focus` do Flutter. Lógica testável fora da UI: ranking (§3.8, §5.17),
+operações em massa (§5.18), padrão de regra (§5.19) e seleção (`TransactionSelection`, abaixo).
+
+| Recurso | Simples | Ultra |
+|---|---|---|
+| Paleta Ctrl+K (navegar, ações, buscar transações) | sim (busca ignora provisionados de conta, como a tabela) | sim + entrada "Filtrar Transações do mês por “q”" |
+| Atalhos globais (N, /, 1–9, Ctrl+K, Ctrl+I) | sim (`/` sempre abre a paleta) | sim (`/` foca a busca da página Transações quando ela está aberta) |
+| Dicas de atalho (tooltips, rodapé da paleta, entrada "Buscar" na sidebar) | sim | sim |
+| Multi-seleção, Ctrl+A, Esc, barra de ações em massa | — | sim |
+| Edição inline de categoria e valor | — | sim |
+
+**Atalhos** (`lib/app/app_shortcuts.dart`):
+```dart
+class OpenPaletteIntent extends Intent { const OpenPaletteIntent(); }
+class NewTransactionIntent extends Intent { const NewTransactionIntent(); }
+class FocusSearchIntent extends Intent { const FocusSearchIntent(); }
+class ImportFileIntent extends Intent { const ImportFileIntent(); }
+class GoToPageIntent extends Intent { const GoToPageIntent(this.index); final int index; } // 0..8
+class SelectAllRowsIntent extends Intent { const SelectAllRowsIntent(); }
+class ClearSelectionIntent extends Intent { const ClearSelectionIntent(); }
+final Map<ShortcutActivator, Intent> kAppShortcuts;
+  // SingleActivator(keyK, control: true) → OpenPaletteIntent; SingleActivator(keyI, control: true) → ImportFileIntent;
+  // SingleActivator(keyN) → NewTransactionIntent; CharacterActivator('/') → FocusSearchIntent (independe do layout ABNT2/US);
+  // SingleActivator(digit1..digit9) e SingleActivator(numpad1..numpad9) → GoToPageIntent(0..8)
+final Map<ShortcutActivator, Intent> kSelectionShortcuts;
+  // SingleActivator(keyA, control: true) → SelectAllRowsIntent; SingleActivator(escape) → ClearSelectionIntent
+bool isTextInputFocused();
+  // FocusManager.instance.primaryFocus?.context: widget é EditableText ou tem EditableTextState acima
+class TypingGuardAction<T extends Intent> extends CallbackAction<T> {
+  TypingGuardAction({required super.onInvoke});
+  @override bool isEnabled(T intent) => !isTextInputFocused(); // desabilitada → evento segue (campo recebe a tecla)
+}
+```
+Regras: atalhos sem modificador (N, /, 1–9) e os de seleção (Ctrl+A, Esc) usam `TypingGuardAction` — **não disparam com foco em campo de texto**
+(Ctrl+A no campo seleciona o texto). Ctrl+K e Ctrl+I usam `CallbackAction` (valem também com foco em campo). Diálogos e rotas por cima do shell
+não recebem os atalhos (não são descendentes do shell).
+
+**Foco do shell**: `HomeShell` = `Shortcuts(kAppShortcuts)` > `Actions` > `Focus(focusNode: _shellFocus, autofocus: true)` > `Scaffold`.
+O shell guarda `_txFocus` e `_txSearchFocus` (`FocusNode`) e passa para `TransactionsPage`. Ao trocar de página e quando o foco primário cai num
+`FocusScopeNode` (nenhum nó folha focado) com a rota do shell no topo, o shell pede foco (pós-frame) em `_txFocus` se a página é Transações, senão
+em `_shellFocus`. Ações: N → `showTransactionForm(context)`; Ctrl+I → `startImport(context)`; 1–9 → página `i`; Ctrl+K → paleta;
+`/` → Ultra e página 4: `_txSearchFocus.requestFocus()`; senão abre a paleta. Paleta aberta não reabre (flag `_paletteOpen`).
+
+**Paleta** (`lib/app/command_palette.dart`):
+```dart
+class PaletteEntry {
+  const PaletteEntry({required this.label, required this.icon, required this.onRun, this.subtitle, this.shortcut,
+    this.keywords = const [], this.trailing, this.group = 'Comandos'});
+  final String label; final IconData icon; final VoidCallback onRun;
+  final String? subtitle; final String? shortcut; final List<String> keywords; final Widget? trailing; final String group;
+}
+Future<void> showCommandPalette(BuildContext context, {required List<PaletteEntry> commands,
+  List<PaletteEntry> Function(String query)? search});
+  // resultados = fuzzyRank(commands, q, (e) => [e.label, ...e.keywords], limit: 8) seguidos de search?.call(q) (já ordenados).
+  // Fecha com pop(entry) e SÓ DEPOIS chama entry.onRun() (o comando roda no contexto de quem abriu).
+```
+Visual: `Dialog` no topo (`alignment: Alignment.topCenter`, `insetPadding` topo 80), largura máx. 640, altura máx. 480, raio `AppRadius.card`.
+Campo com `Icons.search`, hint 'Buscar comandos e transações', `autofocus`. Lista com `itemExtent` 44; cabeçalho de grupo (12 px w600 `textSecondary`)
+quando `group` muda; linha = ícone 18, `label` (13), `subtitle` (12 `textSecondary`), à direita `trailing` e/ou `shortcut` em chip (11 px w500,
+borda `border`, raio `AppRadius.chip`). Item destacado com `primarySubtle`. Vazio → 'Nada encontrado'. Rodapé (12 `textSecondary`):
+'↑↓ navegar · Enter executar · Esc fechar'. Teclado: `CallbackShortcuts` em volta do campo (mais perto do foco que os atalhos de texto):
+↓/↑ movem o destaque (limitado às pontas, sem volta) e rolam para mantê-lo visível; Enter executa o destacado (`onSubmitted`); Esc fecha
+(padrão do `Dialog`). Clique executa. Mudar o texto zera o destaque em 0. Keys: `palette-input`, `palette-item-$i`.
+
+**Comandos** (`lib/app/app_commands.dart`), na ordem: 'Ir para {página}' ×9 (ícones de `_navItems`, `shortcut` '1'..'9', keywords [nome da página]),
+'Nova transação' (N; keywords: lançar, despesa, receita, adicionar), 'Importar arquivo' (Ctrl+I; csv, ofx, extrato), 'Nova recorrência'
+(assinatura, fixo), 'Mudar para Modo Ultra' / 'Mudar para Modo Simples' (modo), 'Alternar tema claro/escuro' (tema, escuro, claro),
+'Ocultar valores' / 'Mostrar valores' (privacidade, esconder). Tema: `brightness` atual escuro → `ThemePreference.light`, senão `dark`.
+Busca (query com 2+ caracteres): Ultra põe primeiro `PaletteEntry(group: 'Transações', label: 'Filtrar Transações do mês por “q”', icon: Icons.filter_list)`
+→ vai para a página 4 com `initialQuery: q`; depois até 20 transações de `TransactionSearchIndex.search` (índice construído uma vez ao abrir a
+paleta; Simples exclui `isProvisioned`): label = descrição (+ ' i/n' se parcela), subtitle = 'dd/mm/aaaa · conta/cartão · categoria',
+`trailing` = `MoneyText` com sinal (respeita `hideValues`), `onRun` → `showTransactionForm(context, initial: t)`.
+
+**Seleção** (`features/transactions/presentation/transaction_selection.dart`, Dart puro, imutável):
+```dart
+class TransactionSelection {
+  const TransactionSelection({this.ids = const {}, this.anchorId});
+  static const empty = TransactionSelection();
+  final Set<String> ids; final String? anchorId;
+  bool contains(String id);
+  TransactionSelection toggle(String id);                       // inverte id; anchorId = id
+  TransactionSelection extendTo(String id, List<String> order); // Shift+clique: anchor nulo/fora de order ou id fora → toggle(id);
+                                                                // senão ids ∪ order[min(ia, ib)..max(ia, ib)]; anchorId mantido
+  TransactionSelection selectAll(List<String> order);           // ids = order; anchorId mantido
+  List<String> selectedIn(List<String> order);                  // interseção na ordem de order
+  bool? allState(List<String> order);                           // order vazio ou nenhum → false; todos → true; parcial → null
+}
+```
+**Transações Ultra com seleção**: coluna de checkbox à esquerda (`kTxSelectWidth = 36`; `kTxUltraMinWidth` passa a 796) nas linhas e no
+cabeçalho (tristate por `allState`; clicar com tudo marcado limpa, senão marca todas as visíveis). Clique no checkbox → `toggle`; com Shift
+(`HardwareKeyboard.instance.isShiftPressed`) → `extendTo`. Clique no resto da linha continua abrindo o formulário. Linha selecionada:
+fundo `primarySubtle` (vence o fundo de provisionado). A página envolve o conteúdo em `Shortcuts(kSelectionShortcuts)` > `Actions` >
+`Focus(focusNode: widget.focusNode ?? próprio, autofocus: true)`: Ctrl+A marca todas as linhas visíveis; Esc limpa. Ações valem para
+`selectedIn(linhas visíveis)` (filtro escondeu → não entra). Trocar de mês limpa a seleção; Simples não mostra nem usa seleção.
+**Barra de ações em massa** (`bulk_action_bar.dart`, só com seleção visível não vazia, entre filtros e tabela, altura 40, fundo
+`primarySubtle`, raio `AppRadius.card`): '{N} selecionadas' + `BulkAction`s em ordem — 'Recategorizar' (`Icons.category_outlined`),
+'Confirmar pagamento' (`Icons.event_available`; desabilitado se nenhuma `isPlanned`), 'Criar regra' (`Icons.rule`), 'Excluir'
+(`Icons.delete_outline`, cor `danger`) — e `IconButton` `Icons.close` tooltip 'Limpar seleção (Esc)'.
+```dart
+class BulkAction { const BulkAction({required this.label, required this.icon, required this.onPressed, this.destructive = false});
+  final String label; final IconData icon; final VoidCallback? onPressed; final bool destructive; } // null = desabilitado
+class BulkActionBar extends StatelessWidget {
+  const BulkActionBar({super.key, required this.count, required this.actions, required this.onClear});
+  final int count; final List<BulkAction> actions; final VoidCallback onClear; }
+```
+A lista de `BulkAction` é montada pela página: a Fase 10 acrescenta 'Tags' sem mudar a barra.
+Diálogos (`bulk_dialogs.dart`; guarda contra duplo pop como os diálogos atuais):
+```dart
+typedef CategoryChoice = ({TransactionCategory? category}); // category null = 'Sem categoria'
+Future<CategoryChoice?> showBulkCategoryDialog(BuildContext context, {required int count, required List<TransactionCategory> categories});
+  // título 'Recategorizar {count}'; dropdown 'Sem categoria' + despesas (por nome) + receitas (por nome, sufixo ' (receita)'); null = cancelou
+Future<DateTime?> showBulkConfirmDialog(BuildContext context, {required int count, required DateTime initialDate});
+  // título 'Confirmar {count} provisionados'; DateField 'Data do pagamento'; botões 'Cancelar' / 'Confirmar'
+enum BulkDeleteScope { selected, wholeGroups }
+Future<BulkDeleteScope?> showBulkDeleteDialog(BuildContext context, {required int count, required int groups, required int wholeGroupsCount});
+  // groups == 0: 'Excluir {count} transações?' com 'Cancelar' / 'Excluir' (danger) → selected.
+  // groups > 0: texto '{groups} grupos de parcelas na seleção.'; 'Cancelar' / 'Só as {count} selecionadas' → selected /
+  //   'Grupos inteiros ({wholeGroupsCount} lançamentos)' (danger) → wholeGroups
+```
+Depois de cada ação: SnackBar — recategorizar '{changed} recategorizadas' (+ ' · {skipped} ignoradas (tipo incompatível)' se > 0); confirmar
+'{changed} provisionados confirmados'; excluir '{n} transações excluídas' e limpa a seleção; regra 'Regra criada · {n} transações atualizadas'.
+Recategorizar e confirmar mantêm a seleção.
+
+**Edição inline (Ultra)** (`inline_cells.dart`):
+```dart
+class InlineCategoryCell extends StatelessWidget {
+  const InlineCategoryCell({super.key, required this.categoryId, required this.options, required this.onChanged});
+  final String? categoryId; final List<TransactionCategory> options; final ValueChanged<String?> onChanged; }
+  // DropdownButton<String?> isDense, isExpanded, sem sublinhado, 12 px textSecondary: 'Sem categoria' + options
+class InlineAmountCell extends StatefulWidget {
+  const InlineAmountCell({super.key, required this.display, required this.amountCents, required this.onSubmit});
+  final Widget display; final int amountCents; final ValueChanged<int> onSubmit; }
+  // Exibe `display` com Tooltip 'Clique para editar o valor'; clique (GestureDetector, vence o InkWell da linha) → TextField denso,
+  // alinhado à direita, autofocus, texto formatMoney(amountCents) sem 'R$ ' todo selecionado, key 'inline-amount-field'.
+  // Enter: v = parseInlineAmount(texto); v nulo → continua editando com borda danger; v == amountCents → só sai; senão onSubmit(v) e sai.
+  // Esc (CallbackShortcuts no campo, não chega à seleção) ou perda de foco → cancela sem gravar.
+```
+`TransactionRow` (Ultra) ganha: `bool? selected` (null = sem checkbox), `VoidCallback? onToggleSelect`, `List<TransactionCategory>? categoryOptions`
++ `ValueChanged<String?>? onCategoryChanged` (os dois não nulos e `canEditCategoryInline` → `InlineCategoryCell`; senão texto), `ValueChanged<int>? onAmountChanged`
+(não nulo → `InlineAmountCell`; senão `MoneyText`). Opções de categoria = categorias do `kind` do tipo, por nome. Keys: `tx-select-<id>`,
+`inline-category-<id>`, `inline-amount-<id>`; cabeçalho `tx-select-all`.
+
+**Dicas de atalho**: FAB `tooltip: 'Atalho: N'`; botão 'Nova transação' de Transações em `Tooltip('Atalho: N')`; botão 'Importar' em
+`Tooltip('Atalho: Ctrl+I')`; sidebar larga: cada item em `Tooltip('Atalho: {i+1}')` e entrada 'Buscar' (ícone `Icons.search`, texto à direita
+'Ctrl+K' 11 px `textSecondary`, key `sidebar-search`) abaixo do logo; sidebar colapsada: tooltip do item '{rótulo} · {i+1}' e `IconButton`
+`Icons.search` tooltip 'Buscar (Ctrl+K)'. As duas entradas de busca abrem a paleta.
+
+#### Subcategorias, tags, metas e "posso gastar hoje" (Fase 10)
+Decisões de navegação: **sem página nova** (os atalhos 1–9 já mapeiam as 9 páginas). Metas é uma seção da página **Contas** (a meta é uma
+reserva dentro de uma conta). "Posso gastar hoje" é o **primeiro elemento do Painel** nos dois modos. Visual da Fase 7: KPI em `AppText.kpi`
+(Source Serif, tabular), tokens via `context.colors`, animações com `AppMotion`. Rótulo de categoria em toda a UI = `ledger.categoryTree.label(id)`
+(`'Pai › Filha'`); dropdowns listam `categoryTree.options(kind)` (pai seguido das filhas).
+
+| Recurso | Onde | Simples | Ultra |
+|---|---|---|---|
+| Posso gastar hoje (§5.23) | Painel, antes dos KPIs | `SpendableCard` com linha principal e "Ver cálculo" (só as parcelas da fórmula) | idem + lista dos eventos de faturas e provisionados no detalhamento |
+| Drill-down por categoria | Painel, "Gastos por categoria (mês)" | 3 raízes (gasto agregado), sem drill-down | 8 raízes agregadas; raiz com filhas abre as filhas (chevron) |
+| Árvore de categorias | Categorias | raízes por nome, cada uma seguida das filhas recuadas (sempre visíveis); gasto da raiz agregado | raízes recolhidas com chevron; gasto e orçamento da raiz agregados; filhas com gasto e orçamento próprios |
+| Categoria pai | Form de categoria | campo "Categoria pai" | idem |
+| Tags no form de transação | `transaction_form.dart` | — (tags existentes são preservadas, não exibidas) | `TagField` + tags sugeridas por regra |
+| Filtro e coluna de tags | Transações | — | filtro "Tags" (multi), tags na linha (`TagChips`), busca textual casa tags |
+| Tags em massa | barra de ações em massa | — | ação 'Tags' (adicionar/remover) |
+| Busca por tag | Paleta Ctrl+K | sim (`#tag` e texto) | sim |
+| Tags em regras | Form e seção de Regras | — | campo "Adicionar tags" e chips na linha da regra |
+| Metas | Contas, seção "Metas" | nome, barra de progresso, "R$ X de R$ Y", botão aportar/retirar | + conta, data-alvo, aporte mensal necessário, aviso de reserva acima do saldo, histórico, editar, arquivar, excluir, "Mostrar arquivadas" |
+| Reservado por conta | Contas, linha da conta | — | caption "R$ X reservado" (12 px `textSecondary`) quando > 0; `warning` se `overReservedCents > 0` |
+
+**`SpendableCard`** (`features/dashboard/presentation/spendable_card.dart`):
+```dart
+class SpendableCard extends StatefulWidget {
+  const SpendableCard({super.key, required this.data, required this.ultra});
+  final SpendableToday data; final bool ultra;
+}
+```
+Container `surface`, borda `border`, raio `AppRadius.card`, padding `AppSpace.lg`, key `spendable-card`. Título 'Posso gastar hoje' (14 w600).
+Linha principal (`Wrap`, alinhada pela base): `MoneyText(freeCents)` em `AppText.kpi` + ' livres · ' + `MoneyText(perDayCents)` em `AppText.kpi` +
+'/dia até {formatShortDate(untilDate)}' (texto em 14 `textSecondary`). `overcommitted` → no lugar: 'Sem folga até {dd/mm}' (`AppText.kpi`, `danger`)
+e abaixo 'Faltam ' + `MoneyText(-freeCents)` (`danger`). Legenda (12 `textSecondary`): com receita 'Próxima receita: {nextIncomeDescription} em {dd/mm}
+({days} dias)'; sem: 'Sem receita recorrente: considerando até o fim do mês ({days} dias)'. `TextButton` 'Ver cálculo' / 'Ocultar cálculo'
+(key `spendable-toggle`) alterna o detalhamento dentro de `AnimatedSize(duration: AppMotion.normal, curve: AppMotion.curve)` (key `spendable-detail`):
+linhas rótulo à esquerda e `MoneyText` tabular à direita —
+'Saldo das contas' (`balanceCents`); '− Faturas até {dd/mm} ({n})' (`invoicesCents`); '− Provisionados até {dd/mm} ({n})' (`plannedCents`);
+'− Reservado em metas' (`reservedCents`); divisor; '= Livre' (`freeCents`, w600; `danger` se ≤ 0); '÷ {days} dias' → `perDayCents`.
+Ultra: abaixo de cada uma das linhas de faturas e provisionados, até 8 eventos (`dd/mm`, descrição, valor; 12 px) e 'e mais N' se houver mais.
+Valores respeitam `hideValues` (via `MoneyText`). Dados de `ledger.spendableToday` (memoizado), nunca calculados em `build`.
+
+**Drill-down do Painel (Ultra)**: `CategoryRow` ganha `String? id` e `List<CategoryRow> children` (padrão `const []`). `DashboardSummary.of` usa
+`ledger.rolledSpendingFor(mês)` para as linhas (nome = `categoryTree.label(id)` da raiz, "Sem categoria" para null) e, no Ultra, preenche `children`
+de cada raiz que `hasChildren` com as filhas de gasto > 0 (`spendingFor(mês)[filha.id]`, nome = nome da filha) + linha 'Sem subcategoria' com o gasto
+direto na raiz quando > 0, ordenadas por valor desc. `CategoriesCard` (Ultra) vira `StatefulWidget` com `Set<String> _expanded`: raiz com `children`
+mostra chevron (`Icons.chevron_right`, `AnimatedRotation` 90° com `AppMotion.fast`); toque alterna; filhas recuadas `AppSpace.lg`, 12 px, mesma barra
+proporcional ao total do mês. Keys `category-row-<id>` (raiz) e `category-child-<id>` (filha; 'Sem subcategoria' usa `category-child-<raiz>-direct`).
+
+**Categorias**: `showCategoryForm(context, {TransactionCategory? initial, CategoryKind kind, String? parentId})`. Campo "Categoria pai"
+(`DropdownButtonFormField<String?>`, `initialValue`, key `category-parent`): 'Nenhuma (categoria principal)' + `categoryTree.roots(kind)` sem a própria;
+desabilitado com `helperText` 'Tem subcategorias' quando a categoria editada tem filhas; trocar o tipo limpa o pai; validador = `categoryParentError`.
+Nova subcategoria herda ícone e cor do pai como padrão. Menu da raiz ganha 'Nova subcategoria'. Excluir raiz com filhas → SnackBar
+'Mova ou exclua as subcategorias antes' (nada é apagado). Keys: `category-toggle-<id>` (chevron, Ultra), `category-line-<id>`.
+
+**Tags** (`features/transactions/presentation/tag_widgets.dart`):
+```dart
+class TagField extends StatefulWidget {
+  const TagField({super.key, required this.tags, required this.onChanged, this.suggestions = const [], this.helperText, this.label = 'Tags'});
+  final List<String> tags; final ValueChanged<List<String>> onChanged; final List<String> suggestions;
+  final String? helperText; final String label;
+}
+  // InputDecorator(labelText: label, helperText) com Wrap de InputChip (texto da tag, onDeleted remove) + TextField sem borda (key 'tag-input').
+  // Enter ou ',' → onChanged(normalizeTags([...tags, ...parseTagInput(texto)])) e limpa o campo. Backspace com campo vazio remove a última.
+  // Abaixo, até 8 ActionChip de sugestões (suggestions cujo tagKey não está em tags e começa com tagKey do texto digitado); toque adiciona.
+class TagChips extends StatelessWidget {
+  const TagChips({super.key, required this.tags, this.max = 3});
+  final List<String> tags; final int max;
+} // Row de '#tag' (11 px w500 textSecondary, fundo textSecondary α 0.08, raio AppRadius.chip, padding 4/2) até max, depois '+N'; vazio → SizedBox.shrink
+typedef BulkTagsChoice = ({bool remove, List<String> tags});
+Future<BulkTagsChoice?> showBulkTagsDialog(BuildContext context, {required int count, required List<String> suggestions});
+  // título 'Tags em {count} transações'; SegmentedButton 'Adicionar' / 'Remover' (key 'bulk-tags-mode'); TagField; 'Cancelar' / 'Aplicar'
+  // (desabilitado sem tags); guarda contra duplo pop. Cancelar → null.
+```
+Form de transação (Ultra): `TagField` depois de Categoria, `suggestions: ledger.allTags`. Em transação **nova**, enquanto o usuário não mexeu nas tags,
+o mesmo gatilho da sugestão de categoria (descrição) aplica `categorizer.categorize(...).tags` ao campo, com `helperText` 'Tags da regra'.
+Salvar passa `tags` (Simples: `widget.initial?.tags ?? const []`).
+Transações (Ultra): `TransactionFilter` ganha `Set<String> tags` (chaves `tagKey`; vazio = sem filtro; casa se `hasAnyTag`); `hasCriteria` inclui tags;
+`query` também casa `t.tags` (minúsculas, `contains`); `matches(t, {CategoryTree? tree})` e `visibleTransactions(..., {CategoryTree? tree})`: filtro
+de categoria numa raiz inclui as filhas (`t.categoryId == categoryId || tree.parentOf(t.categoryId) == categoryId`). Barra de filtros: dropdown de
+categoria com `options(expense)` e depois `options(income)` (rótulo `label`, receitas com sufixo ' (receita)'); botão `PopupMenuButton` key
+`filter-tags` com texto 'Tags' / 'Tags ({n})', itens `CheckedPopupMenuItem` para `ledger.allTags.take(30)` (+ selecionadas fora do top 30) e
+'Limpar tags' quando há seleção. Linha Ultra: rótulo da categoria por `categoryTree.label`; `TagChips(tags: t.tags)` depois da descrição.
+Ordenação pela coluna Categoria usa o rótulo. Ações em massa: `BulkAction('Tags', Icons.sell_outlined)` logo depois de 'Recategorizar'.
+`InlineCategoryCell` e `showBulkCategoryDialog` ganham `String Function(TransactionCategory c)? labelOf` (padrão `c.name`); com `labelOf`, a ordem
+recebida é mantida (a página passa `options(kind)`).
+Paleta: `transactionEntries` usa o rótulo da categoria no `subtitle` e acrescenta `' · #a #b'` quando há tags.
+
+**Metas** (`features/goals/presentation/goals_section.dart`, `goal_dialogs.dart`):
+```dart
+class GoalsSection extends StatefulWidget { const GoalsSection({super.key}); } // estado: _showArchived (Ultra)
+Future<Goal?> showGoalForm(BuildContext context, {Goal? initial});
+Future<void> showGoalMovementDialog(BuildContext context, Goal goal, {bool withdrawal = false});
+Future<void> showGoalHistory(BuildContext context, Goal goal);
+```
+`SectionCard(title: 'Metas', trailing: FilledButton.icon(Icons.add, 'Nova meta'))` (desabilitado sem conta ativa) depois da lista de contas.
+Vazio: `EmptyState(icon: Icons.savings_outlined, message: 'Nenhuma meta. Reserve parte do saldo de uma conta para um objetivo; o valor reservado sai do "posso gastar".', action: 'Nova meta')`.
+Linha (key `goal-<id>`): nome; barra de progresso (altura 6, fundo `textSecondary` α 0.15, preenchimento `primary`, `success` quando `reached`,
+largura animada `AppMotion.normal`); 'R$ X de R$ Y' (`MoneyText`) + `formatPercent(progress)`; `IconButton(Icons.add_circle_outline, tooltip: 'Aportar')`.
+Ultra: + conta (`BankAvatar` + nome; 'Conta arquivada' `warning`), 'até dd/mm/aaaa' se `targetDate`; 'Aporte mensal necessário: R$ Z'
+(`monthlyContributionNeeded`), 'Meta atingida' (`success`) ou 'Data-alvo passou' (`warning`, `isGoalOverdue`); `StatusBadge` `warning`
+'Reserva maior que o saldo da conta: faltam R$ X' quando `overReservedCents(saldo da conta, reservado da conta) > 0`; menu: Aportar, Retirar, Histórico, Editar,
+Arquivar/Desarquivar, Excluir. Arquivadas só com "Mostrar arquivadas" (Ultra), em `textSecondary`. Simples: só metas não arquivadas, sem menu.
+Form (`showDialog`, máx. 520): nome (obrigatório, 'Informe o nome'), conta (`DropdownButtonFormField`, `initialValue`, só contas ativas; obrigatória),
+alvo (`MoneyField`, > 0, 'Informe um alvo maior que zero'), `CheckboxListTile` 'Com data-alvo' + `DateField`. Na edição, trocar a conta é permitido
+só se a meta não tem movimentos (senão o campo fica desabilitado com `helperText` 'Meta com movimentos').
+Movimento: `SegmentedButton` 'Aporte' / 'Retirada' (key `goal-move-mode`), valor (`MoneyField`), data (`DateField`, padrão `ledger.today`), nota opcional;
+texto de apoio 'Disponível para reservar nesta conta: R$ A' (aporte) ou 'Reservado nesta meta: R$ R' (retirada); erro do domínio em `danger`;
+'Salvar' grava e fecha. Histórico: `AlertDialog` com movimentos por data desc ('dd/mm/aaaa', '+R$'/'−R$' com `MoneyText(signed: true)`, nota) e
+`IconButton(Icons.delete_outline)` por linha (bloqueado com SnackBar do `removeMovementError`).
+
+#### Patrimônio e devo/me devem (Fase 11)
+Decisões de navegação: **página nova "Patrimônio"** (índice 9, `Icons.account_balance_outlined`). Ativos e dívidas não cabem como seção de Contas
+(Contas já tem metas e a página ficaria longa) e o patrimônio precisa de gráfico. Na sidebar o item aparece **logo depois de Contas**
+(`const _sidebarOrder = [0, 1, 2, 3, 9, 4, 5, 6, 7, 8]`; a lista itera essa ordem, `onSelect`/badges continuam pelo índice). Sem atalho numérico:
+`GoToPageIntent` continua 0..8 e '1'..'9' continuam nas mesmas páginas. `_NavTile.number` vira `int?`: `null` → sidebar larga sem `Tooltip`; colapsada,
+tooltip só com o rótulo ('Patrimônio'). Acesso pela sidebar e pela paleta ('Ir para Patrimônio', sem `shortcut` — `buildAppCommands` já omite para i >= 9).
+Badge Ultra no item Patrimônio = número de dívidas `iOwe` com `isDebtOverdue`. Visual da Fase 7: KPI em `AppText.kpi`, valores tabulares (`MoneyText`),
+tokens via `context.colors`, `BankAvatar` onde houver conta, `EmptyState` com ação, animações com `AppMotion`. Dados só de `ledger.netWorthHistory`,
+`ledger.debtsByPerson`, `ledger.debtPeople`, `services.assets.all` e `services.debts.all` — nada calculado em `build` além de filtrar/ordenar listas.
+
+| Recurso | Simples | Ultra |
+|---|---|---|
+| KPI "Patrimônio líquido" | valor (`danger` se < 0) + 1 linha de apoio 'Contas R$ A · Ativos R$ B · A receber R$ C · Dívidas R$ D' (D = `liabilitiesCents`) | + `DeltaBadge` vs. mês anterior, variação em R$ (`MoneyText(signed: true)`) e `Sparkline` dos 12 últimos `netCents` |
+| Evolução (gráfico) | — | `SectionCard` 'Evolução' com `NetWorthChart` e seletor 12/24 meses |
+| Composição | — | `SectionCard` 'Composição' com os 5 componentes, total e variação vs. mês anterior |
+| Ativos | nome, tipo, valor atual, botão 'Atualizar valor' | + 'Atualizado em dd/mm/aaaa', última variação, menu (Atualizar valor, Histórico, Editar, Encerrar/Reativar, Excluir), 'Mostrar encerrados', total |
+| Devo / me devem | totais 'Me devem R$ X · Devo R$ Y', dívidas em aberto (pessoa, 'Me deve'/'Devo', restante, vencimento/'Vencida') e botão 'Quitar' | + 'Por pessoa', filtros (direção, pessoa, 'Mostrar quitadas'), descrição, data, pago/total, menu (Quitar, Pagamentos, Editar, Excluir) |
+| Painel | — | 6º KPI 'Patrimônio líquido' com delta e sparkline de 6 meses |
+| Paleta Ctrl+K | 'Ir para Patrimônio', 'Novo ativo', 'Nova dívida (devo / me devem)' | idem |
+
+**`NetWorthPage`** (`features/net_worth/presentation/net_worth_page.dart`, `StatefulWidget`; estado `_months` 12|24, padrão 12):
+`ListenableBuilder(ledger)` > `ListView` com `PageHeader(title: 'Patrimônio', actions: [OutlinedButton.icon(Icons.handshake_outlined, 'Nova dívida')
+→ showDebtForm, FilledButton.icon(Icons.add, 'Novo ativo') → showAssetForm])`, depois (padding `AppSpace.xl`, gap `AppSpace.lg`):
+1. KPI (key `net-worth-kpi`): `KpiTile(label: 'Patrimônio líquido', cents: last.netCents, color: last.netCents < 0 ? danger : null, trend: ...)` com
+   `last = ledger.netWorthHistory.last` e `prev` = penúltimo. Ultra `trend`: `Row` com `DeltaBadge(ratio: deltaRatio(prev.netCents, last.netCents))`,
+   `MoneyText(last.netCents − prev.netCents, signed: true, colorBySign: true)` + ' vs. mês anterior' (12 `textSecondary`) e `Sparkline(values: últimos 12 netCents)`.
+   Simples: abaixo do KPI, a linha de apoio da tabela (12 `textSecondary`, valores por `MoneyText`). Largura do KPI 320.
+2. Ultra: `SectionCard(title: 'Evolução', trailing: SegmentedButton<int>(key: 'net-worth-range', {12: '12 meses', 24: '24 meses'}))` com
+   `NetWorthChart(points: history.sublist(history.length − _months), hideValues: settings.hideValues)`.
+3. Ultra: `SectionCard(title: 'Composição')` (key `net-worth-breakdown`): linhas 'Contas', 'Ativos', 'A receber', '− A pagar (devo)', '− Dívida de cartão',
+   divisor, '= Patrimônio líquido' (w600). Colunas: valor atual (`MoneyText` tabular; passivos exibidos positivos) e variação vs. mês anterior da
+   **contribuição ao líquido** (`MoneyText(signed: true, colorBySign: true)`; passivo que cresce aparece negativo). Sob 'Dívida de cartão', apoio 12 px
+   `textSecondary`: 'Faturas em aberto e parcelas futuras já lançadas'.
+4. `const AssetsSection()`.
+5. `const DebtsSection()`.
+
+**`NetWorthChart`** (`features/net_worth/presentation/net_worth_chart.dart`):
+```dart
+class NetWorthChart extends StatelessWidget {
+  const NetWorthChart({super.key, required this.points, required this.hideValues});
+  final List<NetWorthPoint> points; final bool hideValues;
+}
+String netWorthTooltipText(NetWorthPoint p, {required bool hideValues}); // pública para teste
+```
+`LineChart` (fl_chart) altura 220, uma linha `netCents` em `colors.chartBar` (largura 2, sem pontos, sem área, sem gradiente), grade horizontal
+`border`, sem borda externa. Eixo X: `formatMonth(p.month)` em 1 de cada 3 pontos (11 px `textSecondary`); eixo Y: valores por `formatMoney`,
+ocultos (`showTitles: false`) com `hideValues`. Se algum `netCents < 0`, `HorizontalLine` em 0 (`colors.danger` α 0.4, tracejada).
+Tooltip rico no padrão do saldo diário (Fase 7: fundo `surface`, borda `border`, texto 12 `textPrimary`) com `netWorthTooltipText`, linhas separadas por '\n':
+```
+{formatMonthLong(month)}            // + ' (até dd/mm)' quando date != month.lastDay (mês atual)
+Patrimônio líquido: R$ N
+Contas: R$ A
+Ativos: R$ B
+A receber: R$ C
+A pagar: -R$ D
+Dívida de cartão: -R$ E
+```
+(valores por `formatMoney`; passivos com sinal negativo, `formatMoney(-x)`; `hideValues` → todos 'R$ ••••'). Menos de 2 pontos →
+`EmptyState(icon: Icons.show_chart, message: 'Ainda sem histórico para o gráfico.')`.
+
+**`AssetsSection`** (`features/net_worth/presentation/assets_section.dart`, `StatefulWidget`; estado `_showArchived`, só Ultra):
+`SectionCard(title: 'Ativos', trailing: TextButton.icon(Icons.add, 'Novo ativo'))`. Lista = `services.assets.all` não arquivados (Ultra com
+'Mostrar encerrados': todos), ordenados por `currentValueCents` desc e depois nome. Vazio (sem ativos não arquivados): `EmptyState(icon: Icons.home_work_outlined,
+message: 'Nenhum ativo. Cadastre imóveis, veículos e investimentos fora das contas para ver o patrimônio completo.', action: 'Novo ativo')`.
+Linha (key `asset-<id>`): ícone por tipo (`investment` `Icons.trending_up`, `realEstate` `Icons.home_outlined`, `vehicle` `Icons.directions_car_outlined`,
+`other` `Icons.category_outlined`), nome (13), `assetKindLabel` (12 `textSecondary`), `MoneyText(currentValueCents)` à direita e
+`IconButton(Icons.update, tooltip: 'Atualizar valor')` (key `asset-update-<id>`) → `showAssetValueDialog`.
+Ultra: + 'Atualizado em dd/mm/aaaa' (`latest.date`), `MoneyText(lastChangeCents, signed: true, colorBySign: true)` quando não nulo, menu
+(`PopupMenuButton` key `asset-menu-<id>`: 'Atualizar valor', 'Histórico', 'Editar', 'Encerrar' / 'Reativar', 'Excluir'); encerrados em `textSecondary`
+com `StatusBadge('Encerrado', textSecondary)`; `FilterChip` 'Mostrar encerrados' (key `assets-show-archived`) visível só se existe encerrado;
+rodapé 'Total' com a soma de `currentValueCents` dos não arquivados. Simples: sem menu nem encerrados.
+
+**Diálogos de ativo** (`features/net_worth/presentation/asset_dialogs.dart`):
+```dart
+Future<Asset?> showAssetForm(BuildContext context, {Asset? initial});
+Future<void> showAssetValueDialog(BuildContext context, Asset asset);
+Future<void> showAssetHistory(BuildContext context, Asset asset);
+```
+Form (`showDialog`, máx. 520): título 'Novo ativo' / 'Editar ativo'; nome (obrigatório, 'Informe o nome'); tipo (`DropdownButtonFormField<AssetKind>`,
+`initialValue`, rótulos `assetKindLabel`; key `asset-kind`); só na criação: 'Valor atual' (`MoneyField`; vazio/inválido → 'Informe o valor'; depois
+`assetSnapshotError`) e 'Data do valor' (`DateField`, padrão `ledger.today`). Salvar grava (§6.3) e devolve o ativo; Cancelar → `null`.
+Atualizar valor: título 'Atualizar valor · {nome}'; apoio 'Valor atual: R$ X em dd/mm/aaaa'; 'Novo valor' (`MoneyField`), 'Data' (`DateField`, padrão hoje),
+'Observação' opcional; se a data escolhida já tem snapshot: apoio 'Substitui o valor de dd/mm/aaaa'; erro do domínio em `danger`; 'Salvar'.
+Histórico: `AlertDialog` 'Histórico · {nome}', snapshots por data desc: 'dd/mm/aaaa', `MoneyText(valueCents)`, variação vs. o anterior
+(`MoneyText(signed: true, colorBySign: true)`; o primeiro não tem), nota (12 `textSecondary`), `IconButton(Icons.delete_outline)` por linha
+(bloqueado com SnackBar do `removeSnapshotError`). Todos com guarda contra duplo pop (padrão dos diálogos existentes).
+
+**`DebtsSection`** (`features/debts/presentation/debts_section.dart`, `StatefulWidget`; estado Ultra: `DebtDirection? _direction` (null = todas),
+`String? _person` (chave `foldText`), `bool _showSettled`):
+`SectionCard(title: 'Devo / me devem', trailing: TextButton.icon(Icons.add, 'Nova dívida'))`. Primeira linha (key `debt-totals`): 'Me devem ' +
+`MoneyText(last.receivableCents)` (`success`) + ' · Devo ' + `MoneyText(last.payableCents)` (`danger`), com `last = ledger.netWorthHistory.last`.
+Ultra: 'Por pessoa' — tabela densa de `ledger.debtsByPerson` (pessoa, 'Me deve', 'Devo', 'Líquido' com `colorBySign`); tocar numa linha
+(key `debt-person-$i`) aplica o filtro de pessoa (tocar de novo limpa). Filtros Ultra: `SegmentedButton<DebtDirection?>` (key `debt-filter-direction`:
+'Todas' / 'Me devem' / 'Devo'), `DropdownButton<String?>` 'Pessoa' (key `debt-filter-person`, 'Todas' + `ledger.debtPeople`) e `FilterChip`
+'Mostrar quitadas' (key `debt-show-settled`).
+Lista: dívidas em aberto (Ultra com 'Mostrar quitadas': todas) que passam nos filtros, ordenadas por (`dueDate` nulo por último, `dueDate` asc, `date` asc).
+Linha (key `debt-<id>`): pessoa (13), `StatusBadge` 'Me deve' (`success`) / 'Devo' (`warning`), `MoneyText(remainingCents)`, 'vence dd/mm' (12
+`textSecondary`) ou `StatusBadge('Vencida', danger)` (`isDebtOverdue`), `TextButton('Quitar')` (key `debt-settle-<id>`, oculto se `settled`).
+Ultra: + descrição, 'desde dd/mm/aaaa', 'R$ pago de R$ total' quando há pagamentos, quitadas em `textSecondary` com `StatusBadge('Quitada', textSecondary)`, menu
+(key `debt-menu-<id>`: 'Quitar', 'Pagamentos', 'Editar', 'Excluir'). Vazio: `EmptyState(icon: Icons.handshake_outlined, message: 'Nada pendente. Registre o
+que você deve ou o que te devem para acompanhar e quitar com um clique.', action: 'Nova dívida')`. Simples: sem filtros, sem 'Por pessoa', sem menu.
+
+**Diálogos de dívida** (`features/debts/presentation/debt_dialogs.dart`):
+```dart
+Future<Debt?> showDebtForm(BuildContext context, {Debt? initial});
+Future<void> showSettleDebtDialog(BuildContext context, Debt debt);
+Future<void> showDebtPayments(BuildContext context, Debt debt);
+```
+Form (máx. 520): título 'Nova dívida' / 'Editar dívida'; `SegmentedButton<DebtDirection>` (key `debt-direction`: 'Me devem' / 'Devo'; padrão 'Me devem';
+desabilitado com apoio 'Dívida com pagamentos' quando há pagamentos); 'Pessoa' (`Autocomplete<String>`, key `debt-person`, opções = `ledger.debtPeople`
+cujo `foldText` contém o `foldText` digitado, até 8; obrigatório 'Informe a pessoa'); 'Valor' (`MoneyField`; ≤ 0/inválido → 'Informe um valor maior que zero';
+edição com valor < `paidCents` → 'Já pago: R$ X'); 'Data' (`DateField`, padrão `ledger.today`); 'Descrição' opcional; `CheckboxListTile` 'Com vencimento'
++ `DateField` (vencimento < data → 'Vencimento antes da data'). Salvar grava `debts.upsert` (id novo na criação; na edição mantém `payments`) e devolve.
+Quitar (máx. 520): título 'Receber de {pessoa}' (me devem) / 'Pagar a {pessoa}' (devo); apoio 'Restante: R$ X'; 'Valor' (`MoneyField`, inicial = restante
+formatado sem 'R$ '; menor = pagamento parcial); 'Conta' (`DropdownButtonFormField<String>`, key `settle-account`, contas não arquivadas por nome com
+`BankAvatar`, `initialValue` a 1ª); 'Data' (`DateField`, padrão hoje); 'Categoria' opcional (key `settle-category`, 'Sem categoria' + `categoryTree.options(kind)`
+com `label`; kind = income para me devem, expense para devo); apoio 'Cria uma receita na conta' / 'Cria uma despesa na conta'; erro de
+`debtPaymentError` em `danger`; botão 'Confirmar'. Sem conta ativa: texto 'Cadastre uma conta para registrar o pagamento.' e 'Confirmar' desabilitado.
+Pagamentos: `AlertDialog` 'Pagamentos · {pessoa}' com os pagamentos por data desc: 'dd/mm/aaaa', `MoneyText`, descrição da transação ligada
+(`transactions.byId`) ou 'Transação excluída' (`warning`) e `IconButton(Icons.undo, tooltip: 'Desfazer')` (§6.3). Vazio → 'Nenhum pagamento'.
+
+**Painel Ultra**: `DashboardSummary` ganha `int? netWorthCents`, `double? netWorthDelta` e `List<int>? netWorthTrend` (Ultra: de `ledger.netWorthHistory`:
+último `netCents`, `deltaRatio` penúltimo→último, últimos 6 `netCents`; Simples: `null`). `DashboardKpiRow` acrescenta, depois de 'Gasto no mês',
+`KpiTile(label: 'Patrimônio líquido', cents: ..., trend: _Trend(delta, values, higherIsBetter: true))` quando não nulo.
+
+**Paleta**: `buildAppCommands` ganha `required VoidCallback onNewAsset` e `required VoidCallback onNewDebt`; depois de 'Nova recorrência':
+`PaletteEntry(label: 'Novo ativo', icon: Icons.home_work_outlined, keywords: ['patrimônio', 'imóvel', 'veículo', 'investimento', 'bem'])` e
+`PaletteEntry(label: 'Nova dívida (devo / me devem)', icon: Icons.handshake_outlined, keywords: ['devo', 'me devem', 'emprestei', 'empréstimo', 'pessoa', 'quitar'])`.
+O shell passa `() => showAssetForm(context)` e `() => showDebtForm(context)`.
+
+#### Relatórios (Fase 12)
+Decisões de navegação: **página nova "Relatórios"** (índice 10, `Icons.insights_outlined`), tela **curada** (lista fixa de relatórios, sem construtor livre).
+Na sidebar fica **entre Categorias e Ajustes**: `const _sidebarOrder = [0, 1, 2, 3, 9, 4, 5, 6, 7, 10, 8]`. Sem atalho numérico (`GoToPageIntent` continua 0..8);
+`_NavTile.number` `null` como Patrimônio; sem badge. Paleta: 'Ir para Relatórios' (sem `shortcut`, vem do laço de páginas) e um comando por relatório disponível
+no modo atual. Visual da Fase 7: Plex/Source Serif, valores tabulares (`MoneyText`/`AppText.tabular`), tokens via `context.colors`, tooltips ricos
+(fundo `surface`, borda `border`, texto 12 `textPrimary`), `AppMotion`, `EmptyState`, `SortableHeaderLabel`, `DeltaBadge`. Respeita `hideValues`
+(`MoneyText`; eixos de gráfico sem rótulos de valor; tooltips 'R$ ••••'). Janela desktop: tabelas largas rolam na horizontal.
+Ordenação por cabeçalho (todas as tabelas dos relatórios): clicar numa coluna nova ordena desc em colunas de valor e asc na coluna de texto; clicar na coluna ativa inverte.
+
+| Recurso | Simples | Ultra |
+|---|---|---|
+| Relatórios disponíveis | Tendência, Top estabelecimentos, Comparativo por categoria (só raízes, média de 3 meses) | os 7 (§5.27 `kUltraReports`) |
+| Filtros | só período (presets + personalizado) | período, contas/cartões, categorias, tags, tipo (despesas/receitas), incluir provisionados, 'Limpar filtros' |
+| Export CSV | sim (relatório atual) | sim |
+| Paleta | 'Ir para Relatórios' + 3 comandos | 'Ir para Relatórios' + 7 comandos |
+
+Ícones por relatório (`IconData reportKindIcon(ReportKind)`, em `reports_page.dart`): comparativo `Icons.compare_arrows`, tendência `Icons.bar_chart`,
+pivot `Icons.grid_on`, gasto por dia `Icons.calendar_view_month`, estabelecimentos `Icons.storefront_outlined`, fixo × variável `Icons.pie_chart_outline`,
+patrimônio `Icons.account_balance_outlined`.
+
+**`ReportsPage`** (`features/reports/presentation/reports_page.dart`, `StatelessWidget`; `const ReportsPage({super.key, required this.controller})`):
+`ListenableBuilder(listenable: controller)` > `Column`:
+1. `PageHeader(title: 'Relatórios', actions: [OutlinedButton.icon(Icons.download, 'Exportar CSV')])` (key `report-export`).
+2. `ReportFilterBar` fixo (não rola com o conteúdo), padding horizontal `AppSpace.xl`, seguido de `Divider`.
+3. `Expanded(Row)`: lista de relatórios (largura 200, `ListView` de itens densos 40 px com ícone + `reportKindLabel`, item atual com fundo `primarySubtle`,
+   key `report-tab-{kind.name}`, tocar → `controller.selected = kind`), `VerticalDivider`, e a área do relatório: `AnimatedSwitcher(AppMotion.normal)` com
+   `KeyedSubtree(ValueKey(current))`. Acima da view, quando `ignoredFor(current)` não é vazio: 'Filtros ignorados neste relatório: {lista com ", "}'
+   (12 `textSecondary`, key `report-ignored`).
+Cada view ocupa o espaço restante e rola sozinha (as tabelas têm cabeçalho fixo). Views (dados vindos do controller):
+`categoryComparison` → `CategoryComparisonView`; `trend` → `TrendView`; `pivot` → `PivotView`; `heatmap` → `HeatmapView`; `topMerchants` → `MerchantsView`;
+`fixedVariable` → `FixedVariableView`; `netWorth` → `NetWorthReportView`.
+Exportar: `getSaveLocation(suggestedName: controller.csvFileName(current), acceptedTypeGroups: [XTypeGroup(label: 'CSV', extensions: ['csv'])])`;
+`null` → nada; grava `'﻿' + controller.csvFor(current)` (`File.writeAsString`); SnackBar 'CSV exportado.' / 'Não foi possível exportar o CSV.'.
+A função de gravação é injetável para teste: `ReportsPage({..., this.saveCsv})` com
+`typedef SaveReportCsv = Future<bool> Function(String suggestedName, String csv)` (padrão: `file_selector` + `File`; `false` = cancelado).
+
+**`ReportFilterBar`** (`features/reports/presentation/report_filter_bar.dart`, `StatelessWidget`):
+```dart
+const ReportFilterBar({super.key, required this.filter, required this.range, required this.ultra, required this.onChanged,
+  required this.accounts, required this.cards, required this.categoryTree, required this.tags});
+final ReportFilter filter; final ReportRange range; final bool ultra; final ValueChanged<ReportFilter> onChanged;
+final List<Account> accounts; final List<PaymentCard> cards; final CategoryTree categoryTree; final List<String> tags; // tags = ledger.allTags
+Future<Set<String>?> showReportMultiSelect(BuildContext context, {required String title,
+  required List<({String id, String label, bool indent})> options, required Set<String> selected});
+```
+`Wrap` (spacing `AppSpace.sm`): `DropdownButton<ReportPeriodPreset>` (key `report-period`, rótulos `reportPeriodLabel`); com `custom`, dois `MonthSelector`
+'De' / 'Até' (keys `report-from`, `report-to`; padrão = `range` atual); texto do intervalo '{formatMonth(from)} – {formatMonth(to)}' (12 `textSecondary`, key `report-range`).
+Ultra: botões `OutlinedButton` com contagem — 'Contas e cartões: Todos' / 'Contas e cartões: {n}' (key `report-filter-accounts`; opções = contas e depois cartões,
+arquivados com sufixo ' (arquivada)'/' (arquivado)'; ids de conta vão para `accountIds`, de cartão para `cardIds`), 'Categorias: Todas' / '{n}'
+(key `report-filter-categories`; opções `categoryTree.options(flow == expense ? expense : income)` com `label`, filhas com `indent`), 'Tags: Todas' / '{n}'
+(key `report-filter-tags`; desabilitado sem tags; opções = `tags`, seleção guardada como `tagKey`); `SegmentedButton<ReportFlow>` 'Despesas' / 'Receitas'
+(key `report-flow`; trocar o tipo limpa `categoryIds`); `FilterChip` 'Incluir provisionados' (key `report-planned`); `TextButton` 'Limpar filtros'
+(key `report-clear`, só com `hasScopeFilters`) → `onChanged(filter.periodOnly)`.
+`showReportMultiSelect`: `AlertDialog` (máx. 420 × 480) com `CheckboxListTile` denso por opção (indent 24 nas filhas), botões 'Limpar' (devolve `{}`),
+'Cancelar' (`null`) e 'Aplicar' (seleção). Guarda contra duplo pop.
+
+**`CategoryComparisonView`** (`category_comparison_view.dart`, `StatefulWidget`):
+`({required CategoryComparison data, required CategoryTree tree, required bool ultra, required ReportFlow flow, required bool isCurrentMonth, required ValueChanged<int> onAverageMonthsChanged})`
+(`flow` = `controller.effectiveFilter.flow`; `isCurrentMonth` = `data.month` é o mês de `ledger.today`).
+Cabeçalho: 'Mês de referência: {formatMonthLong(month)}' (+ ' (até hoje)' se `isCurrentMonth`) e, Ultra, `SegmentedButton<int>` 'Média 3 meses'/'Média 6 meses'
+(key `comparison-average`). Tabela (cabeçalho fixo com `SortableHeaderLabel`; padrão: mês atual desc; null sempre por último):
+Ultra: Categoria (240) | {mês} | {mês anterior} | Média {n}m | Variação (`MoneyText(signed: true)`) | % (`DeltaBadge(ratio: changeRatio, higherIsBetter: flow == income)`) |
+Vs. média (`DeltaBadge(ratio: averageChangeRatio, higherIsBetter: flow == income)`). Raiz com filhas tem chevron (key `comparison-expand-{id}`, `AnimatedRotation` `AppMotion.fast`); filhas indentadas 24 px
+com o nome da filha ou '(sem subcategoria)'. Simples: Categoria | {mês} | {mês anterior} | % ; sem drill-down. Linha final 'Total' (w600) de `data.total`.
+Linhas 36 px (Ultra) / 44 px (Simples). Vazio (`rows` vazio) → `EmptyState(icon: Icons.category_outlined, message: 'Sem lançamentos no período com estes filtros.')`.
+
+**`TrendView`** (`trend_view.dart`, `StatefulWidget`; estado `_showAverage`, só Ultra):
+`({required List<TrendPoint> points, required List<int?> expenseAverage, required List<int?> balanceAverage, required bool ultra, required bool hideValues})`
++ `String trendTooltipText(TrendPoint p, {required bool hideValues})` pública: '{formatMonthLong}\nReceitas: R$ X\nDespesas: R$ Y\nSaldo do mês: R$ Z'.
+`BarChart` (altura 220) com 2 barras por mês: receitas `colors.success`, despesas `colors.chartBar`; rótulo X `formatMonth` (todos até 12 pontos, senão 1 a cada 3);
+eixo Y `formatMoney` (oculto com `hideValues`); tooltip rico com `trendTooltipText`. Ultra: `LineChart` (altura 160) do saldo do mês (`colors.primary`, largura 2,
+sem pontos, sem área) com `HorizontalLine` em 0 (`colors.danger` α 0.4, tracejada) se algum saldo < 0; `FilterChip` 'Média móvel 3 meses' (key `trend-average`) desenha
+`balanceAverage` no `LineChart` e `expenseAverage` como 2ª linha (tracejadas, `colors.textSecondary`; nulls viram lacuna). Legenda abaixo dos gráficos.
+Tabela: Mês | Receitas | Despesas | Saldo do mês (`colorBySign`) (+ Ultra com média: 'Média 3m despesas', 'Média 3m saldo'; null → '–'); rodapé 'Total' com somas.
+Tudo zero → `EmptyState(icon: Icons.bar_chart, message: 'Sem lançamentos no período com estes filtros.')`.
+
+**`PivotView`** (`pivot_view.dart`, `StatefulWidget`; estado: `PivotSortKey _key = total`, `_monthIndex`, `_ascending = false`, `Set<String> _expanded`):
+`({required CategoryPivot pivot, required CategoryTree tree})`. Linhas exibidas = `sortPivotRows(pivot.rows, ...)` (raízes; filhas abaixo do pai se expandido).
+`LayoutBuilder` > `Scrollbar` > `SingleChildScrollView(horizontal)` > `SizedBox(width: max(maxWidth, 240 + 96 × meses + 112))` > `Column`: cabeçalho fixo
+(36 px, fundo `surface`, borda inferior `border`; `SortableHeaderLabel` 'Categoria', cada `formatMonth`, 'Total' — clique ordena por ela, alterna asc/desc; keys
+`pivot-sort-label`, `pivot-sort-{i}`, `pivot-sort-total`), `Expanded(ListView.builder(itemExtent: 32))` e rodapé 'Total' fixo com `columnTotals` e `grandTotalCents`.
+Célula: `MoneyText` tabular alinhado à direita; 0 → '–' `textSecondary`; fundo `colors.primary` α `0.04 + 0.20 × célula / maxCellCents` nas raízes (sem fundo se
+`maxCellCents == 0`); filhas sem fundo, rótulo indentado 24 px em 12 px. Chevron nas raízes com filhas (key `pivot-expand-{id}`). Linha: key `pivot-row-{id ?? 'none'}`.
+Vazio → `EmptyState(icon: Icons.grid_on, message: 'Sem lançamentos no período com estes filtros.')`.
+
+**`HeatmapView`** (`heatmap_view.dart`, `StatelessWidget`): `({required SpendingHeatmap heatmap, required bool hideValues})`
++ `String heatmapTooltipText(DateTime day, DaySpending? s, {required bool hideValues})` pública: com gasto 'dd/mm/aaaa · R$ X · N transações' ('1 transação' no singular);
+sem gasto 'dd/mm/aaaa · sem gastos'; `hideValues` → 'R$ ••••'.
+Grade estilo calendário: colunas = semanas, linhas = dias da semana (domingo no topo). `offset = from.weekday % 7`; dia i (0 = `from`) → coluna `(i + offset) ~/ 7`,
+linha `(i + offset) % 7`. Dias gerados com `DateTime(from.year, from.month, from.day + i)` até `to`; diferença de dias sempre via `DateTime.utc` (sem erro de horário de verão).
+Célula 12×12, gap 2, raio 2; cor nível 0 = `colors.border`; níveis 1–4 = `colors.primary` α 0.25 / 0.45 / 0.70 / 1.0 (`heatmap.levelOf`). `Tooltip` por célula
+(key `heatmap-day-{dateKey}`). Rótulos de mês acima da primeira coluna de cada mês ('jan', 'fev'... = `formatMonth` antes da '/'), rótulos 'Dom', 'Qua', 'Sáb' à esquerda.
+Rolagem horizontal. Abaixo: legenda 'Menos ▢▢▢▢▢ Mais' e resumo 'Total R$ X · N dias com gasto · Maior dia: dd/mm (R$ Y)' (sem `maxDay` → só o total).
+Sem dias → `EmptyState(icon: Icons.calendar_view_month, message: 'Sem gastos no período com estes filtros.')`.
+
+**`MerchantsView`** (`merchants_view.dart`, `StatefulWidget`; estado: coluna de ordenação, asc/desc, `_showAll`):
+`({required List<MerchantTotal> merchants, required CategoryTree tree, required bool ultra})`. Ultra: Estabelecimento (`label`, apoio `key` em 11 px `textSecondary`
+quando difere de `foldText(label)`) | Total | Compras | Ticket médio | Última compra | Categoria (`reportCategoryLabel`). Simples: Estabelecimento | Total | Compras.
+Cabeçalho fixo com `SortableHeaderLabel` (padrão Total desc). Mostra as 50 primeiras; botão 'Mostrar todos ({n})' (key `merchants-show-all`) quando há mais.
+`ListView.builder` com `itemExtent` 36 (Ultra) / 44 (Simples); rodapé '{n} estabelecimentos'. Vazio → `EmptyState(icon: Icons.storefront_outlined,
+message: 'Sem compras no período com estes filtros.')`.
+
+**`FixedVariableView`** (`fixed_variable_view.dart`, `StatelessWidget`; só Ultra): `({required List<FixedVariableMonth> months, required bool hideValues})`
++ `String fixedVariableTooltipText(FixedVariableMonth m, {required bool hideValues})` pública: '{formatMonthLong}\nRecorrentes: R$ A\nParcelas: R$ B\nVariável: R$ C\nFixo: {formatPercent} do total'
+(sem total → linha 'Fixo: –'). `BarChart` empilhado (altura 220; `rodStackItems`: recorrentes `colors.primary`, parcelas `colors.warning`, variável `colors.chartBar` α 0.35),
+legenda, e tabela Mês | Recorrentes | Parcelas | Fixo | Variável | Total | % fixo; rodapé 'Total' (somas; % = fixo/total do período). Apoio (12 `textSecondary`):
+'Fixo = lançamentos de recorrências e parcelas. Variável = o resto.' Tudo zero → `EmptyState(icon: Icons.pie_chart_outline, message: 'Sem gastos no período com estes filtros.')`.
+
+**`NetWorthReportView`** (`net_worth_report_view.dart`, `StatelessWidget`; só Ultra): `({required List<NetWorthPoint> points, required bool hideValues})`.
+`NetWorthChart(points: points, hideValues: hideValues)` (Fase 11) e tabela Mês | Contas | Ativos | A receber | A pagar | Dívida de cartão | Líquido | Variação
+(`MoneyText(signed: true, colorBySign: true)` vs. ponto anterior da lista; o primeiro '–'). Apoio: 'Histórico disponível: últimos 24 meses. Filtros de conta, categoria,
+tag, tipo e provisionados não se aplicam ao patrimônio.' Sem pontos → `EmptyState(icon: Icons.account_balance_outlined, message: 'Sem histórico de patrimônio no período.')`.
+
+**Paleta**: `buildAppCommands` ganha `required ValueChanged<ReportKind> onOpenReport`; depois das entradas de Patrimônio ('Nova dívida ...'), uma entrada por
+relatório de `ultra ? kUltraReports : kSimpleReports`: `PaletteEntry(label: 'Relatório: {reportKindLabel}', icon: reportKindIcon(k), group: 'Relatórios',
+keywords: ['relatório', 'análise', ...palavras do relatório], onRun: () => onOpenReport(k))`. Palavras: comparativo ['comparar', 'mês anterior', 'média', 'categoria'];
+tendência ['12 meses', 'receitas', 'despesas', 'saldo', 'evolução']; pivot ['pivot', 'tabela', 'planilha', 'categoria', 'mês']; gasto por dia ['heatmap', 'calendário', 'dia'];
+estabelecimentos ['lojas', 'onde gasto', 'ranking', 'top']; fixo × variável ['fixo', 'variável', 'recorrente', 'parcelas']; patrimônio ['patrimônio', 'evolução', 'líquido'].
+O shell passa `(k) { _reports.selected = k; _select(10); }`.
+
+### 7.4 Onboarding
+Uma tela: escolher modo (Simples/Ultra) + checkbox "Criar dados de exemplo" (fictícios: "Banco Alfa", "Banco Beta"; nunca bancos reais). Grava `onboardingDone`.
+
+## 8. Testes
+- Unitários obrigatórios para todo `domain/` e `core/utils|models|services`.
+- `test/` espelha `lib/` (`test/features/cards/domain/invoice_cycle_test.dart`).
+- Widget smoke test: app sobe com `MemoryRecordStore` e navega pelas 11 páginas (9 na Fase 8; Patrimônio na Fase 11; Relatórios na Fase 12) sem exceção (janela larga 1400×900 e estreita 800×700 com sidebar colapsada).
+- Fixtures de importação (Fase 8): `test/fixtures/import/` com arquivos **fictícios** (texto exato no BACKLOG, T-074/T-075). Nunca dado real.
+- Atalhos (Fase 9): testes de widget usam `tester.sendKeyEvent` / `sendKeyDownEvent(LogicalKeyboardKey.controlLeft)` e cobrem o caso
+  "tecla com foco em campo de texto não dispara".
+- Fase 10: domínio puro com os exemplos de §5.20–5.23 (o de §5.23 monta a `Forecast` com `ForecastService.compute` sobre dados do teste, não à mão).
+  `Ledger` testado com repositórios em memória (`goals` incluído).
+- Fase 11: domínio puro com os exemplos de §5.24–5.26 (o de §5.26 monta as compras do cartão com `buildInstallments`); `Ledger` com
+  repositórios em memória (`assets` e `debts` incluídos); smoke test navega as 10 páginas.
+- Fase 12: domínio puro com os exemplos de §5.27–5.32 (parcelas com `buildInstallments`); teste de desempenho de §5.32 (20.000 transações × 24 meses,
+  cada relatório < 300 ms); `ReportsController` com `bootstrap` em memória; views testadas com dados montados pelas funções de domínio dentro do app de teste
+  (`AppScope` + tema, para `MoneyText`/`context.colors`); smoke test navega as 11 páginas.
+- Portão: `bash tool/check.sh` → `CHECK OK`.
+
+### Decisões da revisão da Fase 11
+- Dívida: data não pode ser futura nem posterior ao primeiro pagamento.
+- `cardDebtAt`: `invoicePayment` provisionado não abate a dívida do cartão.
+- Ativo encerrado que recebe valor > 0 é reativado (`archived = false`).
+- Diálogos de dívida mascaram valores com `hideValues` (inclusive o valor pré-preenchido).
+
+## 9. Fase 13 — Pendências da v3
+
+Fecha as pendências de CONTEXT §12. Sem dependência nova, sem box nova no backup, `ledger.dart` não muda. Decisões fechadas abaixo;
+cada subseção é o contrato da tarefa indicada em `docs/BACKLOG.md` (Fase 13).
+
+### 9.1 `CollectionRepository` grava antes de mudar a memória (T-200)
+`delete`, `deleteWhere` e `replaceAll` passam a seguir `upsertAll`: **disco primeiro, memória e notify depois**.
+- `delete(id)`: ausente → nada; `await _store.delete(id)`; só então remove e `_changed()`.
+- `deleteWhere(test)`: calcula os ids; vazio → nada; `await _store.deleteAll(ids)`; só então remove e `_changed()` (um notify).
+- `replaceAll(items)`: monta mapas; `await _store.putAll(entries)`; `await _store.deleteAll(antigos fora de entries)`; só então troca a memória e `_changed()` (um notify).
+- Falha do store → a exceção sobe; `all`, `version` e listeners ficam como antes. Limite: em `replaceAll`, falha entre `putAll` e `deleteAll`
+  deixa no disco os novos além dos antigos (memória continua a anterior); a compensação do backup (`replaceAll(retrato)`) apaga os extras.
+Comentário de classe atualizado ("todas as escritas gravam antes de mudar a memória").
+
+### 9.2 Linha de fechamentos memoizada (T-047)
+Contrato já descrito em T-047 (BACKLOG, Fase 6). Assinaturas públicas de `invoice_cycle.dart` não mudam.
+
+### 9.3 Tags pré-dobradas (T-201) — `features/transactions/domain/tags.dart`
+```dart
+Set<String> tagKeysOf(Transaction t);
+  // conjunto imutável de tagKey(tag) das tags de t; t.tags vazio → const {}.
+  // Memoizado por instância (Expando<Set<String>>): Transaction é imutável, copyWith gera instância nova.
+bool hasAnyTag(Transaction t, Set<String> keys); // keys vazio → true; senão tagKeysOf(t).any(keys.contains)
+```
+Resultado de `hasAnyTag` idêntico ao atual; o filtro de Transações e os relatórios deixam de dobrar texto a cada build.
+
+### 9.4 Desfazer importação (T-202, T-212) — `features/importing/domain/import_batch.dart`
+Decisão: o lote guarda **ids criados** e **versões anteriores** das transações alteradas. `Transaction` não ganha campo novo.
+```dart
+class ImportBatch {
+  ImportBatch({required this.id, required DateTime createdAt, required this.label, this.accountId, this.cardId,
+    List<String> createdIds = const [], List<Transaction> previous = const []}); // listas imutáveis
+  final String id;
+  final DateTime createdAt;          // com horário; ordena o histórico
+  final String label;                // nome do arquivo importado
+  final String? accountId, cardId;   // destino (ImportTarget)
+  final List<String> createdIds;     // plan.create (inclui parcelas futuras e pagamentos de fatura), na ordem do plano
+  final List<Transaction> previous;  // versão anterior de cada transação de plan.update (provisionados confirmados)
+  int get createdCount => createdIds.length;
+  int get confirmedCount => previous.length;
+  // toMap {'id','createdAt' (ISO 8601),'label','accountId'?,'cardId'?,'createdIds','previous' (lista de Transaction.toMap)}
+  // fromMap: id/createdAt inválidos → FormatException (registro pulado no boot); createdIds não-lista → [], itens não String ignorados;
+  //   item de previous inválido ignorado.
+}
+const int kImportBatchesKept = 10;
+ImportBatch importBatchFor(ImportPlan plan, {required String id, required DateTime createdAt, required String label,
+  required ImportTarget target, required Iterable<Transaction> before});
+  // createdIds = ids de plan.create; previous = para cada t de plan.update, a transação de `before` com o mesmo id (ausente → ignorada)
+ImportBatch? latestImportBatch(Iterable<ImportBatch> batches);       // maior createdAt; empate: maior id; vazio → null
+List<String> importBatchesToPrune(Iterable<ImportBatch> batches, {int keep = kImportBatchesKept});
+  // ids dos lotes além dos `keep` mais recentes (mesma ordem de latestImportBatch)
+({List<String> deleteIds, List<Transaction> restore}) importUndoPlan(ImportBatch batch, Iterable<Transaction> current);
+  // deleteIds = createdIds que ainda existem em current (ordem de createdIds)
+  // restore = previous cujo id ainda existe em current (transação excluída depois da importação não volta)
+```
+Regras:
+1. Só o lote **mais recente** pode ser desfeito (pilha): desfazer um lote antigo poderia sobrescrever confirmações de lotes posteriores.
+   Desfeito o último, o anterior vira o mais recente e pode ser desfeito também.
+2. O que é revertido: transações criadas pelo lote são excluídas (mesmo se editadas depois); provisionados confirmados voltam à versão
+   anterior (status, data, `externalId`, `importedDescription`, categoria e tags de antes). Edição manual feita depois num provisionado
+   confirmado é perdida (o diálogo avisa). Perfil de importação e aprendizado de categorias do banco **não** são revertidos.
+3. Persistência: box `fm_import_batches` (`AppServices.importBatches`). Não entra no `exportJson`; import de backup e "Apagar todos os dados"
+   fazem `importBatches.replaceAll([])` (o lote não faria sentido sobre outros dados). Entra no retrato/rollback do import de backup.
+4. Gravar importação (`import_flow.dart`): `before = transactions.all` (antes do upsert) → `transactions.upsertAll(rows)` (como hoje) →
+   `importBatches.upsert(importBatchFor(plan, id: newId(), createdAt: services.clock(), label: file.name, target: target, before: before))` →
+   `importBatches.deleteWhere` dos ids de `importBatchesToPrune` → perfil (como hoje). Falha ao gravar o lote → SnackBar
+   'Lançamentos importados, mas sem opção de desfazer.' (segue para o perfil). Sucesso → SnackBar com o texto atual e
+   `SnackBarAction(label: 'Desfazer')` que chama `undoImportBatch` sem confirmação.
+5. `Future<({int deleted, int restored})> undoImportBatch(AppServices s, ImportBatch batch)` (em `import_flow.dart`):
+   `p = importUndoPlan(batch, s.transactions.all)`; `await transactions.upsertAll(p.restore)`; `await transactions.deleteWhere((t) => ids.contains(t.id))`;
+   `await importBatches.delete(batch.id)` (lote apagado por último: falha no meio permite repetir; repetir é idempotente).
+   SnackBar 'Importação desfeita: {deleted} lançamentos removidos' + (restored > 0 ? ', {restored} provisionados reabertos' : '');
+   erro → 'Não foi possível desfazer a importação.'.
+6. Página Importar (Simples e Ultra): seção **'Importações recentes'** (oculta sem lotes) com até 10 linhas, mais recente primeiro:
+   `label` · `formatDate(createdAt)` · '{createdCount} lançamentos' (+ ' · {confirmedCount} confirmados' se > 0). Só a linha do mais recente tem
+   o botão 'Desfazer' (key `import-undo-{id}`) → `confirmDialog('Desfazer importação?', '{createdCount} lançamentos criados por este arquivo serão
+   excluídos e {confirmedCount} provisionados voltam a ficar pendentes. Edições feitas depois neles são perdidas.')` → `undoImportBatch`.
+
+### 9.5 Pagamento de fatura no extrato (T-203, T-208, T-212, T-213) — `features/importing/domain/invoice_payment_match.dart`
+Decisão: só importação **em conta** converte; em importação de **cartão** a linha de pagamento continua desmarcada (o pagamento entra pelo
+extrato da conta; importar os dois lados duplicaria). Sugestão automática só com valor exato; senão o usuário escolhe a fatura num menu.
+```dart
+class InvoiceCandidate {
+  const InvoiceCandidate({required this.cardId, required this.dueMonth, required this.dueDate, required this.remainingCents});
+  final String cardId; final YearMonth dueMonth; final DateTime dueDate; final int remainingCents;
+  String get invoiceKey => dueMonth.key;   // o mesmo que pay_invoice_dialog grava
+}
+List<InvoiceCandidate> invoiceCandidatesFor({required String accountId, required Iterable<PaymentCard> cards,
+  required List<Invoice> Function(String cardId) invoicesFor});
+  // cartões kind == credit, !archived, paymentAccountId == accountId; faturas com remainingCents > 0; ordem dueDate asc, cardId asc
+InvoiceCandidate? suggestInvoicePayment({required int amountCents, required DateTime date, required List<InvoiceCandidate> candidates});
+  // remainingCents == amountCents e |dueDate − date| <= 10 dias (diferença via DateTime.utc); menor distância;
+  // empate dueDate asc, cardId asc; nenhuma → null
+List<InvoiceCandidate> invoiceChoicesFor(DateTime date, List<InvoiceCandidate> candidates);
+  // menu manual: por cartão, a candidata de dueDate mais próxima de date (empate: a de dueDate anterior); ordem cardId asc
+```
+Sessão (`import_session.dart`):
+- `ImportRow.invoicePayment` (`InvoiceCandidate?`, `copyWith` com `_keep`), `bool get isInvoicePayment`.
+- `ImportSession.build(..., List<InvoiceCandidate> invoiceCandidates = const [])`; `ImportSession.invoiceCandidates` guarda a lista.
+  Linha com `target.accountId != null`, tipo `expense`, flag `invoicePaymentLike` e `plannedMatch == null` →
+  `invoicePayment = suggestInvoicePayment(abs, line.date, …)`. Com sugestão: `include = true` salvo se a linha também tem
+  `fitidDuplicate`/`probableDuplicate`; `categoryId = null`; `createInstallments = false`.
+- `ImportSession setInvoicePayment(int i, InvoiceCandidate? c)`: ignorado se o destino é cartão ou a linha é `income`. `c != null` →
+  `invoicePayment = c`, `include = true`, `categoryId = null`, `createInstallments = false`. `null` → `invoicePayment = null` e a categoria volta a
+  `plannedMatch?.categoryId ?? suggestion.categoryId` (se `!categoryEdited`); `include` não muda.
+- `recategorize` e `setCategory` ignoram linhas de pagamento de fatura; `uncategorizedIndices` as exclui.
+- `summary` ganha `invoicePayments` (incluídas com `invoicePayment`); `create` passa a excluí-las.
+- Plano: linha incluída com `invoicePayment` → `create` de `Transaction(id: idGenerator(), type: invoicePayment, amountCents: abs, date: line.date,
+  description: finalDescription, accountId: target.accountId, cardId: c.cardId, invoiceKey: c.invoiceKey, status: paid, externalId: line.fitid,
+  importedDescription: line.description)` — sem categoria, sem tags, sem parcelas; `plannedMatch` (escolha manual sobre linha que casou) **não** é confirmado.
+- `import_flow.dart` monta `invoiceCandidatesFor(accountId: target.accountId!, cards: services.cards.all, invoicesFor: services.ledger.invoicesFor)`
+  só quando o destino é conta (cartão → `const []`).
+Prévia (`import_preview_row.dart`/`import_preview_page.dart`): em linha `expense` de importação em conta com `invoiceCandidates` não vazio e
+(`isInvoicePayment` ou flag `invoicePaymentLike`), um menu compacto (key `import-invoice-{i}`) — no lugar do seletor de categoria quando marcado:
+rótulo 'Fatura {nome do cartão} · venc. dd/mm' (marcado) ou 'Pagamento de fatura?' (não marcado); opções = `invoiceChoicesFor` com o mesmo
+rótulo + 'Não é pagamento de fatura'. Nome do cartão via `AppScope.of(context).cards.byId`. O chip 'Parece pagamento de fatura' só aparece sem
+`invoicePayment`. Resumo da prévia acrescenta ' · {n} pagamentos de fatura' quando `invoicePayments > 0`.
+
+### 9.6 Regras no lançamento manual (T-214) — `transaction_form.dart`
+Decisão mínima: categoria e tags já eram sugeridas (Fase 8/10). Passa a valer também o `renameTo`, **só em lançamento novo** de `expense`/`income`,
+com aviso visível e opção de recusar. Edição não aplica regras (igual a hoje).
+- `_suggestCategory` guarda `r.renamedDescription`. Se não vazio e diferente do texto digitado (trim), mostra abaixo da descrição
+  (key `form-rename-hint`, 12 px, `textSecondary`): 'Será salvo como "{renamed}" (regra)' + `TextButton` 'Manter como digitado'
+  (key `form-rename-keep`); tocado, o aviso some até a descrição mudar de novo.
+- Ao salvar (novo, sem recusa): `description = renamed`, `importedDescription = texto digitado` (a regra continua casando, §5.14).
+- Tags no Simples (campo oculto): lançamento novo grava `tags = r.tags` da última sugestão (Ultra continua pelo campo).
+- Parcelado: vale para a base, logo para todas as parcelas (`buildInstallments` copia).
+
+### 9.7 Tags em recorrências (T-204, T-215)
+`RecurringRule` ganha `final List<String> tags` (construtor `this.tags = const []`, normaliza com `normalizeTags` e guarda imutável;
+`copyWith({List<String>? tags})` com `??`; `toMap` só quando não vazia; `fromMap` tolerante como `Transaction`; `==`/`hashCode` elemento a elemento).
+`occurrenceTransactions` copia `tags: r.tags` (materialização e projeção). Decisão: a materialização **não** aplica regras — a recorrência já é
+configuração explícita (categoria, descrição e tags escolhidas no formulário) e projeção e ocorrência gravada precisam ser iguais. Mudar as tags da
+recorrência afeta só ocorrências futuras (como a categoria). Formulário: `TagField` só no Ultra (sugestões `ledger.allTags`); no Simples as tags
+existentes são preservadas ao salvar. Backup: viajam no mapa (backup antigo sem `tags` importa normalmente).
+
+### 9.8 Filtro de relatório persistente (T-205, T-216)
+`report_filter.dart`:
+```dart
+Map<String, dynamic> ReportFilter.toMap();
+  // {'preset': name, 'customFrom': key?, 'customTo': key?, 'accountIds', 'cardIds', 'categoryIds', 'tagKeys' (listas ordenadas),
+  //  'flow': name, 'includePlanned'}
+factory ReportFilter.fromMap(Map<String, dynamic> map);
+  // tolerante: enum desconhecido → padrão (last12, expense); chave de mês inválida → null; custom sem os dois meses → last12;
+  // não-lista → {}; itens não String ignorados; includePlanned só true se == true
+ReportFilter withKnownIds({required Set<String> accountIds, required Set<String> cardIds, required Set<String> categoryIds,
+  required Set<String> tagKeys}); // intersecta cada conjunto do filtro com o conhecido; resto igual
+```
+Persistência: `AppServices.uiState` (`RecordStore` da box `fm_ui_state`; estado de tela, fora do backup e do "Apagar todos"), registro único
+`{'id': 'reports', 'filter': filter.toMap(), 'selected': kind.name, 'averageMonths': 3|6}` (mesmo padrão de `SettingsController`).
+`ReportsController`: o construtor lê o registro; `filter = ReportFilter.fromMap(...).withKnownIds(ids de services.accounts.all, services.cards.all,
+services.categories.all (arquivados inclusive), tagKey de ledger.allTags)`; `selected` por `enumByName` (inválido → trend); `averageMonths` 3 ou 6
+(outro → 3). Registro ausente/inválido → padrões. Os setters de `filter`, `selected` e `averageMonths` (quando mudam) gravam o registro sem
+`await` (`unawaited` + `catchError` com `debugPrint`: perder estado de tela não é erro). Não grava em `settings` (mudar settings invalidaria o
+`Ledger` inteiro). §6.4 deixa de dizer "não são persistidos entre execuções".
+
+### 9.9 Patrimônio no período do relatório (T-216)
+`ReportsController.netWorth`: `m` = meses de `range.from` até o mês de `today` (inclusivos). `m <= Ledger.netWorthMonths` → recorte de
+`ledger.netWorthHistory` (como hoje). Senão → `netWorthHistory(accounts, cards, transactions, assets, debts, today: ledger.today, months: min(m, 120))`
+(§5.26) recortado em `range.from <= month <= range.to`; memoizado no cache do controller (zera com o `Ledger` ou o filtro). Painel e página
+Patrimônio continuam com 24 meses. `NetWorthReportView`: o texto de apoio perde a frase 'Histórico disponível: últimos 24 meses.' (o resto fica).
+
+### 9.10 Heatmap preguiçoso (T-217)
+A grade de `HeatmapView` vira `ListView.builder` horizontal (`itemExtent: _stride`, `itemCount: weeks`, altura 8 × `_stride`); cada coluna
+(rótulo do mês + 7 células) é montada sob demanda a partir de `from + (w × 7 + r − offset)` dias. A coluna de rótulos dos dias da semana fica
+fora da lista. Keys (`heatmap-day-yyyymmdd`), tooltip, cores e posições continuam iguais. Com 60 meses só as colunas visíveis (+ cache da
+lista) são montadas.
+
+### 9.11 Backup usa os formatadores comuns (T-211)
+`backup_service.dart` remove `_csvMoney`/`_csvText` e usa `formatCsvMoney`/`csvText` (§3.3, Fase 12). Saída do CSV byte a byte igual.
+
+### 9.12 Transação de quitação sincroniza a dívida (T-206, T-210)
+Decisão: editar/excluir a transação em qualquer tela **ajusta o pagamento** (consistência sem bloquear o usuário). `debt_math.dart`:
+```dart
+Set<String> linkedTransactionIds(Iterable<Debt> debts, bool Function(String id) exists);
+  // transactionId dos pagamentos cuja transação existe agora
+List<Debt> syncDebtsWithTransactions(Iterable<Debt> debts, {required Set<String> knownIds,
+  required Transaction? Function(String id) lookup});
+  // só pagamentos com transactionId ∈ knownIds: lookup == null → pagamento removido (withoutPayment);
+  // amountCents ou dateOnly(date) diferentes → pagamento substituído (mesmo id e transactionId, valor/data da transação).
+  // Devolve só as dívidas que mudaram (ordem de entrada).
+```
+`knownIds` (ids que existiam na última sincronização) impede que `transactionId` órfão vindo de backup (§3.5 Fase 11) apague pagamentos.
+Tipo, conta, status e categoria da transação são ignorados. Valor editado acima do restante deixa a dívida quitada (`remainingCents` é `max(0, …)`).
+`features/debts/presentation/debt_transaction_sync.dart`:
+```dart
+class DebtTransactionSync {
+  DebtTransactionSync({required CollectionRepository<Transaction> transactions, required CollectionRepository<Debt> debts});
+    // calcula _known e escuta os dois repositórios
+  Future<T> suspendDuring<T>(Future<T> Function() action); // não sincroniza durante action; depois recalcula _known
+  void dispose();
+}
+```
+Mudança em `transactions` (fora de `suspendDuring`, sem sincronização em curso) → `changed = syncDebtsWithTransactions(debts.all, knownIds: _known,
+lookup: transactions.byId)`; não vazio → `await debts.upsertAll(changed)` (erro → `debugPrint`, `_known` mantido para tentar de novo); depois
+recalcula `_known`. Mudança em `debts` → recalcula `_known`. Fluxos de §6.3 continuam válidos: quitar (transação antes da dívida) e desfazer
+(dívida antes da transação) não disparam ajuste. Import de backup e "Apagar todos os dados" rodam dentro de `services.debtSync.suspendDuring`
+(senão a gravação assíncrona da sincronização poderia ressuscitar dívidas antigas depois do `replaceAll`). O bootstrap cria o sync (vive com o app).
+§5.25 regra 4 passa a valer este contrato.
+
+### 9.13 Import de backup recuperável (T-207, T-211, T-212)
+`core/services/recovery_journal.dart`:
+```dart
+abstract interface class RecoveryJournal {
+  Future<String?> read();          // null = sem retrato pendente
+  Future<void> write(String json); // grava em '<arquivo>.tmp' e renomeia por cima (troca atômica no mesmo volume)
+  Future<void> clear();            // apaga; ausente → ok
+}
+class MemoryRecoveryJournal implements RecoveryJournal { bool failWrites = false; ... }   // testes
+class FileRecoveryJournal implements RecoveryJournal { FileRecoveryJournal(File file); }  // dart:io
+```
+Arquivo: `{getApplicationSupportDirectory()}/finme_import_journal.json` (bootstrap com Hive); `bootstrap(storeFactory: …)` sem `journal:` →
+`MemoryRecoveryJournal()`. `BackupService.importJson(s, json)`:
+1. Valida e converte (`_parse`) como hoje: erro → `FormatException`, nada muda.
+2. `await s.journal.write(exportJson(s))` (retrato do estado atual em disco). Falha → a exceção sobe e nada muda.
+3. Aplica dentro de `s.debtSync.suspendDuring` (coleções, `importBatches.replaceAll([])`, settings, `materializeRecurring`); rollback em memória
+   como hoje (§3.5), agora incluindo `importBatches`.
+4. Sucesso → `journal.clear()` (falha só `debugPrint`; limite: o próximo boot restauraria o estado anterior e avisaria).
+   Falha com rollback completo → `journal.clear()`; falha com alguma restauração falhando → o retrato **fica**; relança o erro original.
+`static Future<bool> BackupService.recoverPendingImport(AppServices s)`: `read()`; null/vazio → false. Senão aplica o retrato com os passos 1 e 3
+(sem escrever novo retrato); sucesso → `clear()` e true; falha → `debugPrint`, retrato mantido (tenta no próximo boot), false. O bootstrap chama
+antes de `materializeRecurring` e grava `services.restoredFromJournal = true` quando devolve true; o `HomeShell` mostra uma vez a SnackBar
+'A última importação de backup não terminou. Os dados anteriores foram restaurados.' e zera a flag.
+Queda de energia no meio do import também cai aqui (o boot volta ao estado anterior). §3.5: o limite "rollback não atômico" passa a apontar
+para este contrato.
+
+### 9.14 `AppServices` e bootstrap (T-210)
+`AppServices` ganha (obrigatórios no construtor, salvo indicado): `CollectionRepository<ImportBatch> importBatches` (box `fm_import_batches`),
+`RecordStore uiState` (box `fm_ui_state`), `RecoveryJournal journal`, `DebtTransactionSync debtSync`, `bool restoredFromJournal = false` (mutável).
+`bootstrap({storeFactory, clock, RecoveryJournal? journal})`. "Apagar todos os dados" (Ajustes): roda em `debtSync.suspendDuring` e faz também
+`importBatches.replaceAll([])`.
+
+### 9.15 Testes (Fase 13)
+Domínio com os exemplos das tarefas; `FailingRecordStore` de teste para §9.1; `DebtTransactionSync` e `ReportsController` com `bootstrap` em
+memória; `recoverPendingImport` com `MemoryRecoveryJournal`. Testes existentes só mudam onde o contrato muda (texto de apoio do patrimônio,
+`summary` da sessão).
+
+## 10. Fase 14 — Perfis
+
+Vários perfis com dados isolados (ex.: pessoal, empresa, outra pessoa) e PIN opcional por perfil.
+
+### 10.1 Modelo — `features/profiles/domain/profile.dart`
+`Profile {String id, String name, String? pinSalt, String? pinHash, DateTime createdAt}`; `hasPin = pinHash != null`.
+`verifyPin(pin)` (sem PIN, sempre true), `withPin(pin?)` (null remove; sal novo a cada troca), `toMap/fromMap` (datas ISO), `copyWith` com `_keep` para `pinSalt`/`pinHash` (SPEC §4). `defaultProfileId = 'default'`.
+
+### 10.2 PIN — `features/profiles/domain/pin_hash.dart`
+SHA-256 em Dart puro (`sha256Hex`, sem dependência nova). `isValidPin`: 4 a 8 dígitos. `hashPin(pin, salt)` = SHA-256 iterado
+10 000 vezes sobre `salt:pin`; `newPinSalt()` com `Random.secure()` (16 bytes, hex).
+Limite: o PIN só bloqueia a interface; os boxes Hive continuam legíveis em disco. Sem limite de tentativas.
+
+### 10.3 Isolamento e registro
+- `bootstrap({String profileId = defaultProfileId, ...})`. `boxNamesFor(id)`: perfil `default` usa os nomes atuais `fm_*`
+  (sem migração; os dados existentes ficam no perfil "Principal"); outros usam `p<id>_fm_*`. Retrato do import:
+  `finme_import_journal.json` (default) ou `finme_import_journal_<id>.json`. `storeFactory` recebe o nome já prefixado.
+- `RecordStore.close()` (Hive fecha o box; memória no-op). `AppServices.close()` descarta o `Ledger` e fecha os stores do perfil.
+- `deleteProfileData(id)`: apaga do disco os boxes de `boxNamesFor(id)` e o retrato. Nunca para o perfil aberto.
+- `ProfileRegistry` (`app/profile_registry.dart`, `ChangeNotifier`) sobre o box global `fm_profiles` (fora de perfil e de backup).
+  Vazio → cria "Principal" (`default`). `create(name)`, `rename`, `setPin(id, pin?)` (null remove), `delete(id)` (chama
+  `deleteProfileData`; o perfil `default` também pode ser excluído desde que não esteja aberto e reste ao menos um perfil).
+- Backup, CSV e "Apagar todos os dados" valem só para o perfil aberto.
+
+### 10.4 Abertura e troca — `app/profile_gate.dart`
+`ProfileGate` é a raiz (`main.dart`). Um perfil sem PIN → abre direto. Senão → `ProfilePickerPage` (avatar com iniciais,
+nome, cadeado se tem PIN, "Novo perfil"). Abrir: tela de carregamento → `bootstrap(profileId)` → `FinMeApp`; erro →
+`BootErrorScreen`. `ProfileScope` (InheritedWidget) expõe `registry`, `activeId` e `switchProfile()`; ausente em testes
+(sidebar mostra "FinMe" e Ajustes não mostra a seção Perfil). Trocar: `AppServices.close()` e volta ao picker.
+
+### 10.5 UI
+- Sidebar: topo vira avatar + nome do perfil; clique → menu "Trocar perfil". Colapsada: só avatar com tooltip.
+- Ajustes, seção "Perfil": renomear, definir/alterar/remover PIN (alterar e remover pedem o PIN atual), criar perfil,
+  excluir outro perfil (confirmação destrutiva).

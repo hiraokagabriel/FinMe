@@ -1,480 +1,182 @@
-# CONTEXT.md — FinMe: Estado Atual do Projeto
+# CONTEXT.md — FinMe v2: estado atual
 
-> **Para uso da IA:** Este arquivo é a fonte da verdade sobre o que está implementado, como o projeto está estruturado e o que falta fazer. Consulte-o antes de qualquer commit.  
-> **Última atualização:** 2026-04-06
+> Estado em 2026-11-15. Fonte da verdade de domínio: `docs/SPEC.md`. Tarefas e status: `docs/BACKLOG.md`.
+> Este arquivo descreve o que existe no código hoje. Atualize-o ao concluir uma fase.
 
----
+## 1. O que é o FinMe v2
 
-## 1. O que é o FinMe
+App local (sem backend, sem integração bancária) de **previsibilidade financeira** para quem tem muitos cartões de crédito, contas e faturas.
+Pergunta central: *"quanto vai sair, de onde e quando — e meu saldo aguenta?"*
 
-Aplicativo Flutter de **gestão financeira pessoal** para Android (com estrutura também para iOS, Windows, Linux, macOS e Web). O foco principal é controle de transações, cartões de crédito, categorias, recorrências e metas financeiras.
+- Faturas certas por cartão (fechamento, vencimento, parcelas, assinaturas).
+- Previsão de caixa consolidada e por conta, com alerta de saldo negativo e cobertura de faturas.
+- Provisionamento de boletos e despesas planejadas.
+- Categorias e orçamento mensal.
+- Dois modos sobre o mesmo domínio: **Simples** (enxuto) e **Ultra** (denso). Alternância em Ajustes e no rodapé da sidebar.
 
-- **Stack:** Flutter (Dart) + Hive (banco local) + fl_chart (gráficos) + csv (exportação)
-- **Persistência:** 100% local via Hive (sem backend/API)
-- **Versão atual:** 1.0.0+1
+Plataforma: só Windows (desktop); as demais foram removidas na v3 (`docs/V3_DIRECTION.md`). Esta é a v2, um rewrite na branch `rewrite/v2`; a v1 foi apagada (ver ROADMAP).
 
----
+## 2. Stack
 
-## 2. Estrutura de Pastas
+- Flutter 3.41 / Dart 3.11 (`environment: sdk: ^3.11.4`).
+- Persistência: Hive com mapas (`Box<Map>`). Sem adapters e sem typeIds: cada entidade tem `toMap()`/`fromMap()`.
+- Pacotes: `hive`, `hive_flutter`, `path_provider`, `fl_chart` (gráfico de previsão), `csv` (exportação CSV), `file_selector` (salvar/abrir arquivo de backup e CSV), `cupertino_icons`.
+- Estado: `ChangeNotifier` + `ListenableBuilder`. Sem pacote de estado.
+- Nenhuma outra dependência é permitida.
+
+## 3. Como rodar
+
+- SDK Flutter: `E:\Projetos\FinMe\flutter\bin` (fora do PATH). No Git Bash: `export PATH=/e/Projetos/FinMe/flutter/bin:$PATH`.
+- Dependências: `flutter pub get`.
+- Rodar: `flutter run -d windows`.
+- Build: `flutter build windows`.
+- Testes: `flutter test`.
+- **Portão obrigatório:** `bash tool/check.sh` (format + analyze + test). Termina com `CHECK OK`. O script acha o SDK sozinho.
+
+## 4. Arquitetura
+
+Regras: `domain/`, `core/models/` e `core/utils/` são Dart puro (sem `package:flutter`). Dinheiro é `int` em centavos. Formatação só em `core/utils/formatters.dart`. Cores só via `context.colors`.
 
 ```
 lib/
-├── main.dart
-├── app/
-│   ├── app.dart
-│   └── router.dart                    # Rotas: /, /transactions, /cards, /settings, /goals, /reports, /accounts, /transfer, /onboarding
-├── core/
-│   ├── models/
-│   │   ├── app_mode.dart
-│   │   ├── date_range.dart
-│   │   └── money.dart
-│   ├── services/
-│   │   ├── hive_init.dart             # Abre box 'accounts' + registra AccountModelAdapter (typeId 4) + flag de onboarding
-│   │   ├── app_mode_controller.dart
-│   │   ├── theme_controller.dart
-│   │   ├── recurrence_service.dart
-│   │   └── repository_locator.dart    # Expõe RepositoryLocator.instance.accounts
-│   ├── theme/
-│   │   └── app_theme.dart
-│   └── utils/
-docs/
-│   └── M3_REPORT.md                   # ✅ #50 — Relatório de progresso do M3
-└── features/
-    ├── transactions/
-    │   ├── domain/
-    │   │   ├── transaction_entity.dart # accountId + toAccountId + notes (M3-B)
-    │   │   ├── transaction_type.dart   # income | expense | transfer (M3-B)
-    │   │   ├── payment_method.dart
-    │   │   └── recurrence_rule.dart
-    │   ├── data/
-    │   │   ├── transaction_model.dart  # índices 15 (toAccountId) e 16 (notes) adicionados
-    │   │   ├── transactions_repository.dart
-    │   │   └── hive_transactions_repository.dart
-    │   └── presentation/
-    │       ├── transactions_page.dart
-    │       └── new_transaction_page.dart
-    ├── categories/
-    │   ├── domain/
-    │   ├── data/
-    │   └── presentation/
-    ├── cards/
-    │   ├── domain/
-    │   ├── data/
-    │   └── presentation/
-    ├── accounts/                       # ✅ M3-A
-    │   ├── domain/
-    │   │   └── account_entity.dart
-    │   ├── data/
-    │   │   ├── account_model.dart      # typeId 4 (era 3, conflitava com CardModel — fix #52)
-    │   │   ├── accounts_repository.dart
-    │   │   └── hive_accounts_repository.dart
-    │   └── presentation/
-    │       └── accounts_page.dart
-    ├── transfer/                       # ✅ M3-B
-    │   └── presentation/
-    │       └── transfer_page.dart      # Seleciona origem/destino, valor, data, descrição
-    ├── dashboard/
-    │   └── presentation/
-    │       └── dashboard_page.dart
-    ├── goals/
-    │   ├── domain/
-    │   ├── data/
-    │   └── presentation/
-    │       └── goals_page.dart
-    ├── reports/
-    │   └── presentation/
-    │       └── reports_page.dart
-    ├── settings/
-    │   └── presentation/
-    │       └── settings_page.dart
-    └── onboarding/
-        └── presentation/
-            └── onboarding_page.dart    # M3-C — splash + seleção de modo
+  main.dart                       runApp(bootstrap)
+  app/
+    app.dart                      FinMeApp (MaterialApp, tema, home)
+    bootstrap.dart                abre boxes fm_*, cria repositórios, seed, materializa recorrências
+    app_scope.dart                AppServices + AppScope (InheritedWidget, estável)
+    ledger.dart                   visões derivadas memoizadas por versão (faturas, saldos, previsão, Fase 5)
+    home_shell.dart               sidebar desktop (colapsa para ícones < 900px); índice de 8 páginas; modo Simples/Ultra
+    seed.dart                     categorias padrão + dados de exemplo fictícios (Banco Alfa, Banco Beta)
+  core/
+    models/                       year_month.dart (YearMonth), app_settings.dart (AppSettings, AppMode)
+    services/                     record_store.dart (RecordStore, Hive/memória), collection_repository.dart (CollectionRepository<T>),
+                                  settings_controller.dart, backup_service.dart (JSON + CSV)
+    theme/                        app_colors.dart (ThemeExtension), app_theme.dart, app_spacing.dart, app_palettes.dart
+    utils/                        formatters.dart (dinheiro/data), date_utils.dart, id.dart
+    widgets/                      MoneyText, SectionCard, EmptyState, LimitBar, StatusBadge, DateField, MoneyField, KpiTile...
+  features/
+    accounts/domain/              account.dart (Account), balances.dart (saldos por conta)
+    accounts/presentation/        accounts_page.dart, account_form.dart, transfer_dialog.dart
+    cards/domain/                 payment_card.dart (PaymentCard, CardCycle), invoice_cycle.dart (ciclo), invoice.dart (faturas),
+                                  card_insights.dart (melhor cartão, parcelas comprometidas, cartão sem conta)
+    cards/presentation/           cards_page.dart, card_tile.dart, card_detail_page.dart, card_form.dart, pay_invoice_dialog.dart, best_card_panel.dart
+    transactions/domain/          transaction.dart (Transaction), installments.dart (parcelas)
+    transactions/presentation/    transactions_page.dart, transaction_row.dart, transaction_form.dart, transaction_filters.dart
+    recurring/domain/             recurring_rule.dart (RecurringRule), recurrence.dart (ocorrências, status)
+    recurring/presentation/       recurring_page.dart, recurring_form.dart
+    categories/domain/            transaction_category.dart, category_spending.dart (gasto e orçamento por categoria)
+    categories/presentation/      categories_page.dart, category_form.dart
+    forecast/domain/              forecast.dart (motor de previsão), invoice_timeline.dart (vencimentos e cobertura)
+    forecast/presentation/        forecast_page.dart, forecast_chart.dart (fl_chart), forecast_events.dart,
+                                  forecast_installments.dart, forecast_invoice_timeline.dart, forecast_summary.dart
+    dashboard/presentation/       dashboard_page.dart, dashboard_summary.dart, dashboard_sections.dart
+    settings/presentation/        settings_page.dart (modo, tema, ocultar valores, horizonte, backup, CSV, apagar dados)
+    onboarding/presentation/      onboarding_page.dart (escolha de modo + dados de exemplo)
+test/                             espelha lib/ (app, core, features) — ver seção 8
 ```
 
----
-
-## 3. Features Implementadas (✅ Concluído)
-
-### 3.1 Transações
-- CRUD completo de transações (criar, editar, excluir)
-- Tipos: receita (`income`), despesa (`expense`) e transferência (`transfer`) ✅ M3-B
-- Métodos de pagamento: dinheiro, débito, crédito, pix, boleto, outros
-- Filtros: por período, por tipo, por categoria, por método de pagamento
-- Busca textual por título
-- Agrupamento por data na listagem
-- Suporte a notas/observações por transação
-- Campo `accountId` + `toAccountId` na `TransactionEntity` (M3-A / M3-B)
-
-### 3.2 Recorrência Automática ✅ (M3)
-- `RecurrenceRule` com frequências: `daily`, `weekly`, `monthly`, `yearly`
-- `RecurrenceService.generatePending()` roda no boot
-- Gera automaticamente transações recorrentes pendentes
-
-### 3.3 Categorias com Ícones Personalizados ✅ (M3)
-- CRUD completo de categorias
-- Picker de ícone (emoji/codepoint)
-- Ícone exibido na listagem de transações
-
-### 3.4 Cartões de Crédito
-- CRUD de cartões com limite, dia de fechamento e dia de vencimento
-- Fatura automática do mês vigente
-- Gráficos de uso do limite
-
-### 3.5 Dashboard Aprimorado ✅ (M3)
-- KPIs do mês + gráfico de linha mensal + últimas transações
-
-### 3.6 Tela de Metas ✅ (M3)
-- CRUD de metas (Meta de Economia + Teto de Gastos)
-- Barra de progresso com alertas verde/amarelo/vermelho
-
-### 3.7 Relatórios Exportáveis ✅ (M3)
-- Filtros por período + exportação CSV
-
-### 3.8 Tema Claro / Escuro ✅ (M3)
-- `ThemeController` singleton com toggle persistido via Hive
-
-### 3.9 Múltiplas Contas/Carteiras ✅ (M3-A)
-- `AccountEntity` com tipos: Conta Corrente, Poupança, Dinheiro, Investimento, Outro
-- `AccountModel` (typeId **4**) + `AccountModelAdapter` manual
-- `HiveAccountsRepository` com CRUD e setDefault
-- `AccountsPage`: listagem com saldo calculado pelas transações, CRUD via bottom sheet, cor personalizada
-- Seed automático com 3 contas padrão no primeiro boot
-- Rota `/accounts` registrada no router
-- `RepositoryLocator.instance.accounts` disponível globalmente
-- `TransactionEntity.accountId` preparado para vincular transações a contas
-
-### 3.10 Transferência entre Contas ✅ (M3-B)
-- `TransactionType.transfer` adicionado ao enum
-- `TransactionEntity.toAccountId` + `notes` adicionados
-- `TransactionModel` atualizado: índices 15 (`toAccountId`) e 16 (`notes`) retrocompatíveis
-- `TransferPage`: seleção de conta origem/destino, valor, data, descrição opcional
-- Lança débito na origem e crédito no destino como par de transações vinculadas
-- Empty state se o usuário tem menos de 2 contas (com botão para criar)
-- Rota `/transfer` registrada no router
-
-### 3.11 Modo Privacidade
-- Valores monetários ocultados quando ativo
-
-### 3.12 Modo Simples / Ultra
-- UI diferenciada por modo
-- Persistência via Hive
-
-### 3.13 Persistência
-- Hive com adapters manuais (sem build_runner)
-- TypeIds: `0` TransactionModel, `2` CategoryModel, `3` CardModel, `4` AccountModel, `5` GoalModel
-- Boxes: `transactions`, `categories`, `cards`, `settings`, `goals`, `accounts`
-- Todos os `registerAdapter` protegidos com `Hive.isAdapterRegistered(typeId_correto)` ✅ fix #53
-
-### 3.14 Splash / Onboarding (M3-C)
-- Rota inicial decide entre `/onboarding` e `/` com base em `HiveInit.isOnboardingDone()`
-- `OnboardingPage` com dois steps: splash com branding + seleção de modo (Simples vs Ultra)
-- Ao finalizar, grava `app_mode` via `AppModeController`, marca `onboardingDone` no box `settings` e redireciona para o dashboard
-
----
-
-## 4. Features M3 — status atual
-
-| # | Feature | Arquivo(s) alvo | Status |
-|---|---------|-----------------|--------|
-| M3-C | **Splash Screen / Onboarding** | `lib/features/onboarding/presentation/onboarding_page.dart` + `lib/main.dart` + `lib/app/app.dart` + `lib/app/router.dart` + `lib/core/services/hive_init.dart` | ✅ Concluído |
-| M3-D | **Persistência definitiva de preferências avançadas** | `lib/core/services/preferences_service.dart` + Hive box `preferences` | 🔲 Pendente |
-| M3-E | **Orçamento Mensal por Categoria** | `lib/features/budget/` | 🔲 Pendente |
-
-> Ver detalhes completos em `docs/M3_REPORT.md`
-
----
-
-## 5. Dependências (pubspec.yaml)
-
-| Pacote | Versão | Uso |
-|--------|--------|-----|
-| `hive` | ^2.2.3 | Banco de dados local |
-| `hive_flutter` | ^1.1.0 | Integração Hive com Flutter |
-| `path_provider` | ^2.1.5 | Diretório de dados do app |
-| `fl_chart` | ^0.70.2 | Gráficos |
-| `csv` | ^6.0.0 | Exportação de relatórios |
-| `file_selector` | ^1.0.3 | Seletor de arquivos |
-| `cupertino_icons` | ^1.0.8 | Ícones iOS |
-
----
-
-## 6. Convenções do Projeto
-
-### Arquitetura
-- **Clean Architecture** por feature: `domain/` → `data/` → `presentation/`
-- Estado: `StatefulWidget` + `setState` + `ValueNotifier`
-- Repositórios injetados via `RepositoryLocator`
-- Adapters Hive **sem** build_runner — escritos manualmente
-
-### Nomenclatura
-- `*_entity.dart` — entidades puras do domínio
-- `*_model.dart` — modelos Hive com `@HiveType`/`@HiveField`
-- `*_repository.dart` — interface abstrata
-- `hive_*_repository.dart` — implementação concreta
-- `*_page.dart` — telas completas
-- `*_controller.dart` — singletons com estado global
-
-### Hive TypeIds
-| TypeId | Classe |
-|--------|--------|
-| 0 | TransactionModel |
-| 2 | CategoryModel |
-| 3 | CardModel |
-| 1 | *(livre — não usar)* |
-| 4 | AccountModel ✅ |
-| 5 | GoalModel ✅ |
-| 6+ | *(reservado para BudgetModel — M3-E e futuros)* |
-
-> ⚠️ **Atenção:** os guards `Hive.isAdapterRegistered(n)` em `hive_init.dart` devem usar o **mesmo typeId** declarado no adapter. Usar o typeId errado faz o guard considerar o adapter já registrado (por outro adapter com aquele typeId) e pular o registro — causando crash `Cannot write, unknown type` no primeiro boot. Ver fix #53.
-
-### Rotas
-| Rota | Tela |
-|------|------|
-| `/` | DashboardPage |
-| `/onboarding` | OnboardingPage |
-| `/transactions` | TransactionsPage |
-| `/cards` | CardsPage |
-| `/settings` | SettingsPage |
-| `/goals` | GoalsPage |
-| `/reports` | ReportsPage |
-| `/accounts` | AccountsPage ✅ |
-| `/transfer` | TransferPage ✅ |
-
----
-
-## 7. Pontos de Atenção
-
-1. **Sem build_runner:** Adapters Hive escritos manualmente. Seguir padrão de `transaction_model.dart`.
-2. **Sem navigator 2.0:** Manter `Navigator.pushNamed` simples.
-3. **fl_chart já incluso:** Usar `fl_chart` para gráficos.
-4. **csv já incluso:** Usar `csv` para exportação.
-5. **ThemeController:** Usar `ThemeController.instance` para troca de tema.
-6. **AppText sem cores fixas:** `AppText` herda cor do tema (commit #37).
-7. **Chave Hive por id (string):** Todos registros usam `entity.id` como chave (commit #26).
-8. **AppRadius.chip:** Usar `AppRadius.chip` para chips/badges (commit #36).
-9. **TransactionType.transfer:** Ao exibir transações na UI, tratar `transfer` separado de `income`/`expense` — não somar ao saldo duas vezes. O par `_out`/`_in` representa os dois lados da transferência.
-10. **TransactionModel índices 15/16:** Campos `toAccountId` e `notes` são opcionais/nullable — registros antigos sem esses campos continuam lidos corretamente.
-11. **TypeId 3 está em uso (CardModel):** Nunca reutilizar typeIds existentes. TypeId 1 está livre mas evitar por precaução. Próximo typeId disponível: **6**.
-12. **isAdapterRegistered — typeId DEVE ser o mesmo do adapter:** O argumento de `Hive.isAdapterRegistered(n)` deve ser exatamente o `typeId` declarado no `TypeAdapter` correspondente. Usar o typeId errado faz o guard falhar silenciosamente — o adapter não é registrado e o Hive lança `Cannot write, unknown type` no primeiro boot. Ver fix #53.
-13. **Apagar arquivos .hive em caso de corrupção:** Se o typeId de um adapter for alterado após dados já gravados, os arquivos `.hive` locais ficam com typeIds obsoletos e o Hive lança `Cannot read, unknown typeId` no boot. Solução: apagar os arquivos em `AppData\\Roaming\\com.example.finme\\` e rodar novamente — o seed recria os dados.
-
----
-
-## 8. Histórico Completo de Commits
-
-> Numerados do mais antigo (#1) ao mais recente. Use este registro para rastrear features e bugs.
-
----
-
-### #1 — Initial commit
-**SHA:** `832733cb` | **Tipo:** chore  
-Criação do repositório no GitHub.
-
-### #2 — Initial commit: projeto Flutter FinMe
-**SHA:** `e35a66f2` | **Tipo:** chore  
-Scaffold do projeto Flutter.
-
-### #3 — Initialize README
-**SHA:** `b20cc5b6` | **Tipo:** docs  
-README inicial com visão geral.
-
-### #4 — Documentação inicial (CLAUDE.md e ROADMAP.md)
-**SHA:** `35f50bc0` | **Tipo:** docs  
-Primeiros arquivos de documentação.
-
-### #5 — Add ROADMAP.md and CLAUDE.md
-**SHA:** `76ab4bf7` | **Tipo:** docs  
-Segunda versão dos arquivos de documentação.
-
-### #6 — Refactor lib structure
-**SHA:** `900cfd8d` | **Tipo:** refactor  
-Estrutura de pastas refatorada, skeleton inicial.
-
-### #7 — Implement M2 domain models
-**SHA:** `cd3d2430` | **Tipo:** feat (M2)  
-Domain models, repositórios em memória, TransactionsPage.
-
-### #8 — Fix imports and currency string
-**SHA:** `d247b42b` | **Tipo:** fix  
-Correção de imports quebrados.
-
-### #9 — Make DateRange non-const
-**SHA:** `5937e7bc` | **Tipo:** fix  
-Erro de compilação no DateRange.
-
-### #10 — Refine M2: cards listing page
-**SHA:** `2e87d9c5` | **Tipo:** feat (M2)  
-CardsPage criada, totais em TransactionsPage.
-
-### #11 — Fix missing CardType import
-**SHA:** `e1ca6a5e` | **Tipo:** fix  
-Import ausente em CardsRepository.
-
-### #12 — Add docs/TROUBLESHOOTING.md
-**SHA:** `9ffd3d5a` | **Tipo:** docs  
-Guia de problemas comuns.
-
-### #13 — Implement M3: app mode, settings page
-**SHA:** `a5b78026` | **Tipo:** feat (M3)  
-AppModeController, SettingsPage, UI adaptativa.
-
-### #14 — Fix encoding issues in AppModeController
-**SHA:** `efd42bfa` | **Tipo:** fix  
-Null bytes corrigidos.
-
-### #15 — Add Hive-based local persistence
-**SHA:** `063b30d7` | **Tipo:** feat  
-HiveInit, RepositoryLocator, modelos Hive.
-
-### #16 — Add CRUD and NewTransactionPage
-**SHA:** `064508b8` | **Tipo:** feat  
-Formulário completo de transação.
-
-### #17 — Allow editing and deleting transactions
-**SHA:** `9bf4e3ef` | **Tipo:** feat  
-Dismissible + edição via toque.
-
-### #18 — Add CRUD for cards
-**SHA:** `12a3e728` | **Tipo:** feat  
-CRUD de cartões, vínculo com transações.
-
-### #19 — Add card limit visualization
-**SHA:** `aee4a7e0` | **Tipo:** feat  
-ProgressIndicator + donut chart + fl_chart.
-
-### #20 — Fix import paths in settings_page
-**SHA:** `3d38aa44` | **Tipo:** fix  
-Imports apontando para core/.
-
-### #21 — Fix corrupted null-byte sequences in dashboard
-**SHA:** `ac124ab2` | **Tipo:** fix  
-Null bytes no dashboard_page.
-
-### #22 — feat(M2+M3): CRUD de categorias, filtros
-**SHA:** `2689f785` | **Tipo:** feat  
-CategoriesPage, filtros em transações.
-
-### #23 — fix: barra debug e layout do cartão
-**SHA:** `00571cef` | **Tipo:** fix  
-Debug bar removida.
-
-### #24 — fix: seed categories com put
-**SHA:** `45e352a4` | **Tipo:** fix  
-Chave única no seed de categorias.
-
-### #25 — fix: remove const das seed lists
-**SHA:** `4c2c39a6` | **Tipo:** fix  
-Const em modelos Hive removido.
-
-### #26 — fix: usar chave id (não índice) no delete
-**SHA:** `bb2c214e` | **Tipo:** fix  
-Migração de chave numérica → string.
-
-### #27 — feat(M3): modo simples enxuto
-**SHA:** `cb760a78` | **Tipo:** feat (M3)  
-Modo Simples real, provisionamento, preferências.
-
-### #28 — docs: padrão visual no CLAUDE.md
-**SHA:** `eb79294` | **Tipo:** docs  
-Paleta, tipografia, mockups no CLAUDE.md.
-
-### #29 — feat: aplica paleta modo claro nos menus
-**SHA:** `ad8da191` | **Tipo:** feat  
-Tokens do design system nos menus.
-
-### #30 — feat: aplica paleta em transactions/settings/categories
-**SHA:** `0fc41226` | **Tipo:** feat  
-Padronização visual completa do modo claro.
-
-### #31 — docs: atualiza roadmap
-**SHA:** `913ec04d` | **Tipo:** docs  
-ROADMAP.md refletindo estado real do M3.
-
-### #32 — feat(dashboard): gráfico de linha mensal
-**SHA:** `c970b00c` | **Tipo:** feat (M3)  
-DashboardPage reescrita com KPIs e fl_chart.
-
-### #33 — feat(goals): tela de metas v1
-**SHA:** `2f1a1248` | **Tipo:** feat (M3)  
-GoalsPage, GoalEntity, GoalModel (typeId 5).
-
-### #34 — feat(reports): relatórios com filtro e CSV
-**SHA:** `4896b0f0` | **Tipo:** feat (M3)  
-ReportsPage com exportação CSV.
-
-### #35 — fix(goals): crash no dropdown
-**SHA:** `0ac24c07` | **Tipo:** fix  
-Dropdown de categorias com loading lazy.
-
-### #36 — feat(theme): tema escuro com toggle
-**SHA:** `66858493` | **Tipo:** feat (M3)  
-ThemeController + toggle em SettingsPage.
-
-### #37 — fix(theme): remove cores fixas dos AppText
-**SHA:** `7a624c51` | **Tipo:** fix  
-AppText herda cor do tema.
-
-### #38 — fix(persistence): corrige persistência entre sessões
-**SHA:** `03b33cba` | **Tipo:** fix  
-Modo e tema restaurados corretamente no boot.
-
-### #39 — feat(recurrence): recorrência automática
-**SHA:** `de224688` | **Tipo:** feat (M3)  
-RecurrenceRule + RecurrenceService.generatePending().
-
-### #40 — feat(categories): ícones personalizados
-**SHA:** `2cc5f2ec` | **Tipo:** feat (M3)  
-Picker de ícone + CategoryEntity.icon.
-
-### #41 — feat(dashboard): KPI 'A vencer' + últimas transações
-**SHA:** `e2b3d3eb` | **Tipo:** feat (M3)  
-KPI no Modo Simples + seção recentes.
-
-### #42 — fix: erros de compilação no dashboard_page
-**SHA:** `833cf73d` | **Tipo:** fix  
-AppText.sm → secondary, nullable, categoryId.
-
-### #43 — fix: AppRadius.sm → AppRadius.chip
-**SHA:** `48c2dedc` | **Tipo:** fix  
-Badges e chips com token correto.
-
-### #44 — feat(goals): tela unificada metas v2
-**SHA:** `15c5c379` | **Tipo:** feat (M3)  
-TabBar Meta de Economia + Teto de Gastos.
-
-### #45 — docs: adiciona CONTEXT.md
-**SHA:** `f37b5654` | **Tipo:** docs  
-CONTEXT.md criado.
-
-### #46 — docs: histórico de commits no CONTEXT.md
-**SHA:** `513bcae2` | **Tipo:** docs  
-Histórico #1–#46 adicionado.
-
-### #47 — docs: reescreve CONTEXT.md definitivo
-**SHA:** *(anterior)* | **Tipo:** docs  
-CONTEXT.md reescrito com histórico oficial.
-
-### #48 — feat(accounts): múltiplas contas/carteiras ✅ (M3-A)
-**SHA:** *(commit anterior)* | **Tipo:** feat (M3)  
-M3-A completo — AccountEntity, AccountModel, HiveAccountsRepository, AccountsPage, seed automático, rota /accounts.
-
-### #49 — feat(transfer): transferência entre contas ✅ (M3-B)
-**SHA:** `c871a23a` | **Tipo:** feat (M3)  
-M3-B completo — TransactionType.transfer, TransactionEntity.toAccountId + notes, TransactionModel índices 15/16, TransferPage, rota /transfer.
-
-### #50 — docs(m3): adiciona M3_REPORT.md e atualiza CONTEXT.md
-**SHA:** *(este commit)* | **Tipo:** docs  
-Criado `docs/M3_REPORT.md` com rastreamento detalhado dos itens M3-C, M3-D e M3-E pendentes (critérios, arquivos alvo, ordem de execução sugerida). CONTEXT.md atualizado com referência ao relatório e seção 4 ajustada.
-
-### #51 — fix(dashboard): null-safety em categoryId no RecentTransactionRow
-**SHA:** `9353359b` | **Tipo:** fix  
-Corrigido erro de compilação no Windows em `dashboard_page.dart`: `categoryId` é `String?` e estava sendo usado sem checagem de nulidade. Aplicado fallback `?? ''` e renderização condicional do texto.
-
-### #52 — fix(hive): corrige conflito typeId 3 entre CardModel e AccountModel
-**SHA:** `4f4f073c` | **Tipo:** fix  
-Crash de boot no Windows: `HiveError: There is already a TypeAdapter for typeId 3`. `AccountModelAdapter` usava o mesmo `typeId = 3` que `CardModelAdapter`. Corrigido: `AccountModelAdapter.typeId` alterado para `4`. Todos os `registerAdapter` em `hive_init.dart` protegidos com `Hive.isAdapterRegistered(...)` para evitar re-registro em hot-restart. TypeId 3 marcado como livre (não reutilizar). Próximo typeId disponível: **6**.
-
-### #53 — fix(hive): corrige typeIds nos guards isAdapterRegistered
-**SHA:** `33146b0f` | **Tipo:** fix  
-Crash de boot: `HiveError: Cannot write, unknown type: CategoryModel`. Os guards `isAdapterRegistered(n)` em `hive_init.dart` usavam typeIds errados — `CategoryModelAdapter` (typeId real **2**) estava sendo verificado com `isAdapterRegistered(1)`, e `CardModelAdapter` (typeId real **3**) com `isAdapterRegistered(2)`. O guard considerava o adapter já registrado (por outro adapter com aquele typeId) e pulava o registro. Corrigido para que cada guard use o mesmo typeId declarado no adapter correspondente. Mapa final: `0=Transaction`, `2=Category`, `3=Card`, `4=Account`. Arquivos `.hive` corrompidos devem ser apagados de `AppData\\Roaming\\com.example.finme\\` e o app reiniciado para o seed recriar os dados.
+## 5. Features implementadas
+
+Páginas (índice do `HomeShell`): 0 Painel, 1 Previsão, 2 Cartões, 3 Contas, 4 Transações, 5 Recorrentes, 6 Categorias, 7 Ajustes. Botão global "Nova transação".
+
+| Tela | Simples | Ultra |
+|---|---|---|
+| **Painel** | KPIs (saldo atual, a pagar em 30 dias, fim do mês previsto), próximas faturas, próximos vencimentos, banner de saldo negativo e de cobertura de faturas | + cards de faturas com limite, lista de categorias com participação no gasto, alerta de cobertura por conta, badge de contagem na sidebar (faturas vencidas e provisionados atrasados) |
+| **Previsão** | cards por mês (entradas, saídas, faturas, saldo final) | + gráfico de linha do saldo diário, tabela de eventos, linha do tempo de vencimentos (60 dias), compromisso de parcelas M+1..M+12 |
+| **Cartões** | lista por banco, fatura atual, painel "melhor cartão para comprar hoje" (1 linha) | + tabela do melhor cartão, limite usado/total, badge de assinaturas ativas, badge "Sem conta de pagamento" (em ambos os modos) |
+| **Detalhe do cartão** | — | faturas passadas e futuras, itens por fatura, pagamento de fatura |
+| **Contas** | saldo atual | + saldo previsto ao fim do mês, transferência entre contas |
+| **Transações** | colunas data, descrição, valor; filtro por mês | colunas extras (banco/cartão, categoria), filtros por conta/cartão/categoria/tipo, busca, toggle de provisionados, rodapé com totais |
+| **Recorrentes** | lista e total mensal | + separação de assinaturas, custo anual |
+| **Categorias** | lista de categorias e gasto do mês | + orçamentos e barra de consumo |
+| **Ajustes** | modo, tema, ocultar valores | + horizonte de previsão, backup JSON (exportar/importar), CSV mensal de transações, apagar dados |
+
+Transações: parcelas (compra em N vezes), provisionado (ainda não pago, itálico + `PlannedMarker`), boleto, confirmar provisionado, duplicar, excluir grupo de parcelas.
+Onboarding: escolha de modo e opção "Criar dados de exemplo" (fictícios).
+
+## 6. Regras financeiras-chave
+
+Detalhes completos em `docs/SPEC.md` §5. Resumo:
+
+- **Ciclo de fatura** (§5.1): compra no dia do fechamento ou depois vai para a próxima fatura. Mudança de dias de fechamento/vencimento com transações exige vigência (`withCycleChange`, §4.2).
+- **Fatura de transição** (§5.1, regras 1–11): com histórico de ciclo, a fatura é o período entre dois fechamentos consecutivos da linha de fechamentos (todos os segmentos). Fechamento cujo mês de vencimento não avança é descartado: cada mês de vencimento tem no máximo uma fatura, e a de transição só cobre um período maior (sem fusão). Datas vêm só do mês de vencimento. Pagamento com `invoiceKey` de mês descartado é remapeado para o próximo fechamento mantido (`invoiceMonthForKey`). Parcela i vai para o fechamento i-1 posições após o da 1ª (`installmentDueMonth`). Sem histórico, valem as fórmulas originais.
+- **Faturas** (§5.2): status open/closed/paid/overdue; pagamento parcial gera saldo restante; estorno abate.
+- **Parcelas** (§5.3): centavos distribuídos sem perda (100,00 em 3x = 33,34 + 33,33 + 33,33).
+- **Recorrência** (§5.4): mensal, semanal e anual com fim de mês clampado (31 → 28/29 ou 30); ocorrência já materializada não duplica.
+- **Saldos** (§5.5): provisionado não afeta saldo; transferência move entre contas; débito afeta a conta; crédito só afeta a conta ao pagar a fatura.
+- **Categorias** (§5.6): gasto inclui cartão, exclui transferência e receita.
+- **Previsão** (§5.7): eventos por conta e consolidados; saldo negativo marcado; fatura paga não gera evento. Horizonte = o mais tarde entre o fim de `forecastMonths` e hoje + 60 dias (`ForecastService.horizonEnd`, `Ledger.invoiceTimelineDays`); previsão, linha do tempo e ocorrências projetadas de cartão usam o mesmo fim.
+- **Insights de cartão** (§5.8): melhor cartão para comprar hoje considera dias até o vencimento e limite livre (cartão sem limite fica de fora); cartão sem conta de pagamento é sinalizado.
+- **Cobertura de faturas** (§5.9): fatura nos próximos dias cuja conta de pagamento fica negativa (`needsAttention`).
+
+## 7. Persistência
+
+- Boxes Hive: `fm_accounts`, `fm_cards`, `fm_categories`, `fm_transactions`, `fm_recurring`, `fm_settings`.
+- Dados da v1 são **ignorados** (outros nomes de box, outro formato). Nenhuma migração.
+- Todos os dados ficam em memória no boot; escrita no Hive é assíncrona. Derivados caros são memoizados no `Ledger`.
+- Registro corrompido é pulado na carga (não derruba o boot).
+- Backup JSON: exportar e importar. O import é tudo-ou-nada (SPEC §3.5): valida tudo antes de gravar, tira um retrato de todas as coleções e das configurações, e em qualquer falha (gravação ou `materializeRecurring`) restaura o retrato com `replaceAll`/`settings.update` e relança o erro. Limite: se o disco falhar também na restauração, o estado pode ficar parcial. CSV: transações do mês.
+- Entidades: `copyWith` limpa campos anuláveis com sentinela privada `_keep` (SPEC §4): omitido mantém, `null` limpa, valor substitui. Vale para `Transaction`, `RecurringRule`, `PaymentCard` e `TransactionCategory`.
+- Excluir conta ou cartão com transações: só arquivar.
+- Perfis (Fase 14, SPEC §10): box global `fm_profiles`; perfil "Principal" (`default`) usa os boxes `fm_*`, os demais `p<id>_fm_*` e `finme_import_journal_<id>.json`. Backup, CSV e "Apagar todos" valem só para o perfil aberto.
+
+## 8. Testes
+
+- `test/app/`: ledger, insights do ledger, smoke test (app sobe com seed em memória e navega).
+- `test/core/`: `year_month`, utils, theme, widgets, `collection_repository`, `backup_service`.
+- `test/features/`: entidades, faturas, ciclo de cartão, parcelas e recorrência, saldos e categorias, previsão, linha do tempo de vencimentos, insights de cartão, e widget tests das telas (cartões, contas, transações, recorrentes, categorias, previsão, painel, ajustes). Onboarding ainda sem teste dedicado.
+- Fase 6: `copy_with_clear_test.dart` e `copy_with_clear_card_category_test.dart` (sentinela do `copyWith`); `card_cycle_test.dart` com os exemplos da SPEC §5.1 (fatura de transição, parcelas, pagamento de mês descartado); rollback do import em `backup_service_test.dart` (store que falha uma vez); horizonte de 60 dias em `forecast_test.dart` e `ledger_insights_test.dart`.
+- Domínio e `core/utils|models|services` têm testes unitários. Widget tests usam `MemoryRecordStore`.
+- Total atual: 303 testes (`bash tool/check.sh` → `CHECK OK`).
+
+## 9. Workflow de agentes
+
+- `.claude/agents/`:
+  - `finme-planner` (opus, effort medium): transforma pedido em SPEC e tarefas no BACKLOG. Não escreve código.
+  - `finme-coder` (haiku, effort high): implementa **uma** tarefa `T-XXX` do BACKLOG.
+  - `finme-verifier` (haiku, effort high): roda format/analyze/test e corrige erros mecânicos.
+  - `finme-reviewer` (opus, effort medium, somente leitura): revisa corretude financeira, aderência ao SPEC e desempenho.
+- `.claude/skills/finme-auto/SKILL.md` (`/finme-auto [T-XXX|feature]`): orquestra planner → coders → verifier → reviewer → commit. Thread principal em opus.
+- Lições da Fase 6: (1) worktrees novos saem de `origin/main`, que ainda aponta para a v1; reapontar o branch para a `main` local antes de trabalhar. (2) Coders em paralelo compartilham a árvore: o `check.sh` roda `dart format lib test` em tudo e pode falhar por arquivo pela metade de outro coder; o portão final é rodado pelo orquestrador depois de todos terminarem. (3) `pubspec.lock` e registrantes gerados (`windows/flutter/`) mudam com o `pub get` implícito; ficam fora dos commits de tarefa.
+
+## 10. Histórico do rewrite (v2)
+
+- `83f9729` fundação: agentes, workflow finme-auto, SPEC e BACKLOG (T-001)
+- `3001a6a` força LF em scripts shell
+- `0ba379c` utilitários, tema, persistência e entidades de domínio (T-002..T-005)
+- `c000583` faturas, parcelas, recorrência, saldos e gastos por categoria (T-006..T-008)
+- `e30c1a1` motor de previsão de caixa (T-009)
+- `46ce375` correções da revisão do domínio: parcelas por fatura, import atômico, boot resiliente (T-009b)
+- `52d0cd3` bootstrap, Ledger memoizado, seed demo, shell e onboarding (T-010)
+- `ea4daa7` widgets compartilhados e status de recorrência materializada (T-010b, T-011)
+- `478314b` telas Painel, Previsão, Cartões, Contas, Transações, Recorrentes, Categorias e Ajustes (T-012..T-019)
+- `6cb402c` polimento pós-revisão e domínio da Fase 5 (T-020a/b, T-030..T-032)
+- `06b1531` previsibilidade: cobertura de faturas, vencimentos 60 dias, parcelas comprometidas, melhor cartão, ciclo com vigência (T-033..T-038)
+- `9194b17` correções da revisão da Fase 5 e documentação v2 (T-021)
+- `152052b` pendências: backup atômico, previsão 60 dias, copyWith limpa anuláveis, fatura de transição (T-040..T-044)
+- `7e3e1f4` correções da revisão da Fase 6: pagamento de mês descartado abate a fatura de transição, horizonte único (T-046)
+
+## 11. Status
+
+- Fases 0–6 concluídas (`docs/BACKLOG.md`), exceto T-047 (`todo`). T-045 (Android) cancelada: plataforma removida.
+- v3 concluída na branch `feat/v3-densidade` (Fases 7–12, sem push) (direção em `docs/V3_DIRECTION.md`). Fase 7 (identidade visual e polimento) concluída: IBM Plex Sans + Source Serif 4 (títulos/KPIs, `AppText`), algarismos tabulares, neutros quentes, `AppMotion`; widgets `DeltaBadge`/`Sparkline`, `BankAvatar`, skeleton + `BootScreen`/`BootErrorScreen`, `SortableHeaderLabel`; shell só desktop com sidebar colapsável (<900px); Painel Ultra com delta e sparkline (`Ledger.monthlyHistory`, `expenseMonthToDate`, SPEC §5.10); transações ordenáveis no Ultra; estados vazios com ação; tooltip rico no saldo diário.
+- Fase 8 (importação, regras e categorização) concluída: página Importar (item 5 da sidebar; perfis salvos; Regras e Dicionário só no Ultra) e botão Importar em Transações; CSV com assistente de mapeamento e perfis (`fm_import_profiles`), OFX com FITID (`Transaction.externalId`/`importedDescription`); prévia com duplicata por FITID/provável (desmarcada), flag leve mesmo nome+valor, pagamento de fatura no extrato desmarcado, confirmação de provisionado e de parcela provisionada, parcelas detectadas (padrão fraco "dd/mm" no fim começa desligado); categorização offline em cascata regra → coluna do banco → histórico → dicionário (`fm_rules`, `fm_dictionary`, `Ledger.categorizer`); sugestão de categoria no lançamento manual; backup cobre as 3 boxes novas; `CollectionRepository.upsert/upsertAll` grava antes de mudar a memória; `suggestRulePattern` (T-102, adiantada da Fase 9).
+- Fase 9 (produtividade) concluída: paleta de comandos Ctrl+K (`command_palette.dart`, `app_commands.dart`; navegar, lançar, importar, modo/tema/ocultar valores, busca de transações por `TransactionSearchIndex` com `fuzzy.dart`, valor não casa com valores ocultos); atalhos globais (`app_shortcuts.dart`: N, /, 1–9, Ctrl+K, Ctrl+I; guarda de digitação) com foco devolvido ao shell; Transações Ultra com multi-seleção (checkbox, Shift, Ctrl+A, Esc), barra de ações em massa (recategorizar, confirmar provisionado, criar regra, excluir com grupos de parcelas; `transaction_bulk.dart`) e edição inline de categoria e valor (valor só despesa/receita não parcelada e sem ocultar valores); dicas de atalho na sidebar e no FAB.
+- Fase 10 concluída: subcategorias de 1 nível (`TransactionCategory.parentId`, `CategoryTree`, rótulo "Pai › Filha", orçamento do pai soma as filhas, drill-down no Painel Ultra); tags livres (`Transaction.tags`, `TransactionRule.tags`, filtro e chips em Transações Ultra, `#tag` na paleta, tags em massa, sugestão por regra no form e na importação); metas/caixinhas como reserva virtual numa conta (`fm_goals`, seção em Contas, aporte limitado ao saldo livre, aviso de reserva acima do saldo); "Posso gastar hoje" (`spendable.dart`, `Ledger.spendableToday`) como primeiro card do Painel: saldo das contas elegíveis (sem investimento/arquivadas) − faturas e provisionados até a próxima receita (inclui transferência para conta não elegível) − reservas, ÷ dias. Ações destrutivas fixas à direita na barra de massa.
+- Fase 11 concluída: página Patrimônio (índice 9, depois de Contas, sem atalho numérico) com patrimônio líquido = contas + ativos (snapshots datados, `fm_assets`) + a receber − a pagar − dívida de cartão (compras lançadas inclusive parcelas futuras − estornos − pagamentos), gráfico de 24 meses e breakdown; devo/me devem (`fm_debts`) com pagamentos parciais que geram transação e desfazer; "devo" com vencimento entra na Previsão e no "posso gastar" via `extraEvents`; KPI de patrimônio no Painel Ultra; badge de dívidas vencidas; comandos na paleta.
+- Fase 12 concluída: página Relatórios (índice 10, entre Categorias e Ajustes, sem atalho numérico) com filtros globais (período, contas/cartões, categorias com filhas, tags, tipo, provisionados) e 7 relatórios no Ultra (comparativo por categoria com média 3/6 meses e drill-down, tendência 12 meses com média móvel, heatmap diário por quantil, top estabelecimentos, fixo × variável, patrimônio, pivot categoria × mês) e 3 no Simples (tendência, estabelecimentos, comparativo); export CSV (`;`, vírgula decimal, BOM, valores reais); `ReportsController` com cache por filtro, fora do Ledger; mês corrente cortado em hoje; 20k transações × 24 meses < 300 ms por relatório (pior ≈ 22 ms em debug). Comandos de relatório na paleta. 1194 testes.
+- Fase 6: import de backup tudo-ou-nada (restaura o estado anterior em falha), previsão cobre os 60 dias da linha do tempo (`Ledger.invoiceTimelineDays`, `ForecastService.horizonEnd`), `copyWith` limpa anuláveis (sentinela `_keep`), fatura de transição sem fusão na mudança de ciclo (`installmentDueMonth`, `invoiceMonthForKey`; SPEC §5.1).
+- Fase 14 (perfis, T-230..T-233): `ProfileGate` na raiz (`main.dart`) abre direto com um perfil sem PIN, senão `ProfilePickerPage`; sidebar mostra o perfil e "Trocar perfil"; Ajustes → Perfil (renomear, PIN, criar, excluir outro). Não commitada; feita por cima da Fase 13 em aberto.
+- Próximos passos sugeridos: ver ROADMAP.md.
+
+## 12. Pendências conhecidas
+
+- Perfis: o PIN só bloqueia a interface (boxes Hive legíveis em disco, sem criptografia) e não tem limite de tentativas; o seletor não lembra o último perfil aberto.
+- Relatórios: filtro não persiste entre execuções; heatmap com 60 meses monta todas as células de uma vez; `backup_service` mantém cópias privadas de `formatCsvMoney`/`csvText`; patrimônio limitado aos 24 meses do Ledger.
+- Patrimônio/dívidas: editar ou excluir pela tela de Transações a transação gerada por uma quitação não altera a dívida.
+- Recorrências sem tags; `hasAnyTag` dobra tags a cada build de Transações.
+
+- Importação: sem desfazer importação; pagamento de fatura no extrato não vira `invoicePayment` (só fica desmarcado); `renameTo` das regras não se aplica no lançamento manual; regras ainda sem tags (Fase 10); `replaceAll`/`delete` do `CollectionRepository` ainda mudam a memória antes de gravar.
+
+- Linha de fechamentos do cartão é recalculada a cada chamada; memoização pendente (T-047).
+- Rollback do import de backup não é atômico se o disco também falhar durante a restauração (SPEC §3.5).
